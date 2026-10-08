@@ -1,0 +1,2 @@
+# python-pptx (MIT) builds decks; it pulls in Pillow and lxml.
+python-pptx==1.0.2

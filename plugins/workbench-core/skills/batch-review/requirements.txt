@@ -1,0 +1,2 @@
+# Anthropic Python SDK (MIT). Needs a Console API key in ANTHROPIC_API_KEY.
+anthropic>=1.0,<2

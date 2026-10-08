@@ -1,0 +1,25 @@
+{
+  "name": "workbench-core",
+  "displayName": "Workbench core",
+  "version": "0.1.0",
+  "description": "Agent personas, workflow skills, and stdlib-only hooks: a shell-aware guard engine (generic and corporate rule packs), session start, statusline, read-flood guard, journal checkpoints, credential check.",
+  "author": {
+    "name": "The claude-workbench contributors"
+  },
+  "license": "MIT",
+  "keywords": [
+    "guards",
+    "hooks",
+    "skills",
+    "agents",
+    "workbench"
+  ],
+  "userConfig": {
+    "python": {
+      "type": "string",
+      "title": "Python interpreter",
+      "description": "Python 3.10+ that runs the hooks: a name on PATH or an absolute path to python.exe / python3. The bootstrap fills in the interpreter it detected. On Windows avoid the Microsoft Store 'python3' stub.",
+      "default": "python3"
+    }
+  }
+}

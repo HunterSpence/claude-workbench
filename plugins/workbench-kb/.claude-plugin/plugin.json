@@ -1,0 +1,24 @@
+{
+  "name": "workbench-kb",
+  "displayName": "Workbench knowledge base",
+  "version": "0.1.0",
+  "description": "A Markdown knowledge base with SQLite full-text search, an append-only journal, a lock-protected active-context writer, size caps, and a save skill that never pushes anywhere unless you configure a remote and ask for it.",
+  "author": {
+    "name": "The claude-workbench contributors"
+  },
+  "license": "MIT",
+  "keywords": [
+    "knowledge-base",
+    "memory",
+    "search",
+    "workbench"
+  ],
+  "userConfig": {
+    "python": {
+      "type": "string",
+      "title": "Python interpreter",
+      "description": "Python 3.10+ the save skill runs its scripts with (the bootstrap fills in the one it detected).",
+      "default": "python3"
+    }
+  }
+}

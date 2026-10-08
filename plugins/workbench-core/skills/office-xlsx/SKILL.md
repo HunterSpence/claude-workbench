@@ -1,0 +1,79 @@
+---
+name: office-xlsx
+description: Build or edit Excel workbooks (.xlsx) with openpyxl the way a careful analyst would - live formulas instead of pasted results, a colour convention for inputs and formulas, named styles, frozen headers, dropdown validation - then recalculate and check for formula errors before handing it over. Use for "make a spreadsheet", "build a model", "add a summary sheet", "fix this workbook".
+---
+
+# office-xlsx
+
+> Python: `${user_config.python}` is the interpreter chosen when the plugin was installed. If it
+> appears unreplaced (the skill was copied in without the plugin), use `py -3` on Windows and
+> `python3` on Linux, macOS and WSL, never the Microsoft Store `python` stub.
+
+Library and CLI: `scripts/xlsx_kit.py`. Setup once:
+`"${user_config.python}" -m pip install --user -r "${CLAUDE_SKILL_DIR}/requirements.txt"`.
+
+## Rules for a workbook people can trust
+1. **Keep it live.** Whatever Python works out, the workbook should be able to work out again:
+   put the calculation in the cell as an expression over the cells it depends on, so a reader who
+   changes one assumption sees every dependent number move. A sheet of pasted numbers is a
+   snapshot, not a model.
+2. **Inputs separate from calculations.** Put assumptions in clearly labelled input cells (or an
+   `Inputs` sheet) and reference them; no magic numbers inside formulas.
+3. **Make each cell's role visible.** `style` gives typed numbers the `Input` style, calculations
+   the `Formula` style and references to other sheets the `Link` style, each with its own font
+   colour, and marks the header row and total rows. A reviewer can then tell at a glance which
+   cells are meant to be edited and which are derived. Use the organisation's own template styles
+   instead when it has them.
+4. **Readable structure:** one header row, frozen panes below it, sensible column widths, number
+   formats set per column (`#,##0`, `0.0%`, dates as dates), no merged cells inside data.
+5. **Constrain inputs:** dropdowns for categorical inputs (`add_list_validation`).
+6. **Portable functions:** prefer functions every engine has (INDEX/MATCH over newer dynamic-array
+   functions) unless the user's Excel version is known to support them.
+7. Editing an existing workbook: load it normally (never save a workbook opened with
+   `data_only=True`: that replaces formulas with values), change only what was asked, save to a
+   new file name unless told otherwise.
+8. **Macro-enabled and legacy files are refused** (`.xlsm`, `.xltm`, `.xls` and their Word and
+   PowerPoint equivalents): they can carry code. Ask the user to save a trusted copy as `.xlsx` in
+   Excel (which drops the macros) and work on that.
+
+## Build
+Write a short Python script with openpyxl for the content, then apply the conventions:
+```python
+import sys; sys.path.insert(0, r"${CLAUDE_SKILL_DIR}/scripts")
+from openpyxl import Workbook
+from xlsx_kit import style_workbook, add_list_validation
+wb = Workbook(); ws = wb.active; ws.title = "Model"
+ws.append(["Item", "Units", "Price", "Revenue"])
+ws.append(["Widgets", 120, 4.5, "=B2*C2"])
+ws.append(["Total", "=SUM(B2:B2)", None, "=SUM(D2:D2)"])
+add_list_validation(ws, "E2:E50", ["Low", "Medium", "High"], prompt="Risk level")
+style_workbook(wb)        # colours, header, totals, freeze panes, widths
+wb.save("model.xlsx")
+```
+Or style an existing file: `"${user_config.python}" "${CLAUDE_SKILL_DIR}/scripts/xlsx_kit.py" style in.xlsx --out out.xlsx`.
+
+## Check before handing over
+openpyxl writes formulas without calculating them, so the file has no values until a spreadsheet
+engine recalculates it (pandas, previews and some viewers then show blanks).
+```bash
+"${user_config.python}" "${CLAUDE_SKILL_DIR}/scripts/xlsx_kit.py" check model.xlsx --recalc auto
+```
+- `--recalc excel` (Windows) opens the workbook **read-only** in Excel through COM with macros
+  force-disabled, runs a full calculation, saves the result to a temporary copy and then replaces
+  the original, so cached values are real Excel results. If the user has Excel open, the script
+  works inside their instance without hiding or closing it. `libreoffice` converts through
+  `soffice --headless` (values may differ for functions LibreOffice lacks). `auto` tries Excel,
+  then LibreOffice. If automation is blocked by policy, say so; do not work around it.
+- It reports formula errors (`#DIV/0!`, `#REF!`, `#NAME?`, ...), formulas that still have no value,
+  and numbers typed into a column of formulas. Exit code 1 if anything is found.
+- Zero errors means the formulas evaluate, not that they are right: spot-check a few results by
+  hand and say which you checked.
+
+Then render it for a visual pass (column widths, cut-off text, print layout):
+`"${user_config.python}" "${CLAUDE_SKILL_DIR}/../office-render/scripts/render.py" model.xlsx --out render/`
+and read every page.
+
+## Alternatives
+The Claude for Excel add-in (if your tenant allows it) works inside Excel directly; Anthropic's
+`document-skills` plugin is an optionally installed, separately licensed alternative. See
+`THIRD-PARTY.md`.

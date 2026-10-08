@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "extraKnownMarketplaces": {
+    "adamsreview": {
+      "source": {
+        "source": "github",
+        "repo": "adamjgmiller/adamsreview"
+      },
+      "autoUpdate": false
+    },
+    "ponytail": {
+      "source": {
+        "source": "github",
+        "repo": "DietrichGebert/ponytail"
+      },
+      "autoUpdate": false
+    }
+  },
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": false,
+    "hookify@claude-plugins-official": false,
+    "security-guidance@claude-plugins-official": true,
+    "claude-code-setup@claude-plugins-official": false,
+    "frontend-design@claude-plugins-official": false,
+    "adamsreview@adamsreview": true,
+    "ponytail@ponytail": false
+  }
+}

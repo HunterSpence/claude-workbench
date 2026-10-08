@@ -1,0 +1,21 @@
+{
+  "name": "workbench",
+  "description": "claude-workbench: a portable Claude Code setup. Install from a local, pinned copy of a tagged release.",
+  "owner": {
+    "name": "The claude-workbench contributors"
+  },
+  "plugins": [
+    {
+      "name": "workbench-core",
+      "source": "./plugins/workbench-core",
+      "description": "Personas, workflow skills, guard engine and session hooks.",
+      "category": "productivity"
+    },
+    {
+      "name": "workbench-kb",
+      "source": "./plugins/workbench-kb",
+      "description": "Markdown knowledge base, full-text search and the save skill.",
+      "category": "productivity"
+    }
+  ]
+}

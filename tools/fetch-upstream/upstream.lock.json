@@ -1,0 +1,100 @@
+{
+ "_readme": "Pinned upstream skills for tools/fetch-upstream. Each file is downloaded from base+src, checked against sha256, and written to <skills dir>/dest. Re-pin deliberately; never point a ref at a moving branch.",
+ "generated": "2026-10-07",
+ "sources": [
+  {
+   "id": "humanizer",
+   "license": "MIT",
+   "kind": "github",
+   "upstream": "blader/humanizer",
+   "ref": "v3.1.0",
+   "commit": "225a6f39ac85f76ee48dbad772ea4abe4ed6c9d8",
+   "base": "https://raw.githubusercontent.com/blader/humanizer/225a6f39ac85f76ee48dbad772ea4abe4ed6c9d8/",
+   "note": "Rewrites AI-sounding prose without changing what it says.",
+   "files": [
+    [
+     "SKILL.md",
+     "humanizer/SKILL.md",
+     "0612f1dfb1672b0ea9b97e139bf1f06cabe98d8b27424fe8ff01e1fb4cc99cad"
+    ],
+    [
+     "LICENSE",
+     "humanizer/LICENSE",
+     "4ac4810254ab36d45419141aeb8e69bf50652cfafe5b2dab947d06d44e5cbf96"
+    ]
+   ]
+  },
+  {
+   "id": "playwright-cli",
+   "license": "Apache-2.0",
+   "kind": "npm",
+   "upstream": "@playwright/cli (npm; source microsoft/playwright-cli)",
+   "ref": "0.1.22",
+   "commit": null,
+   "base": "https://cdn.jsdelivr.net/npm/@playwright/cli@0.1.22/",
+   "note": "Skill for the playwright-cli browser tool. Install the CLI itself separately at the same version: npm install -g @playwright/cli@0.1.22",
+   "files": [
+    [
+     "skills/playwright-cli/SKILL.md",
+     "playwright-cli/SKILL.md",
+     "9bba755285a4c9ad72a4a41b9c7baef6fb516d329c0b44ed0573715f4479b906"
+    ],
+    [
+     "LICENSE",
+     "playwright-cli/LICENSE",
+     "9a7110fc2d2f964038e5dc49128f908f29f47a574c961cba16085914e879cbda"
+    ],
+    [
+     "skills/playwright-cli/references/element-attributes.md",
+     "playwright-cli/references/element-attributes.md",
+     "bf19aa4671e0a50a0fefa9c790f39124e803060eefe395042b723c29fcb7faa2"
+    ],
+    [
+     "skills/playwright-cli/references/playwright-tests.md",
+     "playwright-cli/references/playwright-tests.md",
+     "c5b0719fef2cfdff50bd744051b2f9afc119775db4b48e9b2882c1cf3886797c"
+    ],
+    [
+     "skills/playwright-cli/references/pr-attachments.md",
+     "playwright-cli/references/pr-attachments.md",
+     "24b118e74598be72e73e24fe223d295b9099c85b1860a7c8f6e5690c9038fa2a"
+    ],
+    [
+     "skills/playwright-cli/references/request-mocking.md",
+     "playwright-cli/references/request-mocking.md",
+     "54e801c9663fc2b6d68ceb058cb1c360724c2499f42acc7852a68e83e5b5f37c"
+    ],
+    [
+     "skills/playwright-cli/references/running-code.md",
+     "playwright-cli/references/running-code.md",
+     "3029569ed6ddaeffc0b87badde967efdc2973b1677f078830098146eb3b78ebe"
+    ],
+    [
+     "skills/playwright-cli/references/session-management.md",
+     "playwright-cli/references/session-management.md",
+     "a4f16271f95d3eec7bc56e659d8adbb8f6ad7d603a6fa15efdcdd071a50c6ce3"
+    ],
+    [
+     "skills/playwright-cli/references/storage-state.md",
+     "playwright-cli/references/storage-state.md",
+     "9ac47f9ae4a1aedcd2077f8ac9ab1ba6bee1962cb83ff51adcd36fb6d83b5ec6"
+    ],
+    [
+     "skills/playwright-cli/references/test-generation.md",
+     "playwright-cli/references/test-generation.md",
+     "27ecb11ef647999bd7486695bb1aacc3682097e6bb5742804cb6c8769c2b5364"
+    ],
+    [
+     "skills/playwright-cli/references/tracing.md",
+     "playwright-cli/references/tracing.md",
+     "ef73e71bee792e341df9cd4f60529c929ade48b538ac76e033f4f20843e8dbda"
+    ],
+    [
+     "skills/playwright-cli/references/video-recording.md",
+     "playwright-cli/references/video-recording.md",
+     "1c800b897824cb54394c34265d8ebffdbb530adfc8d612c5d798b667a1799f48"
+    ]
+   ]
+  }
+ ]
+}

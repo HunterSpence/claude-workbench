@@ -1,0 +1,4 @@
+# PDF -> PNG (Apache-2.0 / BSD-3-Clause) and the image library it hands pages to (MIT-CMU).
+# Never PyMuPDF: it is AGPL-3.0.
+pypdfium2==5.14.0
+pillow>=10

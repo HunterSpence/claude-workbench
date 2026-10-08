@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "extraKnownMarketplaces": {
+    "trailofbits": {
+      "source": {
+        "source": "github",
+        "repo": "trailofbits/skills"
+      },
+      "autoUpdate": false
+    },
+    "ai-evals-course": {
+      "source": {
+        "source": "git",
+        "url": "https://github.com/ai-evals-course/evals-skills.git"
+      },
+      "autoUpdate": false
+    }
+  },
+  "enabledPlugins": {
+    "supply-chain-risk-auditor@trailofbits": false,
+    "insecure-defaults@trailofbits": false,
+    "differential-review@trailofbits": false,
+    "sharp-edges@trailofbits": false,
+    "static-analysis@trailofbits": false,
+    "variant-analysis@trailofbits": false,
+    "audit-context-building@trailofbits": false,
+    "fp-check@trailofbits": false,
+    "agentic-actions-auditor@trailofbits": false,
+    "semgrep-rule-creator@trailofbits": false,
+    "evals@ai-evals-course": false
+  }
+}

@@ -1,0 +1,2 @@
+# openpyxl (MIT) reads and writes .xlsx, keeping formulas.
+openpyxl==3.1.5

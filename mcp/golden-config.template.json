@@ -1,0 +1,75 @@
+{
+  "_readme": "Template for tools/mcp-healer/mcp_healer.py. Copy it to a file you own, fill every {{PLACEHOLDER}}, and set each server's action: ensure (install), park (keep but do not load), remove, or ignore (leave untouched). Keys are ${ENV} references: put the values in your environment (or OS credential store), never in this file. 'egress' says where your data goes; check it against your organisation's policy before enabling a server. Optional servers ship as ignore. Versions verified 2026-10-07; re-pin deliberately.",
+  "servers": {
+    "tokensave": {
+      "action": "ensure",
+      "egress": "none: local code index (.tokensave/ in each repo)",
+      "command": "{{TOKENSAVE_BIN}}",
+      "args": ["serve"],
+      "alwaysLoad": false,
+      "reason": "Local code graph: callers, impact, dead code, without reading whole files. Pinned, checksum-verified binary; see mcp/README.md."
+    },
+    "playwright": {
+      "action": "ensure",
+      "egress": "local browser; reaches only the sites you point it at",
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@0.0.83", "--headless", "--isolated"],
+      "alwaysLoad": false,
+      "reason": "Browser automation for testing your own web apps. Exact version pinned (never @latest); isolated profile, so it never uses your signed-in browser."
+    },
+    "chrome-devtools": {
+      "action": "ignore",
+      "egress": "local browser; upstream defaults send usage statistics and performance-trace URLs (CrUX lookups) to the vendor: both switched off here",
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@1.10.1", "--headless", "--isolated", "--no-usage-statistics", "--no-performance-crux"],
+      "env": { "CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS": "1" },
+      "alwaysLoad": false,
+      "reason": "OPTIONAL: performance traces, network and console inspection of your own pages. Keep --no-usage-statistics and --no-performance-crux."
+    },
+    "context7": {
+      "action": "ignore",
+      "egress": "HOSTED: every query goes to a third-party service",
+      "type": "http",
+      "url": "https://mcp.context7.com/mcp",
+      "headers": { "CONTEXT7_API_KEY": "${CONTEXT7_API_KEY:-}" },
+      "alwaysLoad": false,
+      "reason": "OPTIONAL: current library documentation. Works without a key at lower limits. Never put code, internal names or secrets in a query."
+    },
+    "github": {
+      "action": "ignore",
+      "egress": "HOSTED: GitHub's MCP endpoint; repository data you can already read flows to the session",
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/readonly",
+      "headers": { "Authorization": "Bearer ${GITHUB_MCP_PAT}" },
+      "alwaysLoad": false,
+      "reason": "OPTIONAL, read-only toolset (the /readonly URL). GHE.com tenants: https://copilot-api.<tenant>.ghe.com/mcp. GitHub Enterprise Server has no remote endpoint: run the local github-mcp-server with GITHUB_HOST and --read-only, or just use the gh CLI (the github skill). Use a fine-grained token with read scopes your org allows."
+    },
+    "brave-search": {
+      "action": "ignore",
+      "egress": "HOSTED: queries go to Brave Search API",
+      "command": "npx",
+      "args": ["-y", "@brave/brave-search-mcp-server@2.1.4", "--transport", "stdio"],
+      "env": { "BRAVE_API_KEY": "${BRAVE_API_KEY}" },
+      "alwaysLoad": false,
+      "reason": "OPTIONAL web search. Needs a key. Claude Code's built-in WebSearch covers most needs."
+    },
+    "exa": {
+      "action": "ignore",
+      "egress": "HOSTED: queries go to Exa",
+      "type": "http",
+      "url": "https://mcp.exa.ai/mcp",
+      "headers": { "x-api-key": "${EXA_API_KEY}" },
+      "alwaysLoad": false,
+      "reason": "OPTIONAL neural web search. Needs a key (or sign in by OAuth via /mcp and drop the header)."
+    },
+    "tavily": {
+      "action": "ignore",
+      "egress": "HOSTED: queries go to Tavily",
+      "command": "npx",
+      "args": ["-y", "tavily-mcp@0.2.22"],
+      "env": { "TAVILY_API_KEY": "${TAVILY_API_KEY}" },
+      "alwaysLoad": false,
+      "reason": "OPTIONAL search and extract. Needs a key."
+    }
+  }
+}
