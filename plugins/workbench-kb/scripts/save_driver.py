@@ -296,6 +296,8 @@ def pre(verbose=False):
     mrows = _metric_rows()
     recent = [r for r in mrows if (_ts(r) or now - timedelta(days=1)) >= now - timedelta(minutes=RECENT_SAVE_MIN)]
     out["recent_other_saves"] = [{"ts": r.get("ts"), "domains": r.get("domains")} for r in recent][-5:]
+    last = _last_full_save()
+    out["last_save_minutes_ago"] = int((now - last).total_seconds() // 60) if last else None   # the skip gate reads it
     out["ac_hash"] = _ac_hash()
     today = now.strftime("%Y-%m-%d")
     out["ac_hash_already_saved"] = any(str(r.get("ts", "")).startswith(today) and r.get("ac_hash") == out["ac_hash"]
@@ -532,7 +534,7 @@ def main():
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except (AttributeError, OSError):
         pass
-    p = argparse.ArgumentParser(description="The save skill's driver (see the module docstring).")
+    p = argparse.ArgumentParser(description="The /workbench-kb:save skill's driver (see the module docstring).")
     p.add_argument("--pre", action="store_true")
     p.add_argument("--post", action="store_true")
     p.add_argument("--inbox-add", metavar="TEXT")

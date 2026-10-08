@@ -26,6 +26,8 @@ names an application, that application's domain. Neither set of facts is restate
 - Facts: the knowledge base, per `rules/memory-protocol.md`: the domain's `HOT.md` and
   `_shared/HOT.md` first, then the `save` skill's search for anything deeper.
 - Model and effort above are defaults. Your organisation's model and effort limits win.
+- Judgment fallback: `judgment.md` in the core's "Read on demand" list (open it on a trigger,
+  never preload it).
 
 ## Return contract
 At most about 1,500 tokens. Conclusions, not dumps: exact paths, IDs and commands run, and every

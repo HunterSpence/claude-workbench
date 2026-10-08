@@ -6,11 +6,16 @@
       freeze panes under the header; approximate column widths. Every sheet.
   python xlsx_kit.py check <book.xlsx> [--recalc auto|excel|libreoffice|none] [--json]
       optional recalculation, then: formula errors (#DIV/0!, #REF!, ...), formulas with no
-      calculated value, and numbers typed into a column of formulas. Exit 1 if anything is wrong.
+      calculated value, numbers typed into a column of formulas, and newer functions missing their
+      _xlfn. prefix. Exit 1 if anything is wrong.
+  python xlsx_kit.py risk <book.xlsx>
+      what an openpyxl load-and-save would drop (shapes, threaded comments, pivots, slicers, ...).
+      Exit 3 if anything would be lost. `style` runs this first and refuses unless --accept-loss.
 
-As a library: from xlsx_kit import style_workbook, add_list_validation, check
+As a library: from xlsx_kit import style_workbook, add_list_validation, prefix_new_functions,
+roundtrip_loss, check
 """
-import argparse, json, os, pathlib, shutil, subprocess, sys, tempfile
+import argparse, json, os, pathlib, re, shutil, subprocess, sys, tempfile, zipfile
 
 from openpyxl import load_workbook
 from openpyxl.styles import Border, Font, NamedStyle, PatternFill, Side
@@ -74,6 +79,105 @@ def style_workbook(wb, header_row=1, freeze=True, widths=True):
                 longest = max((len(str(c.value)) for c in col if c.value is not None and not str(c.value).startswith("=")), default=8)
                 ws.column_dimensions[get_column_letter(col[0].column)].width = min(max(10, longest + 2), 60)
     return wb
+
+
+# Functions newer than Excel 2007 are stored in the file with a prefix. Written bare (as openpyxl does),
+# Excel shows #NAME? until someone re-enters the cell. Not exhaustive: Microsoft's list is longer.
+XLFN = {f: "_xlfn." for f in (
+    "XLOOKUP", "XMATCH", "IFS", "IFNA", "SWITCH", "MAXIFS", "MINIFS", "CONCAT", "TEXTJOIN", "XOR", "UNIQUE",
+    "SEQUENCE", "RANDARRAY", "SORTBY", "TEXTBEFORE", "TEXTAFTER", "TEXTSPLIT", "VSTACK", "HSTACK", "TOCOL",
+    "TOROW", "CHOOSECOLS", "CHOOSEROWS", "TAKE", "DROP", "EXPAND", "WRAPROWS", "WRAPCOLS", "VALUETOTEXT",
+    "ARRAYTOTEXT", "STDEV.S", "STDEV.P", "VAR.S", "VAR.P", "PERCENTILE.INC", "PERCENTILE.EXC", "QUARTILE.INC",
+    "QUARTILE.EXC", "RANK.EQ", "RANK.AVG", "NORM.DIST", "NORM.INV", "NORM.S.DIST", "NORM.S.INV", "CEILING.MATH",
+    "FLOOR.MATH", "DAYS", "ISOWEEKNUM", "AGGREGATE", "NETWORKDAYS.INTL", "WORKDAY.INTL", "MODE.SNGL", "T.TEST")}
+XLFN.update({"FILTER": "_xlfn._xlws.", "SORT": "_xlfn._xlws."})
+NEEDS_PARAMS = ("LET", "LAMBDA")      # their parameter names also need `_xlpm.`: not rewritten here
+_FN = re.compile(r"(?<![\w.])(" + "|".join(sorted(map(re.escape, XLFN), key=len, reverse=True)) + r")(?=\s*\()", re.I)
+_PARAM_FN = re.compile(r"(?<![\w.])(LET|LAMBDA)(?=\s*\()", re.I)
+
+
+def _outside_strings(formula, fn):
+    parts = formula.split('"')
+    return '"'.join(fn(p) if i % 2 == 0 else p for i, p in enumerate(parts))
+
+
+def prefix_formula(formula):
+    """(new formula, warning or None). Adds _xlfn. (and _xlws. for FILTER and SORT) to newer functions,
+    leaving string literals and already-prefixed names alone. LET and LAMBDA are left as they are."""
+    if not (isinstance(formula, str) and formula.startswith("=")):
+        return formula, None
+    found = []
+    _outside_strings(formula, lambda p: found.extend(_PARAM_FN.findall(p)) or p)
+    if found:
+        return formula, (f"{found[0].upper()} also needs _xlpm. on its parameter names; enter it in Excel, "
+                         "or use INDEX/MATCH or helper cells instead")
+    return _outside_strings(formula, lambda p: _FN.sub(lambda m: XLFN[m.group(1).upper()] + m.group(1).upper(), p)), None
+
+
+def prefix_new_functions(wb):
+    """Prefix newer functions in every formula cell. Returns warnings (cell, text) for what it left alone."""
+    warnings = []
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for c in row:
+                new, warn = prefix_formula(c.value)
+                if warn:
+                    warnings.append((f"{ws.title}!{c.coordinate}", warn))
+                elif new != c.value:
+                    c.value = new
+    return warnings
+
+
+# What openpyxl drops on a load-and-save, measured on the actual file rather than assumed: zip parts by
+# kind, plus the shapes, pictures and charts inside the drawings.
+RISKY_PARTS = {
+    "drawings": r"xl/drawings/drawing\d+\.xml", "legacy drawings (VML)": r"xl/drawings/(vmlDrawing|commentsDrawing)\d+\.vml",
+    "charts": r"xl/charts/chart\d+\.xml", "images": r"xl/media/.+", "comments": r"xl/comments(/comment)?\d*\.xml",
+    "threaded comments": r"xl/threadedComments/.+\.xml", "pivot tables": r"xl/pivotTables/.+\.xml",
+    "pivot caches": r"xl/pivotCache/pivotCacheDefinition\d+\.xml", "slicers": r"xl/slicers?(Caches)?/.+\.xml",
+    "timelines": r"xl/timelines?(Caches)?/.+\.xml", "form controls": r"xl/ctrlProps/.+\.xml",
+    "external links": r"xl/externalLinks/.+\.xml", "VBA project": r"xl/vbaProject\.bin",
+}
+RISKY_XML = {"shapes": (r"xl/drawings/drawing\d+\.xml", b"<xdr:sp>", b"<xdr:sp "),
+             "pictures in drawings": (r"xl/drawings/drawing\d+\.xml", b"<xdr:pic>", b"<xdr:pic "),
+             "sparklines": (r"xl/worksheets/sheet\d+\.xml", b"<x14:sparklineGroup", None)}
+
+
+def inventory(path):
+    counts = {}
+    with zipfile.ZipFile(path) as z:
+        names = z.namelist()
+        for kind, pat in RISKY_PARTS.items():
+            counts[kind] = sum(1 for n in names if re.fullmatch(pat, n))
+        for kind, (pat, a, b) in RISKY_XML.items():
+            n = 0
+            for name in names:
+                if re.fullmatch(pat, name):
+                    data = z.read(name)
+                    n += data.count(a) + (data.count(b) if b else 0)
+            counts[kind] = n
+    return counts
+
+
+def compare_parts(before, after):
+    """Kinds whose count fell between two saved workbooks: [(kind, before, after)]."""
+    b, a = inventory(before), inventory(after)
+    return [(k, b[k], a.get(k, 0)) for k in b if a.get(k, 0) < b[k]]
+
+
+def roundtrip_loss(path):
+    """Load with openpyxl, save to a temporary copy, and compare: what an edit through openpyxl would lose."""
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "roundtrip.xlsx")
+        load_workbook(path).save(out)
+        return compare_parts(path, out)
+
+
+def loss_message(lost):
+    return ("WARNING: SAVING THIS WORKBOOK WITH OPENPYXL WOULD DROP: "
+            + ", ".join(f"{k} ({b} -> {a})" for k, b, a in lost)
+            + ". Make this edit in Excel instead (see 'Workbooks with shapes, pivots or slicers' in SKILL.md), "
+              "or pass --accept-loss to a new file name.")
 
 
 def add_list_validation(ws, cell_range, options, prompt=None):
@@ -172,6 +276,11 @@ def check(path):
                                 "detail": f"{cached}" + (f" from {v}" if is_formula else "")})
                 elif is_formula and cached is None:
                     out.append({"kind": "uncalculated", "sheet": ws.title, "cell": c.coordinate, "detail": v})
+                if is_formula:
+                    new, warn = prefix_formula(v)
+                    if new != v:
+                        out.append({"kind": "xlfn", "sheet": ws.title, "cell": c.coordinate,
+                                    "detail": f"newer function without its _xlfn. prefix (Excel shows #NAME?): {v}"})
                 if is_formula or (isinstance(v, (int, float)) and not isinstance(v, bool)):
                     cols.setdefault(c.column, []).append((c.row, is_formula, c.coordinate))
         for cells in cols.values():   # a typed number sitting between formulas in the same column
@@ -195,6 +304,9 @@ def main(argv=None):
     p.add_argument("book")
     p.add_argument("--out")
     p.add_argument("--header-row", type=int, default=1)
+    p.add_argument("--accept-loss", action="store_true", help="save even if openpyxl would drop parts (needs --out)")
+    p = sub.add_parser("risk")
+    p.add_argument("book")
     p = sub.add_parser("check")
     p.add_argument("book")
     p.add_argument("--recalc", choices=("auto", "excel", "libreoffice", "none"), default="none")
@@ -205,10 +317,23 @@ def main(argv=None):
     except ValueError as e:
         print(e, file=sys.stderr)
         return 2
+    if a.cmd == "risk":
+        lost = roundtrip_loss(a.book)
+        print(loss_message(lost) if lost else "nothing at risk: an openpyxl save keeps every part this check knows")
+        return 3 if lost else 0
     if a.cmd == "style":
+        lost = roundtrip_loss(a.book)
+        if lost and not (a.accept_loss and a.out):
+            print(loss_message(lost), file=sys.stderr)
+            print("Nothing was written.", file=sys.stderr)
+            return 3
         wb = load_workbook(a.book)
         style_workbook(wb, a.header_row)
+        for cell, warn in prefix_new_functions(wb):
+            print(f"note {cell}: {warn}")
         wb.save(a.out or a.book)
+        if lost:
+            print(loss_message(lost), file=sys.stderr)
         print(f"styled {a.out or a.book}")
         return 0
     used = "none"
@@ -224,8 +349,9 @@ def main(argv=None):
         print(f"recalculated by: {used}")
         for p in problems:
             print(f"{p['kind']:<13}{p['sheet']}!{p['cell']}  {p['detail']}")
-        n = {k: sum(1 for p in problems if p["kind"] == k) for k in ("error", "uncalculated", "hardcoded")}
-        print(f"{n['error']} error(s), {n['uncalculated']} uncalculated, {n['hardcoded']} possible hard-coded value(s)")
+        n = {k: sum(1 for p in problems if p["kind"] == k) for k in ("error", "uncalculated", "hardcoded", "xlfn")}
+        print(f"{n['error']} error(s), {n['uncalculated']} uncalculated, {n['hardcoded']} possible hard-coded value(s), "
+              f"{n['xlfn']} missing _xlfn. prefix(es)")
         if n["uncalculated"]:
             print("Uncalculated formulas show as empty to pandas, previews and some viewers: recalc with Excel or LibreOffice.")
     return 1 if problems else 0

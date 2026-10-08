@@ -1,8 +1,7 @@
 # About me (work identity)
 
-<!-- Fill this in after install. It is imported into every session, so keep it short and keep it
-     to WORK facts: no home address, no personal accounts, no family, no health, no ID numbers.
-     Edit your installed copy (next to the workbench instructions), not the template in the kit. -->
+<!-- Imported into every session: keep it short and to WORK facts (no home address, personal
+     accounts, family, health or ID numbers). Edit your installed copy, not the kit's template. -->
 
 ## Who
 - **Name I go by:** <first name>
@@ -20,6 +19,12 @@
 - <e.g. Ask before touching the shared staging environment.>
 - <e.g. Default answer length: short, with a link to detail.>
 
+## How I write (draft-reply reads this)
+- **Sign-off name:** <e.g. Sam>
+- **Greeting style:** <e.g. "Hi <name>," internally; "Hello <name>," externally>
+- **Tone:** <e.g. short, direct, friendly; the answer first>
+- **Phrases to avoid:** <e.g. "just circling back", "per my last email">
+
 ## Facts to keep in mind
-<!-- Each with the date you last checked it. If a tool contradicts one, Claude will flag it. -->
-- <fact> (verified: <YYYY-MM-DD>)
+<!-- Claude flags a tool that contradicts one, unless it is the known-wrong signal you named. -->
+- <fact> (verified: <YYYY-MM-DD>; known-wrong signal: <a source that misleads about it, or none>)

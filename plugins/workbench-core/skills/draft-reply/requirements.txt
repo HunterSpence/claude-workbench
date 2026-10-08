@@ -1,0 +1,2 @@
+# Only needed to read Outlook .msg files; .eml, pasted text and every output use the standard library.
+olefile==0.47

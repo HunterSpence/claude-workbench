@@ -1,9 +1,9 @@
 ---
 name: mcp-heal
-description: Reconcile the user's MCP servers to their golden config and probe every server for real (stdio initialize handshake, HTTP initialize), then report OK / DEGRADED / DOWN with the fix for each. Use for "/mcp-heal", "an MCP server is broken", "MCP tools missing", "check my MCP servers", or after editing the golden config.
+description: Reconcile the user's MCP servers to their golden config and probe every server for real (stdio initialize handshake, HTTP initialize), then report OK / DEGRADED / DOWN with the fix for each. Use for "/workbench-core:mcp-heal", "an MCP server is broken", "MCP tools missing", "check my MCP servers", or after editing the golden config.
 ---
 
-# /mcp-heal
+# /workbench-core:mcp-heal
 
 > Python: `${user_config.python}` is the interpreter chosen when the plugin was installed. If it
 > appears unreplaced (the skill was copied in without the plugin), use `py -3` on Windows and

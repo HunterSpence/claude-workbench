@@ -21,7 +21,7 @@
     "hookify@claude-plugins-official": false,
     "security-guidance@claude-plugins-official": true,
     "claude-code-setup@claude-plugins-official": false,
-    "frontend-design@claude-plugins-official": false,
+    "frontend-design@claude-plugins-official": true,
     "adamsreview@adamsreview": true,
     "ponytail@ponytail": false
   }

@@ -3,8 +3,9 @@
 ## Branching and worktrees
 - Branch off the default branch first. Never switch the branch of a checkout another session is
   using: create a worktree instead (`git worktree add ../<repo>-<topic> -b <branch>`).
-- Never force-push or delete `main`/`master` (or the repo's protected branches). Never rewrite
-  history someone else has pulled.
+- Never force-push or delete `main`/`master` (or the repo's protected branches), and never push to the
+  default branch: work goes in on a branch and a PR (the `push-default-branch` guard denies it). Never
+  rewrite history someone else has pulled.
 - **Never backdate a commit.** Never `--no-verify`, and never bypass commit signing, unless the user
   asks for that specific commit. Pushes go only to approved remotes (Red Line).
 
@@ -28,7 +29,8 @@
 
 ## Commits
 - Small, single-purpose commits with a message that says why. Never commit a credential, a `.env`
-  file, or generated secrets; check `git diff --cached` before committing.
+  file, or generated secrets; check `git diff --cached` before committing. A repo without secret
+  scanning: `{{WORKBENCH_HOME}}/kit/tools/git-credscan/credscan_staged.py --install <repo>`.
 
 ## Secrets hygiene
 - After any redaction sweep, run `git worktree list`: a worktree can still hold the old content.

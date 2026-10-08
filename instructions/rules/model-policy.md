@@ -32,16 +32,18 @@ findings stay attributable.
 | high | final verify, tie-break, gate | `blue-verify` | Opus 5.5 · xhigh |
 
 - Unsure? Go one row up. `sonnet-max` runs only when the user asks for it. The final pass of any
-  build/attack/verify run is `blue-verify`.
-- Think-then-build tasks (fix, build, refactor, migrate) go through the `cascade` skill.
-- Record a non-obvious routing pick in the KB (one append-only ledger note), same session.
+  build/attack/verify run is `blue-verify`. The user naming a model, count or effort overrides.
+- A workflow script's `agent()` call takes a model and effort per call: use the same pairs. Opus
+  and Sonnet run at `high` or `xhigh` only: never `medium`, `low` or `max` (`max` only through
+  `sonnet-max`, on the user's ask).
+- Think-then-build tasks (fix, build, refactor, migrate) go through the `cascade` skill unasked;
+  genuinely hard ones use its best-of-N mode. Non-interactive review, judging or bulk passes go
+  through `batch-review` (Batch API: about half price, minutes to hours, needs an API key your
+  organisation provides).
+- Record a non-obvious routing pick in the KB's `ops/model-routing-ledger.md`, same session.
 
 ## Delegating
-The worker-prompt template is the `spawn` skill's. Why it has each line: lower tiers drift on long
-work (keep the plan in files, cap missions at 30-60 minutes), apply a rule to the instance rather
-than the class (say "every X, including later ones"), drop constraints when two collide (write the
-priority order into their prompt), ask permission for authorised work (say it is pre-authorised),
-and produce plausible-wrong output at volume (never land it without a review gate). Opus accepts
-its own good-looking answer: ask it to refute its top 3 conclusions. Novel problems: decompose,
-best-of-N plus a judge, and say early what is novel. Workflow schemas: optional fields for what an
-agent may omit, exhaustive enums, a literal example object in the prompt.
+The worker-prompt template is the `spawn` skill's. Why each line exists, per-model failure modes
+and the task-shape table: `model-profiles.md` (read on demand). In short:
+keep the plan in files, say "every X, including later ones", write the priority order into the
+worker's own prompt, say what is pre-authorised, and never land worker output without a review gate.

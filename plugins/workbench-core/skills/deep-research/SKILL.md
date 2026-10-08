@@ -1,9 +1,9 @@
 ---
 name: deep-research
-description: Deep, verified web research that ends in a decision list (critical / yes / maybe / no). Use for "deep research", "/deep-research", "research everything", or a question that needs many sources checked and adversarially verified (vendor or tool evaluation, "what changed in X", "should we adopt Y"). Not for a single fact (answer inline) and not for code search.
+description: Deep, verified web research that ends in a decision list (critical / yes / maybe / no). Use for "deep research", "/workbench-core:deep-research", "research everything", or a question that needs many sources checked and adversarially verified (vendor or tool evaluation, "what changed in X", "should we adopt Y"). Not for a single fact (answer inline) and not for code search.
 ---
 
-# /deep-research
+# /workbench-core:deep-research
 
 Uses only Claude Code's built-in `WebSearch` and `WebFetch` tools plus subagents. No extra keys,
 no third-party search service. If your organisation restricts web access, those tools follow its

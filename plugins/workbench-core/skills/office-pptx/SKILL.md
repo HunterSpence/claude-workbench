@@ -38,6 +38,13 @@ doughnut, `categories`, `series`, optional `number_format`, `data_labels`, `lege
 ```bash
 "${user_config.python}" "${CLAUDE_SKILL_DIR}/scripts/build_deck.py" build outline.json deck.pptx
 ```
+Without a template the deck is 16:9 (13.333 x 7.5 in), with the built-in layouts stretched to fit.
+A long title shrinks (down to 20 pt), then wraps onto more lines and pushes the body down, so it
+never overlaps the content; the estimate is approximate, so the render step still checks it.
+Horizontal bar charts list the first category at the top, with the value axis at the bottom.
+Image and template paths must stay inside the outline's folder; `..` escapes, other absolute paths,
+network paths and URLs are refused unless you pass `--allow-outside` (a network path can send
+Windows credentials to that server).
 Charts are native PowerPoint charts (editable data), not pictures. Images are scaled to fit the
 content area without distortion. Empty placeholders are removed so no "Click to add text" boxes
 remain. `LINT` lines flag long titles, too many bullets, long bullets, big tables and missing

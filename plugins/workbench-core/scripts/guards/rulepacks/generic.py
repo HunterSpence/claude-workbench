@@ -4,6 +4,7 @@ Guard ids (each deny names one):
   force-push-main     force-push (--force, --force-with-lease, -f, +refspec, --mirror, a +wildcard refspec, --all
                       with force) that can rewrite main/master, or a bare force-push while on main/master
   delete-main         deleting remote main/master (push :main, --delete, gh api -X DELETE .../refs/heads/main)
+  push-default-branch any push whose destination is main/master, the remote HEAD or the remote's default branch
   backdate            a commit with a forged date (--date, GIT_AUTHOR_DATE / GIT_COMMITTER_DATE)
   no-verify           skipping git hooks (--no-verify, git commit -n, core.hooksPath=/dev/null)
   git-exec-config     a git config value pointing hook/config execution at an absolute path outside the repo
@@ -18,6 +19,12 @@ Guard ids (each deny names one):
   agent-fork          a forked subagent (fresh subagents only: a fork inherits the whole context and fails inside
                       workflow workers)
   webfetch-secret     a WebFetch URL that carries a credential-shaped value (it would leave in the request)
+  encoded-command     a pwsh / powershell -EncodedCommand (any prefix, -ec, with - -- or /) whose value cannot be
+                      decoded
+  msys-path           on Windows, a Write/Edit/NotebookEdit path written the MSYS or WSL way (/c/..., /mnt/c/...):
+                      the file tools take C:/...
+  browser-url         a browser MCP tool (playwright, chrome-devtools, ...) sent to a URL with a credential-shaped
+                      value or user:password@ in it, or to a file:// URL of a credential file
 """
 import glob
 import json
@@ -32,7 +39,7 @@ MAIN = r"(?<![\w.-])(master|main)(?![\w./-])"
 ENV_MSG = ("Writing {path} (an env file) needs the user's explicit request in this session. If they asked, tell "
            "them this hook blocked it and give them the exact command so they can run it themselves.")
 AC_MSG = ("Do not write the knowledge base's active-context.md directly: parallel sessions overwrite each other "
-          "and the loser never sees an error. Mid-session, journal one line with the save skill's "
+          "and the loser never sees an error. Mid-session, journal one line with /workbench-kb:save's "
           "`save_driver.py --inbox-add \"<entry>\"`. During a save, the full rewrite goes through "
           "`save_driver.py --ac-write <draft> --base <ac_base>` (a locked 3-way merge).")
 CLAUDE_JSON_MSG = ("~/.claude.json is Claude Code's own state file: the running app rewrites it, so a hand write races "
@@ -168,10 +175,54 @@ def git_config(c):
             E.shell_checks(v, c.data, c.packs, c.depth + 1)
 
 
+def _default_branches(cwd):
+    """main, master, HEAD, plus the remote default branch git already knows locally (refs/remotes/origin/HEAD)."""
+    names = {"main", "master", "HEAD"}
+    if cwd and os.path.isdir(cwd):
+        try:
+            r = E.subprocess.run(["git", "-C", cwd, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+                                 capture_output=True, text=True, timeout=3,
+                                 creationflags=getattr(E.subprocess, "CREATE_NO_WINDOW", 0)).stdout.strip()
+            if r.count("/") >= 1:
+                names.add(r.split("/", 1)[1])
+        except Exception as e:
+            E.log(f"default-branch lookup skipped: {e!r}")
+    return names
+
+
+def _current_branch(cwd):
+    if not (cwd and os.path.isdir(cwd)):
+        return ""
+    try:
+        return E.subprocess.run(["git", "-C", cwd, "symbolic-ref", "--short", "HEAD"], capture_output=True, text=True,
+                                timeout=3, creationflags=getattr(E.subprocess, "CREATE_NO_WINDOW", 0)).stdout.strip()
+    except Exception as e:
+        E.log(f"current-branch lookup skipped: {e!r}")
+        return ""
+
+
+def _push_dest(spec, cwd):
+    """The remote branch a refspec writes: `src:dst` -> dst (`x:HEAD` = the remote's HEAD), `x` -> x, a bare `HEAD`
+    -> the current branch; refs/heads/ dropped; None for a delete (`:branch`, judged by delete-main)."""
+    spec = spec.strip("\"'").lstrip("+").rstrip("\"')]}\\;,")   # code around it: `...push origin main')"`
+    if ":" in spec:
+        src, dst = spec.split(":", 1)
+        return re.sub(r"^refs/heads/", "", dst) if src else None
+    if spec in ("HEAD", "@"):
+        return _current_branch(cwd) or None
+    return re.sub(r"^refs/heads/", "", spec)
+
+
 def push(c):
-    """Force-push / +refspec / remote delete of main or master, judged per push statement with commit messages and
-    journal lines blanked as data, and a flag held in a variable this command assigned expanded."""
-    live = E.expand_vars(E.blank_data(c.live, c.ps))
+    """Force-push / +refspec / remote delete of main or master, and any push whose destination is the default
+    branch, judged per push statement on the prose-blanked statements (commit messages, echo/grep arguments and
+    cat/tee heredocs are data; bash -c / sh -c / eval / pwsh -Command / cmd /c payloads are judged), with a flag held
+    in a variable this command assigned expanded."""
+    # Both views (see engine.raw_view): a push hidden in python -c / node -e / a written-then-run file is judged too.
+    live = E.expand_vars("\n".join(seg for seg, _ in E.statements(c)) + "\n" + E.raw_view(c))
+    if None in E.live_encoded(c):
+        E.block("This runs a PowerShell -EncodedCommand (or a prefix of it) whose payload the guard cannot decode. "
+                "Run the command as plain text so it can be checked.", "encoded-command", c.cmd[:120])
     for m in re.finditer(r"\bgit\b[^\n;|&]*\bpush\b[^\n;|&]*", live):
         seg = m.group(0)
         forced = re.search(r"(--force(?:-with-lease|-if-includes)?\b|\s-(?!-)[a-eg-z]*f[a-z]*\b)", seg)
@@ -194,11 +245,19 @@ def push(c):
         if re.search(r"(\s:(refs/heads/)?(master|main)(?![\w./-])|(--delete|\s-d\b)[^\n]*" + MAIN + ")", seg):
             E.block("Deleting remote main/master is blocked (push :main, --delete and -d all remove the branch).",
                     "delete-main", seg[:120])
+        try:
+            args = [t for t in ptoks[ptoks.index("push") + 1:] if not t.startswith("-")]
+        except ValueError:
+            args = []
+        deleting = re.search(r"(?<![\w-])(?:--delete|-d)(?![\w-])", seg)
+        if not deleting and not forced and not re.search(r"(?<![\w-])--tags(?![\w-])", seg):   # forced: rules above
+            defaults = _default_branches(c.cwd)
+            dests = [_push_dest(a, c.cwd) for a in args[1:]] if args[1:] else [_current_branch(c.cwd)]
+            hit = next((d for d in dests if d and d in defaults), None)
+            if hit:
+                E.block(f"Pushing to {hit} (a default branch) is blocked: push a feature branch "
+                        "(`git push <remote> <feature-branch>`) and open a pull request.", "push-default-branch", seg[:120])
         if forced and not to_main:
-            try:
-                args = [t for t in ptoks[ptoks.index("push") + 1:] if not t.startswith("-")]
-            except ValueError:
-                args = []
             if len(args) <= 1 and c.cwd and os.path.isdir(c.cwd):   # no refspec: the CURRENT branch is pushed
                 try:
                     cur = E.subprocess.run(["git", "-C", c.cwd, "symbolic-ref", "--short", "HEAD"],
@@ -210,7 +269,7 @@ def push(c):
                 if cur in ("master", "main"):
                     E.block(f"Force-push blocked: no refspec given and the current branch is {cur}, so a bare "
                             f"force-push rewrites {cur}.", "force-push-main", seg[:120])
-    for m in re.finditer(r"\bgh\s+api\b[^\n;|&]*", c.live):
+    for m in re.finditer(r"\bgh\s+api\b[^\n;|&]*", live):
         g = m.group(0)
         if re.search(r"(?i)(?:-X|--method)[\s=]*DELETE\b", g) and re.search(r"refs/heads/(master|main)(?![\w./-])", g):
             E.block("Deleting remote main/master through the API is blocked.", "delete-main", g[:120])
@@ -327,6 +386,11 @@ SHELL = (git_config, protected, secret_read, push, backdate, no_verify, rm_root,
 
 # ── file tools ───────────────────────────────────────────────────────────────────────────────────────────────
 def write_tool(c):
+    raw = str(c.ti.get("file_path") or c.ti.get("notebook_path") or "")
+    m = re.match(r"^/(?:mnt/)?([A-Za-z])(/.*)?$", raw)
+    if os.name == "nt" and m:
+        E.block(f"{raw} is an MSYS/WSL-style path; on Windows the file tools need the drive form: use "
+                f"{m.group(1).upper()}:{m.group(2) or '/'} (C:/... with forward slashes).", "msys-path", raw)
     if not c.path:
         return
     rx = _secret_rx()
@@ -366,6 +430,28 @@ def webfetch_secret(c):
                 "webfetch-secret")
 
 
+def browser_url(c):
+    if not E.BROWSER_MCP.fullmatch(c.tool):
+        return
+    import secretscan
+    from urllib.parse import unquote, urlsplit
+    for key in ("url", "uri", "href"):
+        url = str(c.ti.get(key) or "").strip()
+        if not url:
+            continue
+        found = secretscan.findings(url)
+        parts = urlsplit(url)
+        if found or (parts.scheme in ("http", "https", "ws", "wss") and parts.password):
+            E.block("This browser URL carries a credential (a token-shaped value or user:password@), which would land "
+                    "in browser history, logs and the page. Open it without the credential; the user signs in "
+                    "themselves.", "browser-url")
+        if parts.scheme == "file":
+            path = unquote(parts.path)
+            path = path[1:] if re.match(r"^/[A-Za-z]:", path) else path
+            if _secret_hit(path):
+                E.block(SECRET_MSG.format(path=path), "browser-url", path)
+
+
 WRITE = (write_tool,)
 READ = (read_tool,)
-TOOL = (agent_fork, webfetch_secret)
+TOOL = (agent_fork, webfetch_secret, browser_url)

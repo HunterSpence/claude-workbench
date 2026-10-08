@@ -4,7 +4,7 @@
 |---|---|---|
 | `profiles/corporate.fragment.json` | **Default.** For a managed corporate laptop: prompts for anything beyond reads, bypass mode off, documented defaults for performance settings, shorter transcript retention, stable updates. | `--profile corporate` (default) |
 | `profiles/permissive.fragment.json` | **The permissive profile.** No permission prompts (bypass mode), broad allow rules, larger limits for research and subagent fan-outs, and the ponytail plugin's subagent hook kept off. | `--profile permissive` (also applies the upstream plugins) |
-| `upstream-plugins.fragment.json` | Two marketplaces and the on/off state of seven plugins: security guidance and PR review on, the rest off. | `--upstream-plugins` |
+| `upstream-plugins.fragment.json` | Two marketplaces and the on/off state of seven plugins: security guidance, PR review and frontend design on, the rest off. | `--upstream-plugins` |
 | `upstream-plugins.optional.fragment.json` | Security-audit and eval plugin marketplaces, every plugin off. Not applied by default: review the licences first (see the installer's `--help` for whether it has an option for this file). | — |
 
 The installer merges the chosen fragment into your user settings (`~/.claude/settings.json`). It
@@ -29,7 +29,8 @@ the installer ran with), `{{WORKBENCH_HOME}}` (`<claude config dir>/workbench`) 
 | `modelSettings` | Opus 5.5 / Opus 5 / Fable 5.1 `xhigh`, Sonnet 5.5 `high` | Per-model effort. | Resolved per model; a managed entry or cap wins. |
 | `showThinkingSummaries` | `true` | Expand thinking (Ctrl+O) to see why the model did something. Display only. | — |
 | `switchModelsOnFlag` | `false` | A flagged request pauses and asks instead of silently switching model. | — |
-| `permissions.deny` | Reads of `.env`, `.env.*`, `*.pem`, `*.key`, `*.pfx`, `*.p12` anywhere; `~/.ssh`, `~/.aws`, `~/.azure`, `~/.kube`, `~/.config/gcloud`, `~/.docker/config.json`, `~/.git-credentials`, `~/.netrc` | Keeps secrets out of the model's context. A Read deny also blocks Edit and Write there, and deny rules apply in every mode, bypass included. Side effects: `.env.example` and `~/.ssh/config` are blocked too. Covers Claude's file tools and the file commands it recognises in the shell, not every program. | Deny rules from every source apply. |
+| `permissions.deny` | Reads of `.env`, `.env.*`, `*.pem`, `*.key`, `*.pfx`, `*.p12` anywhere; `~/.ssh`, `~/.aws`, `~/.azure`, `~/.kube`, `~/.config/gcloud`, `~/.docker/config.json`, `~/.git-credentials`, `~/.netrc` | Keeps secrets out of the model's context. A Read deny also blocks Edit and Write there, and deny rules apply in every mode, bypass included. `.env.*` is deliberately fail-closed: it catches every variant (`.env.staging`, `.env.prod`, `.env.qa`), and an allow rule can't carve an exception out of a deny. So `.env.example` and `.env.sample` are blocked too, for Claude's file tools and for the shell file commands Claude Code recognises (`cat`, `head`, `tail`, `sed`); open them yourself, or copy one to another name (`env.example.txt`) if Claude needs to see it. Side effect: `~/.ssh/config` is blocked too. Covers Claude's file tools and the file commands it recognises in the shell, not every program. | Deny rules from every source apply. |
+| `permissions.ask` | Publishing and sharing commands, each as `Bash(<command> *)` and `PowerShell(<command> *)`: `gh gist create`, `gh release create`/`upload`, `npm`/`pnpm publish`, `yarn publish`, `yarn npm publish`, `twine upload`, `poetry publish`, `cargo publish`, `docker`/`podman push` and `image push`, `gem push`, `dotnet nuget push`, `scp`, `rsync`, `sftp`, `aws s3 cp`/`sync`/`mv`, `az storage blob upload`/`upload-batch`, `gsutil cp`/`rsync`/`mv`, `gcloud storage cp`/`rsync`/`mv`, `gh pr merge`/`review`/`comment`, `gh issue comment`; plus `Publish-Module`, `Publish-Script`, `Publish-PSResource` in PowerShell | **These prompt even in bypass mode**: Claude Code never auto-approves a call that matches an ask rule, in any mode, and an ask rule wins over a broader allow rule such as `Bash(*)`. The guard hooks ask about the same verbs (`publish-confirm`), but a hook's ask may not prompt in bypass mode; these rules do. A trailing ` *` also matches the bare command. Like every Bash rule, it matches the command as Claude writes it, not every way of running the program. | Ask rules from every source apply. |
 | `env.WORKBENCH_KB_ROOT` | `{{KB_ROOT}}` | Tells the workbench hooks and KB tools where the knowledge base lives. | — |
 | `env.PYTHONUTF8` / `env.PYTHONIOENCODING` | `1` / `utf-8` | Python reads and writes UTF-8 on Windows; non-ASCII output doesn't crash a hook. (Python docs) | — |
 | `env.GIT_TERMINAL_PROMPT` | `0` | Git fails instead of waiting for a password nobody can type. (Git docs) | — |
@@ -66,6 +67,7 @@ the installer ran with), `{{WORKBENCH_HOME}}` (`<claude config dir>/workbench`) 
 | `cleanupPeriodDays` | `14` | `30` | Transcripts on disk are plaintext and can hold code or pasted secrets. Corporate keeps two weeks; permissive keeps the default 30. | Often set by IT. |
 | `autoUpdatesChannel` | `stable` | `latest` | Corporate takes a build about a week old that skips releases with major regressions. | IT may pin a version or channel. |
 | `theme` | not set | `dark` | Also the default. | — |
+| `includeGitInstructions` | not set (`true`) | `false` | Drops the built-in commit/PR instructions and git status snapshot to save context; `rules/git.md` carries the git rules instead. Corporate keeps the built-ins. | — |
 
 ## Upstream plugins
 Applied only with `--upstream-plugins` (or `--profile permissive`). Each marketplace sets
@@ -77,7 +79,7 @@ organisation's policy before you add any marketplace.
 |---|---|---|---|---|
 | `upstream-plugins.fragment.json` | `adamsreview` | github `adamjgmiller/adamsreview` | MIT | `adamsreview` **on**. In PR mode it posts review comments: use it on your own PRs, and on others' only when asked (`rules/git.md`). |
 | `upstream-plugins.fragment.json` | `ponytail` | github `DietrichGebert/ponytail` | MIT | `ponytail` off: the build personas carry its text. |
-| `upstream-plugins.fragment.json` | `claude-plugins-official` (built in) | Anthropic | — | `security-guidance` **on**; `superpowers`, `hookify`, `claude-code-setup`, `frontend-design` off. |
+| `upstream-plugins.fragment.json` | `claude-plugins-official` (built in) | Anthropic | `frontend-design`: Apache-2.0 (its `LICENSE`, checked with `gh api`) | `security-guidance` **on**; `frontend-design` **on** (design guidance for building UIs; `rules/work-workflows.md`); `superpowers`, `hookify`, `claude-code-setup` off. |
 | `upstream-plugins.optional.fragment.json` | `trailofbits` | github `trailofbits/skills` | **CC-BY-SA-4.0** | Ten security-audit plugins, all off. **Share-alike licence:** get your legal or open-source review's OK before installing, and never copy its content into your repos. |
 | `upstream-plugins.optional.fragment.json` | `ai-evals-course` | git `https://github.com/ai-evals-course/evals-skills.git` | Apache-2.0 | `evals` off. |
 
@@ -90,12 +92,11 @@ organisation's policy before you add any marketplace.
 | `NODE_EXTRA_CA_CERTS` | path to the proxy's root CA (PEM) | Needed inside WSL behind a TLS-inspecting proxy (`instructions/rules/corporate-setup.md`). Native Windows reads the system store already. |
 | `permissions.blockReadsOutsideWorkingDirectories` | `true` | File tools refuse reads outside your working directories; the KB folder the installer adds still counts as one. |
 | `sandbox.enabled` | `true` | OS-level sandbox for shell commands. WSL2 only: native Windows has none. |
-| `skillOverrides` | `{"<skill>": "name-only"}` | Collapses rarely used personal skills to their name, saving context. Has no effect on plugin skills. |
-| `includeGitInstructions` | `false` | Drops the built-in commit/PR instructions and git status snapshot to save context, if you rely on `rules/git.md` alone. |
+| `skillOverrides` | `{"<skill>": "name-only"}` | Collapses rarely used personal skills to their name, saving context (`user-invocable-only` hides one from the model). Has no effect on plugin skills. |
 
 ## Not set by either profile
 - **Hooks:** wired by the plugin's `hooks/hooks.json`.
 - **`skipDangerousModePermissionPrompt`:** the bypass confirmation dialog stays on until you accept
   it yourself.
 - **Variables that hold an ID, URL, host, path, phone number or another tool's config:** they are
-  specific to one person's infrastructure and belong in your own settings, not a shared kit.
+  specific to your own infrastructure, so they belong in your own settings, not a shared kit.

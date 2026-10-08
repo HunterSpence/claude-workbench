@@ -1,0 +1,9 @@
+{
+  "name": "vdi-drive",
+  "private": true,
+  "type": "module",
+  "description": "Opt-in canvas remote-desktop driver. Read SKILL.md first.",
+  "dependencies": {
+    "playwright-core": "1.62.1"
+  }
+}

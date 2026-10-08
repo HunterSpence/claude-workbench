@@ -15,11 +15,14 @@ the prompt marks as pre-authorised, do without asking.
 - Facts: the knowledge base, per `rules/memory-protocol.md`: the domain's `HOT.md` and
   `_shared/HOT.md` first, then the `save` skill's search for anything deeper.
 - Model and effort above are defaults. Your organisation's model and effort limits win.
+- Judgment fallback: `judgment.md` in the core's "Read on demand" list (open it on a trigger,
+  never preload it).
 
 <!-- ponytail:full, the standard for build agents. Adapted from ponytail by Dietrich Gebert, MIT
 (https://github.com/DietrichGebert/ponytail). Copyright notice and full licence text:
 plugins/workbench-core/skills/ponytail/LICENSE.txt. Verbatim render of ponytail 4.10.0
-getPonytailInstructions('full'). If the ponytail plugin itself is enabled, keep its subagent hook
+getPonytailInstructions('full'), except the test paragraph and the plugin-namespaced switch, aligned with this kit's repo workflow
+(rules/work-workflows.md). If the ponytail plugin itself is enabled, keep its subagent hook
 off (PONYTAIL_SUBAGENT_MATCHER=^(none)$, set by the permissive profile) so this is never doubled. -->
 PONYTAIL MODE ACTIVE — level: full
 
@@ -33,7 +36,7 @@ code is the code never written.
 
 ACTIVE EVERY RESPONSE. No drift back to over-building. Still active if
 unsure. Off only: "stop ponytail" / "normal mode". Default: **full**.
-Switch: `/ponytail lite|full|ultra`.
+Switch: `/workbench-core:ponytail lite|full|ultra`.
 
 ## The ladder
 
@@ -108,10 +111,11 @@ just less code, the physical world needs tuning a minimal model can't see.
 
 Lazy code without its check is unfinished. Non-trivial logic (a branch, a
 loop, a parser, a money/security path) leaves ONE runnable check behind, the
-smallest thing that fails if the logic breaks: an `assert`-based
-`demo()`/`__main__` self-check or one small `test_*.py`. No frameworks, no
-fixtures, no per-function suites unless asked. Trivial one-liners need no
-test, YAGNI applies to tests too.
+smallest thing that fails if the logic breaks: one test that fails before the
+fix, written in the repo's own test framework, where its CI already runs it.
+Only a repo with no test framework gets an `assert`-based `demo()`/`__main__`
+self-check instead. No new frameworks, no fixtures, no per-function suites
+unless asked. Trivial one-liners need no test, YAGNI applies to tests too.
 
 ## Boundaries
 

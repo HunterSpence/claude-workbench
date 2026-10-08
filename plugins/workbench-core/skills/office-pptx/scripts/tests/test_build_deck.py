@@ -60,6 +60,53 @@ class BuildDeckTest(unittest.TestCase):
         for slide in s:   # no leftover "Click to add text" boxes
             self.assertFalse([ph for ph in slide.placeholders if ph.has_text_frame and not ph.text_frame.text.strip()])
 
+    def test_default_deck_is_16_9_and_layouts_fill_it(self):
+        prs = self.build({"slides": [{"title": "Short", "bullets": ["a"]}]})
+        self.assertEqual((prs.slide_width, prs.slide_height), (12192000, 6858000))     # 13.333 x 7.5 in
+        self.assertAlmostEqual(prs.slide_width / prs.slide_height, 16 / 9, places=2)
+        title = list(prs.slides)[0].shapes.title
+        self.assertGreater(title.width, prs.slide_width * 0.8, "layouts were stretched to the new width")
+        self.assertLessEqual(title.left + title.width, prs.slide_width)
+
+    def test_long_title_never_overlaps_body(self):
+        long = "Build time fell forty percent after we moved the dependency cache next to the runners " * 2
+        prs = self.build({"slides": [{"title": long.strip(), "bullets": ["one", "two"]},
+                                     {"title": long.strip(), "table": {"columns": ["A"], "rows": [ ["1"] ]}},
+                                     {"title": "Short title", "bullets": ["x"]}]})
+        s = list(prs.slides)
+        body = next(ph for ph in s[0].placeholders if ph.placeholder_format.idx == 1)
+        title = s[0].shapes.title
+        self.assertLessEqual(title.top + title.height, body.top, "title bottom stays above the body top")
+        self.assertLessEqual(body.top + body.height, prs.slide_height)
+        sizes = {r.font.size.pt for p in title.text_frame.paragraphs for r in p.runs if r.font.size}
+        self.assertTrue(sizes and max(sizes) < 44, "the long title was shrunk")
+        tbl = next(sh for sh in s[1].shapes if sh.has_table)
+        self.assertLessEqual(s[1].shapes.title.top + s[1].shapes.title.height, tbl.top)
+        self.assertFalse([r for p in s[2].shapes.title.text_frame.paragraphs for r in p.runs if r.font.size],
+                         "a short title keeps the template size")
+
+    def test_bar_chart_lists_first_category_on_top(self):
+        prs = self.build({"slides": [{"title": "Top three", "chart": {"type": "bar", "categories": ["A", "B", "C"],
+                                                                     "series": {"n": [3, 2, 1]}}}]})
+        chart = next(sh for sh in list(prs.slides)[0].shapes if sh.has_chart).chart
+        self.assertTrue(chart.category_axis.reverse_order)
+        xml = chart._chartSpace.xml
+        self.assertIn('<c:orientation val="maxMin"/>', xml)
+        self.assertIn('<c:crosses val="max"/>', xml.split("<c:valAx>")[1], "the value axis crosses at the max category")
+
+    def test_paths_stay_inside_the_outline_folder(self):
+        outside = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, outside, True)
+        shutil.copy(os.path.join(self.d, "pic.png"), os.path.join(outside, "x.png"))
+        for bad in (os.path.join(outside, "x.png"), "../x.png", "\\\\server\\share\\x.png", "//server/share/x.png",
+                    "http://example.com/x.png"):
+            with self.assertRaises(SystemExit, msg=bad):
+                self.bd.build({"slides": [{"title": "t", "image": bad}]}, self.d)
+        with self.assertRaises(SystemExit):
+            self.bd.build({"template": os.path.join(outside, "t.pptx"), "slides": []}, self.d)
+        prs, _ = self.bd.build({"slides": [{"title": "t", "image": os.path.join(outside, "x.png")}]}, self.d, True)
+        self.assertEqual(len(prs.slides), 1)
+
     def test_lint_and_template(self):
         _, warnings = self.bd.build(self.outline, self.d)
         self.assertTrue(any("slide 6: title longer" in w for w in warnings))

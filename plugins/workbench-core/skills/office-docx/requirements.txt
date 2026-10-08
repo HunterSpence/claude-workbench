@@ -1,0 +1,5 @@
+# python-docx (MIT) builds .docx files; it pulls in lxml (BSD-3-Clause) and typing-extensions.
+python-docx==1.2.0
+# Reading a .docx back as Markdown (`to-md`): markitdown (MIT) with its docx extra (mammoth, BSD-2-Clause).
+markitdown[docx]==0.1.8
+# Images in documents are sized by python-docx itself; Pillow is only used by the tests.

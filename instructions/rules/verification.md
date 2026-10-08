@@ -4,14 +4,13 @@
 - **A green check is not evidence: verify the artifact.** HTTP 200 is not "done". A passing CI run
   says the checks passed, not that the change works.
 - **0 tool calls = not research.** If you did not fetch or run it this session, you did not verify it.
-- **Research first:** a current research pass shapes any build or improvement before code.
+- **Research first:** a fresh, dated research pass (what is current, and what is coming) shapes any
+  build or improvement before code.
 - **Replicate, then test, then test the test.** An adopt or reject decision cites published results
-  with a replication tier (R0 author-only, R1 one independent, R2 two or more) AND our own run. Before
-  you trust that run: reproduce a known result first (positive control), prove the change under test
-  was actually applied, test the workload the technique claims to help, read exit codes directly
-  (never through `| tail` or `| grep`), fail on silent skips, and count what the change broke, not
-  only the average gain. A run that misses any of these is UNTESTED, not rejected and not passed.
-  Full checklist, read before any gate or benchmark claim: `rules/test-validity.md`.
+  with a replication tier (R0 author-only, R1 one independent, R2 two or more) AND our own run, which
+  needs a positive control, proof the change was applied, the matching workload, exit codes read
+  directly and no silent skips. A run that misses one is UNTESTED, not rejected and not passed.
+  Read `{{WORKBENCH_HOME}}/instructions/rules/test-validity.md` before any gate or benchmark claim.
 - **Label every claim** in a report VERIFIED (you checked it this session), PLAUSIBLE (consistent
   with what you saw, not checked) or ASSUMED.
 - **"Public" means re-test unauthenticated**, from outside your own session.
@@ -20,6 +19,7 @@
 - **A live screen beats vendor docs.** A dropdown can be the policy: test it live.
 - **A quote or a landing page is not the product.** Read the individual listing or contract, not
   only the overview.
+- **Reading a code out of a message:** read the message body; don't regex the first 6 digits.
 - Don't ship visual work unseen: the loop is in `rules/browser.md`.
 
 ## Measurement

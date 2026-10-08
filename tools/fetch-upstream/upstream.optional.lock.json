@@ -1,6 +1,5 @@
 {
- "_readme": "NOT RECOMMENDED ON A MANAGED LAPTOP. Same format as upstream.lock.json; fetch only with --lock upstream.optional.lock.json after reading THIRD-PARTY.md. gstack skills carry a usage-logging preamble and their full setup installs bun; impeccable downloads an engine binary at runtime; web-design-guidelines fetches live instructions from its repository's main branch and ships no LICENSE file.",
- "generated": "2026-10-07",
+ "_readme": "NOT RECOMMENDED ON A MANAGED LAPTOP. Same format as upstream.lock.json; fetch only with --optional (or --lock upstream.optional.lock.json for this set alone) after reading THIRD-PARTY.md. gstack skills carry a usage-logging preamble and their full setup installs bun; impeccable downloads an engine binary at runtime; web-design-guidelines fetches live instructions from its repository's main branch and ships no LICENSE file.",
  "sources": [
   {
    "id": "impeccable",

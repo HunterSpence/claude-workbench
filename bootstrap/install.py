@@ -42,7 +42,7 @@ import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 MARKETPLACE = "workbench"
 PLUGIN_IDS = ("workbench-core@workbench", "workbench-kb@workbench")
 BUILTIN_MARKETPLACES = {"claude-plugins-official": {"source": "github", "repo": "anthropics/claude-plugins-official"}}
@@ -326,6 +326,11 @@ def fill_json(obj, values):
     if isinstance(obj, dict):
         return {k: fill_json(v, values) for k, v in obj.items()}
     return obj
+
+
+def store_python(exe):
+    """True for the Microsoft Store Python and its App Execution Alias stub (both live under WindowsApps)."""
+    return "\\windowsapps\\" in str(exe).replace("/", "\\").lower()
 
 
 # ── the installer ────────────────────────────────────────────────────────────────────────────────────────────
@@ -716,7 +721,7 @@ def uninstall(a):
     print(f"claude-workbench uninstall ({'APPLY' if a.apply else 'DRY RUN: nothing is changed; add --apply'})")
     if not manifests:
         print(f"  nothing to undo: no install manifest under {fwd(wb / 'backups')}")
-        return 0
+        return purge_backups(a, wb, False)
     keep = wb / "backups" / f"uninstall-{time.strftime('%Y%m%d-%H%M%S')}"
     claude = None if a.no_cli else shutil.which("claude")
     failed, ran = False, set()
@@ -798,8 +803,27 @@ def uninstall(a):
     for d in (wb / "instructions",):
         if a.apply and d.is_dir() and not any(d.iterdir()):
             d.rmdir()
-    print(f"Done. Logs, backups and the knowledge base stay: {fwd(wb)}")
-    return 4 if failed else 0
+    print(f"Done. Logs, backups and the knowledge base stay: {fwd(wb)}" if not a.purge_backups else
+          f"Done. Logs and the knowledge base stay: {fwd(wb)}")
+    return purge_backups(a, wb, failed)
+
+
+def purge_backups(a, wb, failed):
+    """--purge-backups: delete <workbench>/backups, only after an uninstall that did not fail."""
+    if not getattr(a, "purge_backups", False):
+        return 4 if failed else 0
+    d = wb / "backups"
+    if failed:
+        print(f"  backups kept at {fwd(d)}: the uninstall did not finish cleanly, and they are how to recover")
+        return 4
+    if not d.is_dir():
+        return 0
+    edited = list(d.glob("uninstall-*/files/*"))
+    print(f"  {'delete' if a.apply else 'would delete'} {fwd(d)}"
+          + (f" (including {len(edited)} copy/copies of files you had edited)" if edited else ""))
+    if a.apply:
+        shutil.rmtree(d)
+    return 0
 
 
 def main(argv=None):
@@ -817,6 +841,8 @@ def main(argv=None):
     ap.add_argument("--force", action="store_true", help="replace settings keys you already set")
     ap.add_argument("--no-cli", action="store_true", help="never call the claude CLI; print its commands instead")
     ap.add_argument("--uninstall", action="store_true", help="undo installs, newest first (dry run unless --apply)")
+    ap.add_argument("--purge-backups", action="store_true",
+                    help="with --uninstall: also delete <workbench>/backups once the uninstall succeeded")
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except (AttributeError, OSError):
@@ -827,6 +853,12 @@ def main(argv=None):
         return 0 if e.code == 0 else 2
     if sys.version_info < (3, 10):
         print("Python 3.10 or newer is required.")
+        return 2
+    if store_python(sys.executable):
+        print("This is the Microsoft Store Python (its path is under WindowsApps). Store apps get a private, redirected "
+              "copy of shared folders such as AppData and TEMP, so the hooks' logs and state would land somewhere else. "
+              "Install Python from python.org, winget or your organisation's software portal, then run: "
+              "py -3 bootstrap\\install.py")
         return 2
     try:
         if a.uninstall:

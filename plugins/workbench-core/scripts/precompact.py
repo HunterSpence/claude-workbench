@@ -41,7 +41,7 @@ def main():
         f = flag_path(kb, sid)
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text(f"precompact_fired: {now:%Y-%m-%d %H:%M:%S}\ntrigger: {d.get('trigger') or 'unknown'}\n"
-                     "action: run the save skill at the next start of this session\n", encoding="utf-8")
+                     "action: run /workbench-kb:save at the next start of this session\n", encoding="utf-8")
     except OSError:
         pass
     cutoff = f"{now - timedelta(days=KEEP_DAYS):%Y%m%d}"

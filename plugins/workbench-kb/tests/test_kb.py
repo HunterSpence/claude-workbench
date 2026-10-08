@@ -58,6 +58,7 @@ class KB(unittest.TestCase):
         self.assertEqual(out["mode_hint"], "inline")
         self.assertIn("ops", out["domains"])
         self.assertGreater(out["ac_bytes_left"], 0)
+        self.assertIsNone(out["last_save_minutes_ago"], "no save yet")
 
     def test_inbox_add_masks_credentials_and_surfaces_in_window(self):
         rc, out = self.driver("--inbox-add", f"rotated the deploy key {KEY} today")
@@ -138,6 +139,9 @@ class KB(unittest.TestCase):
         self.assertTrue(Path(out["daily_log"]).exists())
         rc, out = self.driver("--post", "--domains", "ops", "--note", "first save")
         self.assertEqual(out["metrics"], "already recorded")
+        rc, pre = self.driver("--pre")
+        self.assertIsNotNone(pre["last_save_minutes_ago"])
+        self.assertLess(pre["last_save_minutes_ago"], 30, "a save just happened: the skip gate can use this")
 
     @unittest.skipUnless(HAS_GIT, "git not installed")
     def test_git_commit_local_and_push_only_on_request(self):
@@ -181,6 +185,23 @@ class KB(unittest.TestCase):
         self.assertNotIn("ops", pre["history_still_over_cap"])
 
     # ── search, health, demote ──
+    def test_kb_eval(self):
+        rc, out, err = self.run_py("kb_eval.py")
+        self.assertEqual(rc, 2, "no set yet")
+        rc, out, err = self.run_py("kb_eval.py", "--init")
+        self.assertIn("wrote", out)
+        self.assertEqual(self.run_py("kb_eval.py")[0], 2, "the placeholder set is refused")
+        self.note("infra/proxy-cert.md", "---\ntitle: proxy cert\n---\n# Proxy cert\nRotate the inspection proxy "
+                                         "certificate with the vendor console every quarter.\n")
+        (self.root / "kb_eval_set.json").write_text(json.dumps({"cases": [
+            {"q": "rotate inspection proxy certificate", "expect": ["infra/proxy-cert.md"]},
+            {"q": "zebra migration plan", "expect": ["ops/zebra.md"]}]}), encoding="utf-8")
+        rc, out, err = self.run_py("kb_eval.py", "--json")
+        self.assertEqual(rc, 0, err)
+        r = json.loads(out)
+        self.assertEqual((r["cases"], r["hit@1"], r["hit@5"]), (2, 0.5, 0.5))
+        self.assertEqual([m["q"] for m in r["misses"]], ["zebra migration plan"])
+
     def test_search(self):
         self.note("infra/proxy-certs.md", "---\ntitle: Proxy certificates\n---\n# Proxy certificates\n\n"
                   "## Fix\nPoint pip at the corporate CA bundle with pip config set global.cert.\n"

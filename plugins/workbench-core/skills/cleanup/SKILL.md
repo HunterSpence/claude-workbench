@@ -1,9 +1,10 @@
 ---
 name: cleanup
+disable-model-invocation: true
 description: Archive confirmed dead or legacy code. Re-verifies each candidate is unused (zero references on every live surface, scheduler check, build/typecheck/test gate), then git-mv's it into _archive/<date>/ with a restore manifest. Never hard-deletes; confirm-gated at every risky step; deploy-gated repos get a branch and PR, never a merge.
 ---
 
-# /cleanup: confirm-gated archival of dead code
+# /workbench-core:cleanup: confirm-gated archival of dead code
 
 **Voice:** plain, cautious, factual. When in doubt, keep the file.
 

@@ -3,14 +3,14 @@
 Opt-in download of third-party skills this kit recommends but does not ship, each pinned to an
 exact commit or published package version and verified file by file against SHA-256.
 
-```powershell
-.\tools\fetch-upstream\fetch-upstream.ps1                      # dry run: the plan, nothing written
-.\tools\fetch-upstream\fetch-upstream.ps1 -Apply
-```
 ```bash
-tools/fetch-upstream/fetch-upstream.sh                         # dry run
-tools/fetch-upstream/fetch-upstream.sh --apply
+py -3 tools/fetch-upstream/fetch_upstream.py                   # dry run: the plan, nothing written
+py -3 tools/fetch-upstream/fetch_upstream.py --apply           # install the default set
+py -3 tools/fetch-upstream/fetch_upstream.py --optional --apply   # default set + the optional design set
 ```
+Use `python3` instead of `py -3` on Linux and WSL. `fetch-upstream.ps1` (`-Apply`, `-Optional`) and
+`fetch-upstream.sh` are thin wrappers over the same Python file; if your machine blocks PowerShell
+scripts, use the Python command above and leave the execution policy alone.
 
 Default set (`upstream.lock.json`):
 
@@ -19,10 +19,12 @@ Default set (`upstream.lock.json`):
 | humanizer | blader/humanizer | v3.1.0 | MIT | prose de-AI rewrite skill |
 | playwright-cli | @playwright/cli (npm) | 0.1.22 | Apache-2.0 | the skill for the playwright-cli browser tool (install the CLI at the same version) |
 
-`upstream.optional.lock.json` holds gstack (design-review, qa, diagram), impeccable and
-web-design-guidelines. They are **not recommended on a managed laptop**; the reasons are in
-`THIRD-PARTY.md`. Fetch them only deliberately: `-Lock upstream.optional.lock.json`
-(`--lock ...` in bash), after reading those reasons and your organisation's policy.
+Optional design set (`upstream.optional.lock.json`, added by **`--optional`**): gstack's design-review,
+qa and diagram skills (plus the gstack helper folder they read), impeccable, and web-design-guidelines.
+They are **not recommended on a managed laptop**: gstack's skills write local usage logs and its full
+setup installs Bun and a browser, impeccable downloads an engine binary at runtime, and
+web-design-guidelines fetches live instructions on every run. Details in `THIRD-PARTY.md`. Fetch them
+only deliberately, after your organisation approves; `--optional --only impeccable` takes one.
 
 How it behaves:
 - **Dry run by default.** `-Apply` / `--apply` downloads to a temporary folder, checks every hash,

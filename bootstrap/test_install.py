@@ -39,6 +39,18 @@ class Merge(unittest.TestCase):
         self.assertTrue(I.managed_has(m, ("statusLine",)))                 # no value: present at all = managed
         self.assertTrue(I.managed_has(m, ("model", "x"), "y"))              # a scalar above the key
 
+    def test_store_python_is_refused(self):
+        self.assertTrue(I.store_python(r"X:\AppData\Local\Microsoft\WindowsApps\python3.exe"))
+        self.assertTrue(I.store_python("C:/Program Files/WindowsApps/PythonSoftwareFoundation.Python.3.12_x/python3.12.exe"))
+        self.assertFalse(I.store_python(r"X:\AppData\Local\Programs\Python\Python313\python.exe"))
+        self.assertFalse(I.store_python("/usr/bin/python3"))
+        real = sys.executable
+        try:
+            sys.executable = r"X:\AppData\Local\Microsoft\WindowsApps\python3.exe"
+            self.assertEqual(I.main([]), 2)
+        finally:
+            sys.executable = real
+
     def test_marketplace_policy(self):
         gh = {"source": "github", "repo": "acme/tools"}
         self.assertTrue(I.marketplace_allowed(gh, {})[0])
@@ -132,6 +144,11 @@ class RoundTrip(unittest.TestCase):
         self.assertEqual(self.digest(), before, "files not restored byte-identical")
         self.assertFalse((wb / "kit").exists())
         self.assertTrue((self.home / "claude-kb").exists(), "the KB must survive an uninstall")
+        self.assertTrue((wb / "backups").is_dir(), "backups stay without --purge-backups")
+        self.assertIn("would delete", self.run_install("--uninstall", "--purge-backups"))
+        self.assertTrue((wb / "backups").is_dir(), "a dry run deletes nothing")
+        self.run_install("--uninstall", "--purge-backups", "--apply")
+        self.assertFalse((wb / "backups").exists(), "--purge-backups removes them after a clean uninstall")
 
     def test_permissive_optional_upstream_and_one_owner_values(self):
         before = self.digest()

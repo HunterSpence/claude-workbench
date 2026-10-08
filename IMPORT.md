@@ -68,6 +68,7 @@ WSL has its own Claude Code configuration, separate from Windows. Install in eac
 | `--force` | Overwrite keys you already set |
 | `--no-cli` | Don't call the `claude` CLI; print the plugin commands for you to run instead |
 | `--uninstall` | Restore every backed-up file and remove what the installer added |
+| `--purge-backups` | With `--uninstall`: also delete `<workbench>/backups` once the uninstall succeeded |
 
 ## Check that it worked
 1. `/status`: look at *Setting sources* and *Organization*. Managed settings, if any, are listed.
@@ -80,12 +81,32 @@ WSL has its own Claude Code configuration, separate from Windows. Install in eac
 6. Knowledge base: ask Claude to search the knowledge base for any word; it returns hits or says
    the knowledge base is empty.
 
+## After install
+1. **Fill in your work profile:** run `/workbench-core:onboard` in Claude Code. It asks a few
+   questions and writes `<config>/workbench/USER.md` (who you are at work, where the rules live,
+   how you write). You can also edit that file by hand.
+2. **Recommended upstream skills** (humanizer for drafts, playwright-cli for browser checks), pinned
+   and hash-checked:
+   ```
+   py -3 <config>/workbench/kit/tools/fetch-upstream/fetch_upstream.py            # dry run: the plan
+   py -3 <config>/workbench/kit/tools/fetch-upstream/fetch_upstream.py --apply    # install them
+   ```
+   Use `python3` instead of `py -3` on Linux and WSL. Add `--optional` for the design set only after your organisation approves it (`THIRD-PARTY.md`).
+   The playwright-cli skill also needs its CLI: `npm install -g @playwright/cli@<version>` (the
+   version is in `THIRD-PARTY.md`).
+3. **Skills are invoked by their plugin name:** `/workbench-core:<skill>` (for example
+   `/workbench-core:repo-fix`), and `/workbench-kb:save` for the knowledge base. Claude also uses
+   them unasked when a task fits.
+
 ## Optional extras
 - Python packages for the document-search and Office skills: each skill lists its
   `requirements.txt`; install with `py -3 -m pip install --user -r <file>` or your
   organisation's package mirror.
-- Upstream skills and plugins this kit recommends but does not include: see `THIRD-PARTY.md` and
-  `tools/fetch-upstream/`. Each has its own licence; some need approval.
+- Node packages for `ui-build` and `vdi-drive`: `npm install --ignore-scripts` in a copy of the
+  skill's `scripts/` folder, as its SKILL.md shows. They drive the Edge or Chrome already installed,
+  so no Playwright browser download is needed.
+- Other upstream skills and plugins this kit recommends but does not include: see `THIRD-PARTY.md`.
+  Each has its own licence; some need approval.
 
 ## Updating and removing
 - **Update:** download a newer tag, verify it, and run its installer the same way.

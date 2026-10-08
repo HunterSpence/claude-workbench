@@ -30,22 +30,23 @@ Shell mechanics; the environment itself is `rules/corporate-environment.md`.
 - **Never fork a subagent:** spawn a fresh one and pass the context. Both settings profiles turn
   fork mode off (`CLAUDE_CODE_FORK_SUBAGENT=0`); forks fail inside workflow workers.
 - A background shell command is killed at its timeout. Longer work needs a scheduled task or a
-  detached process. **Never `sleep N; cmd`:** poll with a real check.
+  detached process. **Never `sleep N; cmd`:** poll with a real check, or use the Monitor tool.
 - Pass a script to an interpreter as a file (or with `-c`). Never feed it line by line into an
   interactive interpreter, for example through `xargs`: it can loop and flood the log.
 - Stopping a background task on Windows can leave its children running: kill the tree
   (`taskkill /T /PID <pid>`).
 
 ## Memory and parallelism on a laptop
-- **Keep concurrent heavy jobs** (test suites, evals, local models) within what the machine's
-  memory allows, give each a memory cap, and run the heaviest one at a time. Parallel subagents each
-  starting a test suite add up quickly.
+- **At most two heavy jobs at once** (test suites, evals, local models), sized to the free memory,
+  not the core count: give each a cap with `{{WORKBENCH_HOME}}/kit/tools/memcap/memcap.py --mb <MB> --
+  <command>` and run the heaviest alone. Parallel subagents each starting a test suite add up fast.
 - Run stress, fuzz or pathological-input tests under an OS memory cap (a Windows job object, or
   `ulimit -v` / a cgroup inside WSL), so a runaway input can't exhaust memory.
 - **Parallel sessions isolate code, not shared state.** Two sessions writing one memory file clobber
   each other, which is why the KB is journalled (`rules/memory-protocol.md`).
-
-## WSL
-- WSL has its own Claude Code configuration; a Windows user setting doesn't reach it. (Admins can
-  extend managed policy to WSL with `wslInheritsWindowsSettings`; that is theirs to set.) Memory
-  caps, sandbox and certificates: `rules/corporate-environment.md`.
+- **Bulk transfers share the user's connection** (model downloads, large clones, package mirrors):
+  cap the rate and the number of connections, and pause them when the user needs the bandwidth.
+- The Microsoft Store `python.exe` alias (under `WindowsApps`) is a stub, not an interpreter: hooks
+  and scripts that call it fail. Use `py -3` or the path the installer recorded.
+- WSL has its own Claude Code configuration: limits, certificates and setup are in
+  `corporate-setup.md`.

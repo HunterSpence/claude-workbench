@@ -15,6 +15,7 @@ deploy, allow or deny MCP servers through managed settings, and those always win
 | brave-search | ignore (optional) | **hosted**: queries leave | `BRAVE_API_KEY` |
 | exa | ignore (optional) | **hosted**: queries leave | `EXA_API_KEY` or OAuth |
 | tavily | ignore (optional) | **hosted**: queries leave | `TAVILY_API_KEY` |
+| postgres (read-only) | ignore (optional) | local process; talks only to the database you name; results enter the session | `uv`, `POSTGRES_MCP_DATABASE_URI` for a read-only role on a dev or replica database |
 
 Not included, on purpose: servers tied to one person's infrastructure (SSH, databases, hosting
 accounts, messaging), anything AGPL-licensed (for example a popular local-memory server), and

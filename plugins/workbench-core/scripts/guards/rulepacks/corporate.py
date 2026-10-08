@@ -24,6 +24,12 @@ Guard ids:
   upload-not-allowlisted  a file upload (curl -T / -d @file / --data-binary @ / -F x=@file, wget --post-file,
                           Invoke-WebRequest -InFile or -Body (Get-Content ...)) to a host that is not approved
   outbound-send           email / chat / webhook sends: the user is ASKED to confirm (never auto-approved)
+  publish-confirm         publishing or sharing outside the machine: the user is ASKED (never auto-approved). gh gist
+                          create, gh release create / upload, npm / pnpm / yarn publish, twine upload, poetry publish,
+                          cargo publish, gem push, dotnet nuget push, docker / podman push, scp / rsync / sftp to a
+                          remote host, aws s3 cp|sync|mv to s3://, az storage blob upload, gsutil / gcloud storage
+                          cp|rsync|mv to gs://, gh pr merge --admin, gh pr review --approve, gh pr comment, gh issue comment. A
+                          copy to a host or bucket listed in upload_hosts is not asked about.
   tls-verify-off          turning TLS certificate checks off (git http.sslVerify false, NODE_TLS_REJECT_UNAUTHORIZED=0,
                           npm strict-ssl false, pip trusted-host, PYTHONHTTPSVERIFY=0). Behind a TLS-inspecting proxy
                           the fix is the corporate CA bundle, not switching verification off.
@@ -231,10 +237,11 @@ def _gh_host(seg, toks, cwd, repo_flag=False):
 # flags below (force flags are the generic pack's business). Anything else is refused with one instruction. This is an
 # allowlist on purpose: every blacklist of "shapes that switch repo or config" (cd, GIT_DIR, -c include.path, export,
 # read, source, Set-Item env:, ...) had another gap.
-PLAIN_PUSH = ("Run the push on its own as `git push <remote> <branch>` from the repo folder, so the destination can "
-              "be checked.")
+PLAIN_PUSH = ("Run the push as its own command, exactly `git push <remote> <branch>`, from the repo folder: no `cd` "
+              "first, no `&&`, `;` or pipes, no `-c` options, variables or wrappers (bash -c, eval, cmd /c). Then the "
+              "guard can check where it goes.")
 _PUSH_FLAGS = {"-u", "--set-upstream", "--tags", "--follow-tags", "--dry-run", "-n", "--porcelain", "-q", "--quiet",
-               "-v", "--verbose", "--no-verify", "-f", "--force", "--force-if-includes"}
+               "-v", "--verbose", "--no-verify", "-f", "--force", "--force-if-includes", "-d", "--delete"}
 _PUSH_ANY = re.compile(r"(?i)(?<![\w.-])git(?:\.exe)?[\"']?(?:\s+-\S+(?:\s+[^\s-]\S*)?)*\s+push(?![\w-])")  # any form
 _PUSH_WORDS = re.compile(r"(?i)(?<![\w.-])git(?:\.exe)?[\"']?\s+(?:\S+\s+)*?push(?![\w.-])")   # xargs git push ...
 _NOT_PLAIN = re.compile(r"[;&|`()$%\r\n]")
@@ -335,8 +342,14 @@ def remotes(c):
         m = re.fullmatch(r"(?i)url\.(.+)\.(?:push)?insteadof", k)
         if m:
             check(m.group(1), "Rewriting git URLs to", f"{k}={v}")
-    pushing = bool(_PUSH_ANY.search(c.cmd))
-    for seg, remote in E.statements(c):
+    if None in E.live_encoded(c):   # an encoded payload nobody can read may push anywhere
+        E.block("A PowerShell encoded command the guard cannot decode may push anywhere. " + PLAIN_PUSH,
+                "remote-not-allowlisted", c.cmd[:160])
+    stmts = E.statements(c)   # quoted prose and cat/tee heredocs blanked; bash -c / eval / cmd /c payloads included
+    # Both views: the statements, and the raw command minus provable prose (python -c, node -e, written-then-run
+    # files and decoded -EncodedCommand payloads stay in it).
+    pushing = any(_PUSH_ANY.search(seg) for seg, _ in stmts) or bool(_PUSH_ANY.search(E.raw_view(c)))
+    for seg, remote in stmts:
         h = E._head(seg)
         if h == "git":
             toks, sub = E.git_sub(seg)
@@ -424,7 +437,7 @@ def _url_host(word):
     if not w or any(ch in w for ch in "$`{}()<>*") or w.startswith("@"):
         return None
     m = re.match(r"(?i)^(?:[a-z][a-z0-9+.-]*:)?//", w)
-    auth = re.split(r"[/?#]", w[m.end():] if m else w, 1)[0].rpartition("@")[2]   # past user:password@
+    auth = re.split(r"[/?#]", w[m.end():] if m else w, maxsplit=1)[0].rpartition("@")[2]   # past user:password@
     m = re.match(r"^(\[(?:[^\]])+\]|[^:\s]+)", auth)   # [v6] or name
     return m.group(1).strip("[]").lower() if m else None
 
@@ -504,6 +517,68 @@ def uploads(c):
             if not _local(host) and not _allowed(host, conf, "git_remote_hosts", "upload_hosts"):
                 E.block(f"Uploading a file to {host} is blocked: files leave only for approved hosts. "
                         + _why(conf, "upload_hosts"), "upload-not-allowlisted", seg[:160])
+
+
+# ── publishing and sharing (ask) ─────────────────────────────────────────────────────────────────────────────
+_REMOTE_PATH = re.compile(r"^(?:[^@/\s:]+@)?(\x5b[0-9A-Fa-f:.]+\x5d|[^:/\\\s]{2,}):")   # [user@]host:path, [v6]:path (not C:\path)
+
+
+def _publish_what(toks):
+    """What a statement publishes or shares, and the host/bucket it goes to (None when it names none), or None."""
+    h = os.path.basename(toks[0]).lower().removesuffix(".exe") if toks else ""
+    a = [t.strip("\"'") for t in toks[1:]]
+    pos = [t for t in a if not t.startswith("-")]
+    w = " ".join(a)
+    if h == "gh":
+        if pos[:2] == ["gist", "create"]:
+            return "creates a gist", None
+        if pos[:1] == ["release"] and pos[1:2] in (["create"], ["upload"]):
+            return "publishes a release", None
+        if pos[:2] == ["pr", "merge"] and "--admin" in a:
+            return "merges with --admin, skipping branch protection", None
+        if pos[:2] == ["pr", "review"] and ("--approve" in a or "-a" in a):
+            return "posts an approving review", None
+        if pos[:2] in (["pr", "comment"], ["issue", "comment"]):
+            return "posts a comment others will read", None
+    if (h in ("npm", "pnpm") and pos[:1] == ["publish"]) or (h == "yarn" and (pos[:1] == ["publish"] or pos[:2] == ["npm", "publish"])):
+        return "publishes a package to a registry", None
+    if (h == "twine" and pos[:1] == ["upload"]) or (h in ("poetry", "cargo") and pos[:1] == ["publish"]) \
+            or (h == "gem" and pos[:1] == ["push"]) or (h == "dotnet" and pos[:2] == ["nuget", "push"]):
+        return "publishes a package to a registry", None
+    if h in ("docker", "podman") and (pos[:1] == ["push"] or pos[:2] == ["image", "push"]):
+        img = (pos[1:2] or pos[2:3] or [""])[0]
+        return "pushes an image to a registry", img.split("/")[0] if "/" in img and "." in img.split("/")[0] else None
+    if h in ("scp", "rsync") and len(pos) >= 2:
+        m = re.match(r"^rsync://(?:[^@/]+@)?([^/:]+)", pos[-1]) or _REMOTE_PATH.match(pos[-1])
+        if m:
+            return "copies files to a remote host", m.group(1).strip("[]").lower()
+    if h == "sftp" and pos:
+        return "opens a file transfer session with", pos[-1].rpartition("@")[2].split(":")[0].lower()
+    if h == "aws" and pos[:1] == ["s3"] and pos[1:2] and pos[1] in ("cp", "sync", "mv") and pos[-1].startswith("s3://"):
+        return "uploads files to a cloud bucket", pos[-1][5:].split("/")[0].lower()
+    if (h == "gsutil" and pos[:1] and pos[0] in ("cp", "rsync", "mv") and pos[-1].startswith("gs://")) or \
+            (h == "gcloud" and pos[:1] == ["storage"] and pos[1:2] and pos[1] in ("cp", "rsync", "mv")
+             and pos[-1].startswith("gs://")):
+        return "uploads files to a cloud bucket", pos[-1][5:].split("/")[0].lower()
+    if h == "az" and pos[:2] == ["storage", "blob"] and pos[2:3] and pos[2].startswith("upload"):
+        m = re.search(r"--account-name[=\s]+(\S+)", w)
+        return "uploads files to cloud storage", m.group(1).lower() if m else None
+    return None
+
+
+def publish(c):
+    conf = cfg()
+    if not conf:
+        return
+    for seg, _ in E.statements(c):
+        hit = _publish_what(E._cmd_toks(seg))
+        if not hit:
+            continue
+        what, host = hit
+        if host and (_local(host) or _allowed(host, conf, "upload_hosts")):
+            continue
+        E.ask(f"This {what}" + (f" ({host})" if host else "") + ": it leaves this machine and others can see it. "
+              "Approve only if you meant to and your organisation allows it.", "publish-confirm", seg[:160])
 
 
 # ── outbound sends ───────────────────────────────────────────────────────────────────────────────────────────
@@ -611,4 +686,4 @@ def tls_verify_off(c):
                     "cafile <bundle>. Your IT team publishes the bundle.", "tls-verify-off", m.group(0))
 
 
-SHELL = (public_repo, remotes, uploads, tls_verify_off, send)
+SHELL = (public_repo, remotes, uploads, publish, tls_verify_off, send)

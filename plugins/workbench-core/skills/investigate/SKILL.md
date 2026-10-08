@@ -3,7 +3,7 @@ name: investigate
 description: "Systematic debugging with no fix before a proven root cause. Use for 'debug this', 'why is this broken', 'investigate this error', 'root cause', a stack trace, a flaky test or unexpected behaviour. For a multi-file fix after the cause is known, hand over to the cascade skill."
 ---
 
-# /investigate
+# /workbench-core:investigate
 
 The rule: **no fix without a root cause you can demonstrate.** A report names a symptom. The fix
 goes where the cause is, usually in a function every caller shares, not in the one path the report

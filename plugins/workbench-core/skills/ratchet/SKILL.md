@@ -1,9 +1,9 @@
 ---
 name: ratchet
-description: "Keep fixing and re-auditing a target in rounds until two consecutive rounds find nothing new. Use for /ratchet, 'keep going until it's clean', 'find everything', 'don't stop at the first pass', 'harden this properly', or when work was declared done too early. Each round hunts for NEW defects, fixes them, locks each fix behind a test proven to fail without it, and re-verifies. Not for a single known bug or a quick question."
+description: "Keep fixing and re-auditing a target in rounds until two consecutive rounds find nothing new. Use for /workbench-core:ratchet, 'keep going until it's clean', 'find everything', 'don't stop at the first pass', 'harden this properly', or when work was declared done too early. Each round hunts for NEW defects, fixes them, locks each fix behind a test proven to fail without it, and re-verifies. Not for a single known bug or a quick question."
 ---
 
-# /ratchet: fix, re-hunt, repeat until dry
+# /workbench-core:ratchet: fix, re-hunt, repeat until dry
 
 A ratchet only turns one way: each round locks in progress and never reopens covered ground. It
 kills *stopping too early*: the fixes themselves open a new layer nobody re-hunts. The loop runs
@@ -11,7 +11,7 @@ until two consecutive rounds find nothing new, and the confirming round must loo
 eyes (see DECIDE).
 
 ## Invocation
-`/ratchet <target>`, for example `/ratchet this repo's auth` or `/ratchet the deploy pipeline`.
+`/workbench-core:ratchet <target>`, for example `/workbench-core:ratchet this repo's auth`.
 Flags: `--rounds N` hard cap (default: until dry) · `--dry N` consecutive empty rounds to stop
 (default 2) · `--agents N` auditors per round (default 3).
 

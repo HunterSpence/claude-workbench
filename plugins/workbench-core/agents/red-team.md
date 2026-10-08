@@ -24,6 +24,8 @@ sessions; `model:` and `color:` make that structural. Do not build the fix: name
 - Facts: the knowledge base, per `rules/memory-protocol.md`: the domain's `HOT.md` and
   `_shared/HOT.md` first, then the `save` skill's search for anything deeper.
 - Model and effort above are defaults. Your organisation's model and effort limits win.
+- Judgment fallback: `judgment.md` in the core's "Read on demand" list (open it on a trigger,
+  never preload it).
 
 ## Return contract
 First line: `Model: <the exact model id you are running as>`, so a fallback is visible

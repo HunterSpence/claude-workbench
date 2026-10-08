@@ -3,7 +3,7 @@ name: spawn
 description: "Action card for any Agent() call: pick the agent, then write a prompt the subagent can execute without your context. Use before delegating anything, especially work that depends on project knowledge, hosts, money or anything the subagent cannot see."
 ---
 
-# /spawn: action card
+# /workbench-core:spawn: action card
 
 **0.** Think-then-build (fix, build, refactor, migrate)? Load the `cascade` skill first; it runs the phases.
 

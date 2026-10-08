@@ -5,6 +5,9 @@
   python fetch_upstream.py --apply                 download, verify every SHA-256, then install
   python fetch_upstream.py --apply --only humanizer,impeccable
   python fetch_upstream.py --apply --force         replace existing folders (old ones are moved to a backup dir)
+  python fetch_upstream.py --optional [--apply]    also the optional design set (gstack design-review/qa/diagram,
+                                                   impeccable, web-design-guidelines): NOT recommended on a managed
+                                                   laptop, read THIRD-PARTY.md first
 
 Reads upstream.lock.json next to this file: every file has a fixed URL (a commit or a published
 package version) and a SHA-256. A source is installed only if ALL its files verify; nothing is
@@ -113,9 +116,17 @@ def main(argv=None):
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--skills-dir", default=os.path.join(config_dir(), "skills"))
     ap.add_argument("--lock", default=os.path.join(HERE, "upstream.lock.json"))
+    ap.add_argument("--optional", action="store_true",
+                    help="add upstream.optional.lock.json (runtime downloads and local usage logs; see THIRD-PARTY.md)")
     a = ap.parse_args(argv)
     with open(a.lock, encoding="utf-8") as f:
         lock = json.load(f)
+    if a.optional:
+        with open(os.path.join(HERE, "upstream.optional.lock.json"), encoding="utf-8") as f:
+            opt = json.load(f)
+        print("OPTIONAL SET: " + opt.get("_readme", ""))
+        lock = dict(lock, sources=lock["sources"] + [s for s in opt["sources"]
+                                                    if s["id"] not in {x["id"] for x in lock["sources"]}])
     res = fetch(lock, a.skills_dir, a.apply, set(a.only.split(",")) if a.only else None, a.force)
     return 1 if any(v.startswith(("failed", "refused")) for v in res.values()) else 0
 

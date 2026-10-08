@@ -315,6 +315,7 @@ def _inert(seg):
     string, no sed -i)."""
     h = _head(seg)
     if h not in _INERT or (h == "sed" and re.search(r"\s-\w*i\b|--in-place", seg)) or \
+            (h == "rg" and re.search(r"\s--pre(?:-glob)?(?:=|\s|$)", seg)) or \
             (h == "git" and re.search(r"\s(?:-x|--exec(?:=|\s)|foreach|filter-branch|bisect\s+run)", seg)):
         return False
     return not re.search(r"\$\(|`", seg) and not re.search(r"(?<![<>=&\d-])>>?", seg)
@@ -740,6 +741,88 @@ def blank_data(text, ps=False):
     return _DATA_ARG.sub(blank, text)
 
 
+# ── the raw view: everything a command could execute, minus what is provably prose ───────────────────────────
+# Rules that must not miss a push or a force-push judge BOTH the prose-blanked statements (statements()) and this
+# view. statements() blanks every quoted string a known runner does not execute, which also blanks code handed to
+# python -c / node -e and the like; this view keeps all of it and blanks only arguments that provably never run:
+# echo / printf / grep-family arguments (no substitution, not piped onward, not redirected into a file this command
+# executes), git commit / tag messages, gh pr|issue create titles and bodies, journal lines, and cat/tee heredocs to
+# a file nothing here runs. Interpreter and shell payloads are never blanked. A pwsh -EncodedCommand payload is
+# decoded and appended.
+_PROSE_HEADS = {"echo", "printf", "grep", "egrep", "fgrep", "rg", "findstr", "select-string", "sls", "write-host",
+                "write-output"}
+_GIT_MSG = re.compile(r"""((?:\s-[A-Za-z]*m|\s--message)(?:=|\s+))("(?:\\.|[^"\\])*"|'[^']*')""")
+_GH_TEXT = re.compile(r"""((?:\s--title|\s-t|\s--body|\s-b)(?:=|\s+))("(?:\\.|[^"\\])*"|'[^']*')""")
+_PWSH = re.compile(r"(?i)(?<![\w.-])(?:pwsh|powershell)(?:\.exe)?[\"']?(?=\s|$)")
+
+
+def _enc_switch(tok):
+    """True for a pwsh switch that means -EncodedCommand: any prefix of it (or of -EncodedArguments), or -ec, with a
+    -, -- or / prefix."""
+    name = re.sub(r"^(?:--|-|/)", "", tok).split(":", 1)[0].lower()
+    return bool(name) and tok[:1] in "-/" and ("encodedcommand".startswith(name) or "encodedarguments".startswith(name)
+                                               or name == "ec")
+
+
+def encoded_commands(text):
+    """[decoded text, or None when it cannot be resolved] for every encoded-command switch in every pwsh / powershell
+    argument list in text. Decoding follows .NET: strict base64, then UTF-16LE with replacement (odd length is fine)."""
+    import base64
+    out = []
+    for m in _PWSH.finditer(text):
+        toks = [t.strip("\"'") for t in re.split(r"\s+", re.split(r"[;|&\n]", text[m.end():], maxsplit=1)[0].strip()) if t]
+        for i, t in enumerate(toks):
+            if not _enc_switch(t):
+                continue
+            val = t.split(":", 1)[1] if ":" in t else (toks[i + 1] if i + 1 < len(toks) else "")
+            try:
+                out.append(base64.b64decode(val, validate=True).decode("utf-16-le", errors="replace") if val else None)
+            except ValueError:
+                out.append(None)
+    return out
+
+
+def _raw_body(c):
+    """The raw command minus provable prose (see raw_view)."""
+    text = blank_data(c.doc, c.ps)
+    w = _walk(text, c.ps)
+    bounds = [(a, b) for a, b in w.bounds if text[a:b].strip()]
+    segs = [(text[a:b], {os.path.basename(f.strip("\"'")) for f in _fs_wtargets(text[a:b])}, _head(text[a:b]))
+            for a, b in bounds]
+    edits = []
+    for a, b in bounds:
+        seg, h = text[a:b], _head(text[a:b])
+        if re.search(r"\$\(|`|<\(", seg):
+            continue                                   # a substitution runs: keep it all
+        if h in _PROSE_HEADS and not (h == "rg" and re.search(r"\s--pre(?:-glob)?(?:=|\s|$)", seg)) \
+                and not (h == "printf" and re.search(r"(?<![\w-])-v(?![\w-])", seg)):   # rg --pre runs a program
+            nxt = text[b:b + 3].lstrip(" \t")
+            targets = [f.strip("\"'") for f in _fs_wtargets(seg)]
+            if (nxt.startswith("|") and not nxt.startswith("||")) or (targets and _ran(targets, segs, text)):
+                continue                               # piped onward, or written to a file this command runs
+            edits.append((a, b, h))
+        elif h == "git" and re.search(r"(?<![\w.-])git\s+(?:commit|tag)\b", seg):
+            edits.append((a, b, _GIT_MSG.sub(r'\1""', seg)))
+        elif h == "gh" and re.search(r"(?<![\w.-])gh\s+(?:pr|issue)\s+create\b", seg):
+            edits.append((a, b, _GH_TEXT.sub(r'\1""', seg)))
+    out, last = [], 0
+    for a, b, rep in edits:
+        out += [text[last:a], rep]
+        last = b
+    return "".join(out) + text[last:]
+
+
+def live_encoded(c):
+    """encoded_commands over the prose-blanked view: a commit message or echo that names `pwsh -ec` runs nothing."""
+    return encoded_commands(_raw_body(c))
+
+
+def raw_view(c):
+    view = _raw_body(c)
+    dec = [d for d in encoded_commands(view) if d]
+    return view + ("\n" + "\n".join(dec) if dec else "")
+
+
 # ── git config values: git runs many of them as shell (-c, `git config`, GIT_CONFIG_PARAMETERS, GIT_CONFIG_KEY_n /
 # VALUE_n, the GIT_* exec env). Normalise all to (key, value); rules scan every value except identity / color keys.
 GIT_NONEXEC = re.compile(r"(?ix)^(?:(?:user|author|committer)\.|color(?:\.|$))")
@@ -808,6 +891,8 @@ def git_config_pairs(cmd, ps=False):
 WRITE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 READ_TOOLS = ("Read", "Grep", "Glob")
 OTHER_TOOLS = ("WebFetch", "Agent")
+# Browser MCP servers (playwright, chrome-devtools, puppeteer, plugin-namespaced ones): their URL inputs go to TOOL rules.
+BROWSER_MCP = re.compile(r"mcp__.*([Pp]laywright|[Cc]hrome|[Pp]uppeteer|[Bb]rowser).*")
 _RM_HEADS = {"rm", "rmdir", "remove-item", "ri", "rd", "del", "erase", "unlink", "mv", "move-item", "rename-item"}
 _KIT_RAW = re.compile(r"(?i)(?:^|[/\\])\.claude[/\\]+(?:settings(?:\.local)?\.json$|workbench(?:[/\\]|$)|"
                       r"plugins[/\\].*workbench)")
@@ -1029,7 +1114,7 @@ def _evaluate(data):
         shell_checks(cmd, data, packs)
         if tool == "Bash":
             _bash_mechanics(cmd)
-    elif tool in WRITE_TOOLS + READ_TOOLS + OTHER_TOOLS:
+    elif tool in WRITE_TOOLS + READ_TOOLS + OTHER_TOOLS or BROWSER_MCP.fullmatch(tool):
         path = _tool_path(ti, cwd) if tool not in OTHER_TOOLS else ""
         c = SimpleNamespace(tool=tool, ti=ti, data=data, cwd=cwd, path=path, packs=packs)
         if tool in WRITE_TOOLS:

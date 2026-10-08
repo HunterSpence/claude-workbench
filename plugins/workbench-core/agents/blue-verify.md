@@ -13,6 +13,8 @@ Role: **BLUE** (build/verify). The final pass of any build/attack/verify run is 
 - Read-only by design: a gate that can edit is not a gate. Findings ship as file:line plus a
   proposed diff; the caller applies them.
 - Blast radius: graph tools before grep sweeps, per `rules/code-graph.md`.
+- Review volume that needs no conversation (many files, many candidates to score) goes through the
+  `batch-review` skill, if your organisation provides its API key.
 - Removing a real constraint is not the same as removing the binding one: say which. Every finding
   carries a mechanism; "looks wrong" is not a finding.
 - **Test the test before accepting ANY result, pass or null:** positive control reproduced, the
@@ -26,6 +28,8 @@ Role: **BLUE** (build/verify). The final pass of any build/attack/verify run is 
 - Facts: the knowledge base, per `rules/memory-protocol.md`: the domain's `HOT.md` and
   `_shared/HOT.md` first, then the `save` skill's search for anything deeper.
 - Model and effort above are defaults. Your organisation's model and effort limits win.
+- Judgment fallback: `judgment.md` in the core's "Read on demand" list (open it on a trigger,
+  never preload it).
 
 ## Return contract
 First line: `Model: <the exact model id you are running as>`, so a fallback is visible

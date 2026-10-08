@@ -104,7 +104,7 @@ def demote(domain, match, leave_link=False, dry_run=False, force=False):
 
 
 def over_cap():
-    """kb_audit.audit()'s verdict (LF bytes, the /save gate's measurement) + candidate lines to demote."""
+    """kb_audit.audit()'s verdict (LF bytes, the /workbench-kb:save gate's measurement) + candidate lines to demote."""
     out = []
     for r in kb_audit.audit():
         if not r.get("hot_warn"):

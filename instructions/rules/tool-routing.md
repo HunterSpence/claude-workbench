@@ -6,8 +6,9 @@ missing capability: say so and let the user fix it; never silently route around 
 
 ## By task
 - **Web research:** native WebSearch and WebFetch; long-form or comparison research goes to the
-  `researcher` agent or the bundled `/deep-research`. A 403 is not "unreadable": say which fetcher
-  failed. A bot wall or captcha is a stop: hand it to the user.
+  `researcher` agent or `/workbench-core:deep-research`. A 403 is not "unreadable": say which fetcher
+  failed. A bot wall or captcha is a stop: hand it to the user. WebSearch is one per-session
+  budget shared with every subagent: plan research fan-outs around it.
 - **Work documents:** let OneDrive sync the library, then search a scoped, locally kept folder with
   the `doc-index` skill and cite the originals.
 - **Office output:** `office-pptx` and `office-xlsx` build files; `office-render` renders them so
@@ -20,20 +21,28 @@ missing capability: say so and let the user fix it; never silently route around 
   `claude-api` skill, never memory.
 - **Code graph:** `rules/code-graph.md`.
 - **Databases:** read-only queries unless the user asks otherwise; production writes are a Red Line.
-- **Servers:** ssh as the least-privileged user that can do the job. Never ask the user to ssh for you.
-- **Reports** (deep research, comparisons, analyses meant for someone else): write them to a file
-  in the workspace and say where it is. A shareable page (an Artifact) is only for your own
-  organisation's data, never another tenant's, and only when the user asks for one; the user
-  decides who it is shared with.
+- **Servers:** ssh as the least-privileged user that can do the job; an admin or root login is
+  break-glass, so say why first. Never ask the user to ssh for you.
+- **Reports** (deep research, comparisons, analyses meant for someone else): an Artifact link when
+  your organisation's Claude offers Artifacts, for your own organisation's data only, never another
+  tenant's; the user decides who sees it. Otherwise a Markdown file in the workspace, with its path.
 - **Browser:** `rules/browser.md`.
 - **Review:** the bundled `/code-review` for correctness, `/security-review` for the branch's
   security diff, `/simplify` for cleanup.
 
-## Skills, by exact name (use them when the task fits, unasked)
-`cascade` (fix, build, refactor, migrate) · `ratchet` (fix and re-audit until clean) · `handoff` · `spawn` (write a delegation prompt) · `investigate` · `cleanup` ·
-`brain-audit` (KB health) · `deep-research` · `github` · `skill-scan` · `doc-index` ·
-`office-pptx` · `office-xlsx` · `office-render` · `save` (KB). If one isn't installed, say so and do
-the task without it.
+## Skills (use them when the task fits, unasked; invoke as `/workbench-core:<name>`, the KB's as `/workbench-kb:save`)
+`cascade` (fix, build, refactor, migrate) · `ratchet` (fix and re-audit until clean) · `handoff` ·
+`onboard` (fill in USER.md; suggest it when USER.md still holds placeholders) · `spawn` (write a
+delegation prompt) · `investigate` · `cleanup` · `brain-audit` (setup and KB
+health) · `deep-research` · `github` · `skill-scan` · `doc-index` · `office-pptx` · `office-xlsx` ·
+`office-docx` · `office-render` · `ui-build` · `draft-reply` · `batch-review` ·
+`repo-fix` (review and fix a repository) · `linux-service-triage` · `ctx-agent-history-search` (what
+earlier sessions decided) · `mcp-heal` ·
+`save` (KB). If one isn't installed, say so and do the task without it.
+- `vdi-drive`, `pc-checkup` and `cleanup` are user-invoked only: suggest
+  `/workbench-core:<name>`, never start them.
+- **Before installing any plugin or skill:** check your organisation allows it, and run
+  `skill-scan` on its source first.
 
 ## MCP servers
 - **No personal MCP servers** on the work machine, and nothing that sends work data to a

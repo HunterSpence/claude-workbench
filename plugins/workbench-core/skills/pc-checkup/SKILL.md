@@ -1,6 +1,6 @@
 ---
 name: pc-checkup
-description: Read-only health check of this Windows PC - blue screens, crashes and freezes, hardware and disk errors, disk and battery wear, broken drivers, memory pressure, startup load - then a ranked list of problems and who should fix each. Run only when the user asks for it ("/pc-checkup", "check this computer", "why is my laptop crashing").
+description: Read-only health check of this Windows PC - blue screens, crashes and freezes, hardware and disk errors, disk and battery wear, broken drivers, memory pressure, startup load - then a ranked list of problems and who should fix each. Run only when the user asks for it ("/workbench-core:pc-checkup", "check this computer", "why is my laptop crashing").
 disable-model-invocation: true
 ---
 

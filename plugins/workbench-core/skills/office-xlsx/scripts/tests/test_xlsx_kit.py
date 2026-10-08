@@ -67,6 +67,74 @@ class XlsxKitTest(unittest.TestCase):
         self.assertLess(ps.index("AutomationSecurity = 3"), ps.index(".Open("))
         self.assertIn("Workbooks.Open($env:XLSX_IN, 0, $true)", ps)       # read-only
 
+    def test_xlfn_prefix(self):
+        f = self.k.prefix_formula
+        self.assertEqual(f("=XLOOKUP(A2,B:B,C:C)"), ("=_xlfn.XLOOKUP(A2,B:B,C:C)", None))
+        self.assertEqual(f("=filter(A2:A9, B2:B9>1)")[0], "=_xlfn._xlws.FILTER(A2:A9, B2:B9>1)")
+        self.assertEqual(f("=SORTBY(A2:A9,B2:B9)")[0], "=_xlfn.SORTBY(A2:A9,B2:B9)")
+        self.assertEqual(f("=STDEV.S(A1:A5)+COUNTIFS(A:A,1)")[0], "=_xlfn.STDEV.S(A1:A5)+COUNTIFS(A:A,1)")
+        for same in ('="XLOOKUP(" & A1', "=_xlfn.XLOOKUP(A2,B:B,C:C)", "=SUM(A1:A3)", "plain text", 42):
+            self.assertEqual(f(same), (same, None))
+        new, warn = f("=LET(x, A1, x*2)")
+        self.assertEqual(new, "=LET(x, A1, x*2)")
+        self.assertIn("_xlpm.", warn)
+        from openpyxl import load_workbook
+        wb = load_workbook(self.path)
+        wb["Model"]["G2"] = "=XLOOKUP(A2,A2:A5,D2:D5)"
+        wb["Model"]["G3"] = "=LAMBDA(x,x+1)(2)"
+        wb.save(self.path)
+        self.assertIn(("xlfn", "Model", "G2"), {(p["kind"], p["sheet"], p["cell"]) for p in self.k.check(self.path)})
+        warnings = self.k.prefix_new_functions(wb)
+        self.assertEqual(wb["Model"]["G2"].value, "=_xlfn.XLOOKUP(A2,A2:A5,D2:D5)")
+        self.assertEqual([c for c, _ in warnings], ["Model!G3"])
+
+    def _inject(self, path, parts):
+        import zipfile
+        with zipfile.ZipFile(path, "a") as z:
+            for name, data in parts.items():
+                z.writestr(name, data)
+
+    def test_roundtrip_loss_warns_and_style_refuses(self):
+        self.assertEqual(self.k.roundtrip_loss(self.path), [])
+        self._inject(self.path, {
+            "xl/drawings/drawing9.xml": '<xdr:wsDr xmlns:xdr="x"><xdr:twoCellAnchor><xdr:sp><x/></xdr:sp></xdr:twoCellAnchor></xdr:wsDr>',
+            "xl/threadedComments/threadedComment1.xml": "<ThreadedComments/>",
+            "xl/pivotTables/pivotTable1.xml": "<pivotTableDefinition/>"})
+        lost = {k for k, _, _ in self.k.roundtrip_loss(self.path)}
+        self.assertTrue({"drawings", "shapes", "threaded comments", "pivot tables"} <= lost, lost)
+        before = open(self.path, "rb").read()
+        self.assertEqual(self.k.main(["style", self.path]), 3)
+        self.assertEqual(open(self.path, "rb").read(), before, "nothing written when parts would be lost")
+        self.assertEqual(self.k.main(["style", self.path, "--accept-loss"]), 3, "--accept-loss needs --out")
+        out = os.path.join(self.d, "styled.xlsx")
+        self.assertEqual(self.k.main(["style", self.path, "--accept-loss", "--out", out]), 0)
+        self.assertTrue(os.path.exists(out))
+        self.assertEqual(self.k.main(["risk", self.path]), 3)
+
+    def test_openpyxl_charts_comments_images_survive(self):
+        from openpyxl import Workbook
+        from openpyxl.chart import BarChart, Reference
+        from openpyxl.comments import Comment
+        wb = Workbook()
+        ws = wb.active
+        for r in (["k", "v"], ["a", 1], ["b", 2]):
+            ws.append(r)
+        ws["B2"].comment = Comment("note", "me")
+        ch = BarChart()
+        ch.add_data(Reference(ws, min_col=2, min_row=1, max_row=3), titles_from_data=True)
+        ws.add_chart(ch, "D2")
+        if importlib.util.find_spec("PIL"):
+            from PIL import Image as PILImage
+            from openpyxl.drawing.image import Image
+            png = os.path.join(self.d, "p.png")
+            PILImage.new("RGB", (20, 20)).save(png)
+            ws.add_image(Image(png), "D20")
+        p = os.path.join(self.d, "kept.xlsx")
+        wb.save(p)
+        inv = self.k.inventory(p)
+        self.assertEqual((inv["charts"], inv["comments"]), (1, 1))
+        self.assertEqual(self.k.roundtrip_loss(p), [], "no false alarm on parts openpyxl keeps")
+
     @unittest.skipUnless(COM, "set OFFICE_COM_TESTS=1 on Windows with Excel")
     def test_excel_recalc_finds_real_errors(self):
         self.assertEqual(self.k.recalc(self.path, "excel"), "excel")

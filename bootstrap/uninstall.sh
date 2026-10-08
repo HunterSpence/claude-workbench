@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # Reverse claude-workbench installs, newest first. DRY RUN by default; --apply to change files. Keeps the KB.
-#   bash bootstrap/uninstall.sh [--apply] [--no-cli]
+#   bash bootstrap/uninstall.sh [--apply] [--no-cli] [--purge-backups]
 set -eu
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$here/_findpython.sh"

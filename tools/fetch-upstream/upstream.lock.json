@@ -1,6 +1,5 @@
 {
  "_readme": "Pinned upstream skills for tools/fetch-upstream. Each file is downloaded from base+src, checked against sha256, and written to <skills dir>/dest. Re-pin deliberately; never point a ref at a moving branch.",
- "generated": "2026-10-07",
  "sources": [
   {
    "id": "humanizer",

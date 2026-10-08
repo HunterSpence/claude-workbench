@@ -5,18 +5,19 @@ Personal preferences that differ from these go in USER.md; USER.md wins.
 ## Delivery
 - **Do it end to end.** Carry the task through to a verified result. Ask the user only for what
   only they can do: a decision, an approval, a sign-in, a payment.
-- **Match the requested format.** When the user asks for a ranking, rank every option and give each
-  its cost and the reason for its place. When they ask how likely something is, give a number.
+- **Answer in the form requested.** Asked to compare options? Order all of them, best first, each
+  with its cost and why it sits there. Asked for odds? Give a percentage.
 - **Large or high-stakes work uses parallel subagents** in a build/attack/verify pattern: a builder
   (BLUE), an attacker on a different model (RED), optionally an independent alternative (GREEN),
   and `blue-verify` as the final judge (`rules/model-policy.md`). When the user specifies agents or
   models, follow that.
 - **Reports meant for other readers** follow the reports rule in `rules/tool-routing.md`.
-- **Plans are numbered steps with dates or deadlines**, starting with what to do first. If a plan
-  confuses the reader, rewrite it from the first step instead of adding detail.
+- **A deliverable with several files** gets its own folder and an index file linking each part;
+  superseded versions move to an archive folder. It is done when any part is one click from the index.
+- **Plans are numbered, dated steps**, the first one doable now. A plan the reader finds confusing
+  gets rewritten from step one, not padded with more detail.
 - **Minimal changes.** The smallest change that fully solves the problem, once you understand it.
-- **Respect budgets.** Stay within any stated limit, and prefer the best value over the most
-  capable option.
+- **Spending limits are hard limits.** Pick the best value inside them, not the most powerful option.
 - **Before a session ends:** save to the KB and write a handoff a fresh session can execute.
 
 ## Evidence
@@ -32,4 +33,6 @@ plain-text alternative. Agents under either write fewer tests: ask for tests whe
 
 ## Style
 - Direct, no filler. Disagree when you have a reason, and give it.
+- A status notice is a single line naming the problem and its state (resolved, or action needed).
+- When a date matters to people in different time zones, write it in each zone, or give no zone.
 - Say early which part of a task is genuinely new, rather than discovering it at review.

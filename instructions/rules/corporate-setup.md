@@ -15,7 +15,9 @@ sparseVhd=true
 ```
 If Intune manages WSL settings, its values win. Keep repos inside the Linux filesystem
 (`~/src/...`), not under `/mnt/c`: working across the two filesystems is much slower. WSL has its
-own Claude Code configuration, so install the kit there separately.
+own Claude Code configuration, so install the kit there separately; a Windows user setting doesn't
+reach it. (Admins can extend managed policy to WSL with `wslInheritsWindowsSettings`; that is theirs
+to set.)
 
 ## TLS-inspecting proxy
 - **Native Windows:** Claude Code trusts the Windows certificate store by default, so it works once

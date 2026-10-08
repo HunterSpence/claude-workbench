@@ -73,6 +73,22 @@ class FetchTest(unittest.TestCase):
                 self.assertEqual(len(sha), 64)
                 fu.safe_dest(self.skills, dest)
 
+    def test_optional_flag_adds_the_design_set_dry_run(self):
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(fu.main(["--optional", "--skills-dir", self.skills]), 0)
+        out = buf.getvalue()
+        self.assertIn("OPTIONAL SET: NOT RECOMMENDED", out)
+        for sid in ("humanizer", "playwright-cli", "impeccable", "gstack", "web-design-guidelines"):
+            self.assertIn(f"PLAN    {sid} ", out)
+        self.assertEqual(os.listdir(self.skills) if os.path.exists(self.skills) else [], [], "dry run writes nothing")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            fu.main(["--skills-dir", self.skills])
+        self.assertNotIn("gstack", buf.getvalue(), "without --optional the design set stays out")
+
 
 if __name__ == "__main__":
     unittest.main()

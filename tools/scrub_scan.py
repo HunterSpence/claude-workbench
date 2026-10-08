@@ -3,9 +3,12 @@
 
   python tools/scrub_scan.py [PATH ...] [--denylist FILE] [--report SCRUB-REPORT.md] [--root DIR]
 
-Scans text files under the given paths (default: the repository root): in a git work tree the files `git ls-files`
-names (tracked plus untracked-not-ignored), elsewhere a walk that skips .git, caches and virtualenvs; binary files are
-skipped either way. Two rule sets:
+Scans text files under the given paths (default: the repository root): in a git work tree EVERY file `git ls-files`
+names (tracked plus untracked-not-ignored: what would be published, build/ and dist/ included), elsewhere a walk that
+skips .git, caches, virtualenvs and build output. Office files (.docx/.pptx/.xlsx and their macro and template
+variants) are scanned through their metadata parts (docProps/core.xml, app.xml, custom.xml) and PNG files through
+their tEXt/zTXt/iTXt chunks. Every skipped file is printed with its reason. The scan FAILS (exit 1) when it scanned
+no file, or when it skipped a binary or NUL-containing file, unless --allow-binary. Two rule sets:
   built-in (G*)  G1 e-mail addresses (example.com/.org/.net, *.example, *.test, *.invalid, localhost and the
                     git@ SSH user are fine)
                  G2 IPv4 addresses (the RFC 5737 documentation ranges, loopback, the unspecified and broadcast
@@ -15,6 +18,8 @@ skipped either way. Two rule sets:
                  G4 phone numbers
                  G5 double-bracket wiki links (a personal knowledge-base link)
                  G6 credential shapes (the workbench secret scanner's patterns)
+                 G7 author metadata in an Office file or PNG (creator, last modified by, company, manager, Author):
+                    any value except a generator's default (python-docx, openpyxl, ...)
   denylist (D*)  --denylist FILE or the WORKBENCH_DENYLIST environment variable. One term per line, matched
                  case-insensitively wherever it is not glued to another letter or digit: `_`, `-`, `.` and a camelCase
                  step are boundaries, so foo_term_bar and fooTerm match and footerm does not. A line starting with `re:`
@@ -29,8 +34,12 @@ import argparse
 import ipaddress
 import os
 import re
+import struct
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
+import zipfile
+import zlib
 from collections import Counter
 from pathlib import Path
 
@@ -39,6 +48,10 @@ SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv", ".mypy_cach
 BINARY_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".zip", ".gz", ".tgz", ".7z", ".exe", ".dll",
               ".so", ".dylib", ".pyc", ".db", ".sqlite", ".woff", ".woff2", ".ttf", ".otf", ".docx", ".xlsx", ".pptx"}
 ALLOW = re.compile(r"scrub-ok:\s*\S")
+OOXML_EXT = {".docx", ".docm", ".dotx", ".dotm", ".pptx", ".pptm", ".potx", ".potm", ".xlsx", ".xlsm", ".xltx", ".xltm"}
+OOXML_PARTS = ("docProps/core.xml", "docProps/app.xml", "docProps/custom.xml")
+AUTHOR_FIELDS = {"creator", "lastmodifiedby", "company", "manager", "author"}
+GENERATOR_DEFAULTS = {"", "python-docx", "python-pptx", "openpyxl", "microsoft office user", "un-named", "unknown"}
 
 _EMAIL = re.compile(r"(?<![\w.+-])[\w.+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,})(?![\w-])")  # alphabetic TLD, so npm pins like pkg@1.2.3 are not e-mail
 _SAFE_MAIL = re.compile(r"(?i)(?:^|\.)(?:example\.(?:com|org|net)|example|test|invalid|localhost)$")
@@ -121,25 +134,81 @@ def git_files(d):
     return sorted({Path(d) / f for f in r.stdout.decode("utf-8", "replace").split("\0") if f})
 
 
-def iter_files(paths, skip):
+def iter_files(paths, skip, skipped=None):
+    """Files to scan. skipped (a list) receives (path, reason) for each file left out on purpose."""
+    skipped = [] if skipped is None else skipped
     for p in paths:
         p = Path(p)
         if p.is_file():
             yield p
             continue
         listed = git_files(p)
-        if listed is not None:
+        if listed is not None:   # what git would publish: no directory is skipped
             for fp in listed:
-                if fp.is_file() and fp.suffix.lower() not in BINARY_EXT and fp.resolve() not in skip and \
-                        not SKIP_DIRS & set(fp.relative_to(p).parts[:-1]):
+                if not fp.is_file():
+                    continue
+                if fp.resolve() in skip:
+                    skipped.append((fp, "excluded (the report or the denylist)"))
+                else:
                     yield fp
             continue
         for dirpath, dirs, files in os.walk(p):
+            for d in sorted(x for x in dirs if x in SKIP_DIRS):
+                skipped.append((Path(dirpath) / d, "directory skipped outside git (.git, caches, build output)"))
             dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
             for f in sorted(files):
                 fp = Path(dirpath) / f
-                if fp.suffix.lower() not in BINARY_EXT and fp.resolve() not in skip:
+                if fp.resolve() in skip:
+                    skipped.append((fp, "excluded (the report or the denylist)"))
+                else:
                     yield fp
+
+
+def _xml_lines(data):
+    """[(field, value)] for every element with text in an XML part."""
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError:
+        return [("unparseable", data.decode("utf-8", "replace")[:2000])]
+    return [(el.tag.rsplit("}", 1)[-1], el.text.strip()) for el in root.iter() if el.text and el.text.strip()]
+
+
+def ooxml_fields(fp):
+    """[(part, field, value)] from an Office file's metadata parts; raises on a broken zip."""
+    out = []
+    with zipfile.ZipFile(fp) as z:
+        names = set(z.namelist())
+        for part in OOXML_PARTS:
+            if part in names:
+                out += [(part, f, v) for f, v in _xml_lines(z.read(part))]
+    return out
+
+
+def png_fields(fp):
+    """[(chunk, keyword, text)] from a PNG's tEXt / zTXt / iTXt chunks; raises when it is not a PNG."""
+    b = Path(fp).read_bytes()
+    if not b.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise ValueError("not a PNG")
+    out, i = [], 8
+    while i + 8 <= len(b):
+        n, kind = struct.unpack(">I4s", b[i:i + 8])
+        data = b[i + 8:i + 8 + n]
+        i += 12 + n
+        if kind == b"tEXt":
+            k, _, t = data.partition(b"\0")
+            out.append(("tEXt", k.decode("latin-1"), t.decode("latin-1")))
+        elif kind == b"zTXt":
+            k, _, rest = data.partition(b"\0")
+            out.append(("zTXt", k.decode("latin-1"), zlib.decompress(rest[1:]).decode("latin-1", "replace")))
+        elif kind == b"iTXt":
+            k, _, rest = data.partition(b"\0")
+            comp, rest = rest[0], rest[2:]
+            _lang, _, rest = rest.partition(b"\0")
+            _tk, _, t = rest.partition(b"\0")
+            out.append(("iTXt", k.decode("latin-1"), (zlib.decompress(t) if comp else t).decode("utf-8", "replace")))
+        elif kind == b"IEND":
+            break
+    return out
 
 
 def read_text(fp):
@@ -152,21 +221,51 @@ def read_text(fp):
     return b.decode("utf-8", errors="replace")
 
 
-def scan(paths, root, deny_rules, skip=()):
+def _meta_hits(rel, fields, scan_secrets, deny_rules):
+    """Hits in (where, field, value) metadata: every value through every rule, plus G7 for author fields."""
+    hits = []
+    for n, (where, field, value) in enumerate(fields, 1):
+        loc = f"{rel}!{where}"
+        if field.lower() in AUTHOR_FIELDS and value.strip().lower() not in GENERATOR_DEFAULTS:
+            hits.append((loc, n, "G7", False, f"{field} is set"))
+        if where.startswith("iTXt") and re.search(r"<dc:creator>\s*<rdf:Seq>\s*<rdf:li[^>]*>\s*[^<\s]", value):
+            hits.append((loc, n, "G7", False, "XMP dc:creator is set"))
+        line = f"{field}: {value}"
+        hits += [(loc, n, rule, False, line[a:b]) for rule, a, b in generic_hits(line, scan_secrets)]
+        hits += [(loc, n, rule, False, None) for rule, rx in deny_rules if rx.search(line)]
+    return hits
+
+
+def scan(paths, root, deny_rules, skip=(), skipped=None):
     """-> (files scanned, hits). A hit is (path, line, rule, allowed, shown text) where shown text is the match for a
-    built-in rule and None for a denylist rule."""
+    built-in rule and None for a denylist rule. skipped (a list) receives (path, reason) for every file not scanned."""
     scan_secrets = _secret_patterns(root)
     hits, nfiles = [], 0
+    skipped = [] if skipped is None else skipped
     skip = {Path(s).resolve() for s in skip}
-    for fp in iter_files(paths, skip):
-        text = read_text(fp)
-        if text is None:
-            continue
-        nfiles += 1
+    for fp in iter_files(paths, skip, skipped):
         try:
             rel = fp.resolve().relative_to(root.resolve()).as_posix()
         except ValueError:
             rel = fp.as_posix()
+        ext = fp.suffix.lower()
+        if ext in OOXML_EXT or ext == ".png":
+            try:
+                fields = ooxml_fields(fp) if ext in OOXML_EXT else [(f"{c}:{k}", k, t) for c, k, t in png_fields(fp)]
+            except (OSError, ValueError, zipfile.BadZipFile, zlib.error, struct.error) as e:
+                skipped.append((fp, f"binary: unreadable {ext} ({type(e).__name__})"))
+                continue
+            nfiles += 1
+            hits += _meta_hits(rel, fields, scan_secrets, deny_rules)
+            continue
+        if ext in BINARY_EXT:
+            skipped.append((fp, f"binary: {ext} is not scanned"))
+            continue
+        text = read_text(fp)
+        if text is None:
+            skipped.append((fp, "binary: NUL bytes or unreadable"))
+            continue
+        nfiles += 1
         for n, line in enumerate(text.splitlines(), 1):
             ok = bool(ALLOW.search(line))
             for rule, a, b in generic_hits(line, scan_secrets):
@@ -201,6 +300,8 @@ def main(argv=None):
     ap.add_argument("--root", default=str(Path(__file__).resolve().parent.parent))
     ap.add_argument("--denylist", default=os.environ.get("WORKBENCH_DENYLIST"))
     ap.add_argument("--report")
+    ap.add_argument("--allow-binary", action="store_true",
+                    help="do not fail on skipped binary or NUL-containing files (they are still listed)")
     a = ap.parse_args(argv)
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -209,16 +310,33 @@ def main(argv=None):
     root = Path(a.root)
     deny = load_denylist(a.denylist) if a.denylist else []
     skip = [x for x in (a.report, a.denylist) if x]
-    nfiles, hits = scan(a.paths or [root], root, deny, skip)
+    skipped = []
+    nfiles, hits = scan(a.paths or [root], root, deny, skip, skipped)
     bad = [h for h in hits if not h[3]]
     for rel, n, rule, ok, shown in hits:
         if not ok:
             print(f"{rel}:{n}  {rule}" + (f"  {shown[:80]}" if shown is not None else "  (denylist term)"))
+    by_reason = {}
+    for fp, why in skipped:
+        by_reason.setdefault(why, []).append(fp)
+    for why, fps in sorted(by_reason.items()):
+        print(f"skipped ({why}): {len(fps)}")
+        for fp in fps:
+            print(f"  {fp.as_posix()}")
     print(f"scanned {nfiles} files, {len(deny)} denylist rules: {len(bad)} unallowed hit(s), "
-          f"{len(hits) - len(bad)} allowed by scrub-ok")
+          f"{len(hits) - len(bad)} allowed by scrub-ok, {len(skipped)} skipped")
+    binaries = [fp for fp, why in skipped if why.startswith("binary")]
+    fail = bool(bad)
+    if nfiles == 0:
+        print("FAIL: no file was scanned (wrong path, or everything was skipped)")
+        fail = True
+    if binaries and not a.allow_binary:
+        print(f"FAIL: {len(binaries)} binary or NUL-containing file(s) could not be scanned; remove them, or pass "
+              "--allow-binary after checking each by hand")
+        fail = True
     if a.report:
         write_report(a.report, nfiles, hits, len(deny))
-    return 1 if bad else 0
+    return 1 if fail else 0
 
 
 if __name__ == "__main__":

@@ -1,9 +1,9 @@
 ---
 name: handoff
-description: Turn a mission into a self-contained handoff document a fresh Claude session can execute, or a short resume card. Use for "/handoff", "write a handoff", "hand this off", "resume card", when a usage-limit warning appears, when a mission outgrows the session, or when a plan in progress must survive a restart.
+description: Turn a mission into a self-contained handoff document a fresh Claude session can execute, or a short resume card. Use for "/workbench-core:handoff", "write a handoff", "hand this off", "resume card", when a usage-limit warning appears, when a mission outgrows the session, or when a plan in progress must survive a restart.
 ---
 
-# /handoff
+# /workbench-core:handoff
 
 Output: one file, plus a paste prompt. Every rule applies to every phase you write. A section that
 does not apply keeps its header and says "None for this mission"; never drop one silently.
@@ -27,7 +27,7 @@ does not apply keeps its header and says "None for this mission"; never drop one
 # HANDOFF: <TITLE> (<YYYY-MM-DD>)
 ## PASTE PROMPT (at most 1.5 KB; this block is what the user pastes)
 Open Claude Code in <working directory>. Read <absolute path of this file>, then begin at START HERE.
-State is as of <YYYY-MM-DD HH:MM TZ>; anything newer in the repo or tracker beats this doc.
+State is as of <YYYY-MM-DD HH:MM TZ>; anything newer in the repo, the tracker or a knowledge-base note beats this doc.
 Mission: <one line>. You own this mission now; the authoring session stopped changing it.
 ## STATE AT HANDOFF (as of <YYYY-MM-DD HH:MM TZ>)
 - Done and verified, with proof (path / command / URL) for each:

@@ -20,8 +20,10 @@ Under 2 KB, no backticks, no credential values (the driver masks credential shap
 DRIVER --pre
 ```
 Do each item in its `next` list, in order. Keep `ac_base` for step 3.
-- **Skip gate:** if nothing worth keeping happened (no decision, root cause, changed fact, new runbook or open
-  item) and `ac_hash_already_saved` is true, run `DRIVER --post --skip --note "<why>"` and stop.
+- **Skip gate** (never when a precompact save is pending): count the save markers that fired this session (the
+  "A save is due after" list in `rules/memory-protocol.md`). If fewer than 2 fired AND `last_save_minutes_ago` is
+  under 30, or nothing worth keeping happened and `ac_hash_already_saved` is true, run
+  `DRIVER --post --skip --note "<why>"` and stop. The user saying "save anyway" or `/workbench-kb:save force` bypasses it.
 - **Journal window:** the file named by `inbox_file` holds one JSON entry per line. Fold every entry without
   `"folded": true` into your active-context draft. `"mine": false` entries came from other sessions. Entries with
   `"folded": true` were offered to an earlier save: re-add one only if active-context lost it.
@@ -33,6 +35,9 @@ Domains are the KB root's folders that hold a `HOT.md` (the `domains` field of `
    `kb_demote.py --domain <d> --match "<text>"` (in the same `scripts/` folder). Never shorten text in place.
    - One fact, one home: link to the note that owns a fact instead of repeating it.
    - Changing a fact: keep the old line, marked `SUPERSEDED (YYYY-MM-DD): was X, now Y.`
+   - **Error blacklist demotion:** an entry whose fix is deployed and verified AND is more than two weeks old is,
+     on the next save that touches that domain, collapsed to one line (`symptom -> root cause -> fix (date)`); its
+     narrative moves to `history.md`.
 2. **Topic notes** for reusable knowledge (runbooks, configs, patterns): `<domain>/<topic-slug>.md` with
    frontmatter (`title`, `domain`, `tags`, `status`, `updated`), then `## Observations` and `## Relations`.
 3. **`<domain>/history.md`**: append one record; skip it if the same heading exists:
@@ -48,8 +53,11 @@ Domains are the KB root's folders that hold a `HOT.md` (the `domains` field of `
 Work facts stay inside the knowledge base your organisation allows. Never write a credential value anywhere.
 
 ## Step 3: active-context.md (through the driver only)
-Write your full new version to a scratch file (stay within `ac_bytes_left` bytes; in-flight items only, no rules),
-then:
+Write your full new version to a scratch file (stay within `ac_bytes_left` bytes; in-flight items only, no rules).
+Adding more than the budget allows means removing the difference in this same rewrite: cut finished work whose
+detail already lives in a KB note (the link is the entry once the work is done). Never cut a rule pointer or an
+open item that waits on the user. Keep dated items in ISO form (`YYYY-MM-DD`) so session start can surface them.
+Then:
 ```bash
 DRIVER --ac-write <draft-file> --base <ac_base>
 ```
@@ -87,3 +95,6 @@ names, write what it knew (steps 2 to 4). The completed `--post` clears this ses
 - Search: `"${user_config.python}" "${CLAUDE_PLUGIN_ROOT}/scripts/kb_search.py" "<terms>" [--domain d]`.
   A miss is not proof of absence: retry once with the note's own words.
 - Health: `"${user_config.python}" "${CLAUDE_PLUGIN_ROOT}/scripts/kb_health.py"`.
+- Retrieval check: `"${user_config.python}" "${CLAUDE_PLUGIN_ROOT}/scripts/kb_eval.py"` runs your own known-answer
+  set (`--init` writes a starter `kb_eval_set.json` in the KB root). Run it monthly and after big KB reorganisations;
+  a falling hit@5 means notes need clearer titles or the answer moved.

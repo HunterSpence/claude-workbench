@@ -1,0 +1,10 @@
+{
+  "name": "ui-build-shoot",
+  "private": true,
+  "type": "module",
+  "description": "Local screenshots and accessibility checks for the ui-build skill. Read SKILL.md first.",
+  "dependencies": {
+    "axe-core": "4.14.0",
+    "playwright-core": "1.62.1"
+  }
+}
