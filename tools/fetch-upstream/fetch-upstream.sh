@@ -5,6 +5,7 @@
 #   ./fetch-upstream.sh --apply                  # download, verify SHA-256, install
 #   ./fetch-upstream.sh --apply --only humanizer,impeccable [--force] [--skills-dir <path>]
 #   ./fetch-upstream.sh --optional [--apply]     # also the optional design set (read THIRD-PARTY.md first)
+#   ./fetch-upstream.sh --pm [--apply]           # the product-management pack instead of the default set
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 py="$(command -v python3 || command -v python || true)"

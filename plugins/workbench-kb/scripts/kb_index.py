@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """kb_index.py: the knowledge base's search index, one SQLite file (stdlib sqlite3, FTS5).
 
-  note   path, mtime_ns, size, title           (staleness: kb_search rebuilds when the disk moved on)
-  chunk  FTS5 over heading-aware chunks with porter stemming (a long note competes paragraph by paragraph)
-  link   every wikilink outside code, resolved against the KB root (kb_health reports the dead ones)
-  meta   built_at, kb_root, fts (whether FTS5 was available)
+  note     path, mtime_ns, size, title         (staleness: kb_search rebuilds when the disk moved on)
+  chunk    FTS5 over heading-aware chunks with porter stemming (a long note competes paragraph by paragraph)
+  notefts  FTS5 over one row per note: path words, title, every heading (the per-note ranking kb_search fuses with chunk)
+  section  path, line, heading, rid per chunk, indexed by path (finds a note's sections without scanning the FTS table)
+  link     every wikilink outside code, resolved against the KB root (kb_health reports the dead ones)
+  meta     built_at, kb_root, fts (whether FTS5 was available), schema (a cache from an older kit is rebuilt)
 
   kb_index.py build      full rebuild into a temp file, then an atomic swap (readers keep the old file meanwhile)
 A full rebuild is the design: a few seconds for thousands of notes and no incremental state to drift.
@@ -23,17 +25,24 @@ import kb_audit  # noqa: E402
 import savelock  # noqa: E402
 
 MAX_CHARS, OVERLAP = 1000, 150
+SCHEMA = "2"             # 2: notefts table added
+HEADINGS_MAX = 8000      # characters of headings kept per note in notefts
 _FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
 _WIKI = re.compile(r"\[\[([^\[\]\n]{1,300})\]\]")
 _HEAD = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
 
 
 def fts5_ok():
+    if os.environ.get("KB_INDEX_NO_FTS5"):   # test hook: exercise the plain-table fallback on a Python that has FTS5
+        return False
+    con = sqlite3.connect(":memory:")
     try:
-        sqlite3.connect(":memory:").execute("create virtual table t using fts5(x)")
+        con.execute("create virtual table t using fts5(x)")
         return True
     except sqlite3.Error:
         return False
+    finally:
+        con.close()
 
 
 def notes():
@@ -94,9 +103,20 @@ def links_for(raw):
     return out
 
 
-def resolve(target, src_rel, existing):
+def stems_of(existing):
+    """{lower-case file stem: [paths]} over the note paths in `existing` (for the unique-stem fallback of resolve)."""
+    out = {}
+    for p in existing:
+        out.setdefault(Path(p).stem.lower(), []).append(p)
+    return out
+
+
+def resolve(target, src_rel, existing, stems=None):
     """A wikilink target -> the KB-relative path it names, or None. Tries <target>.md from the KB root, beside the
-    source, and <target>/00-index.md. '|alias' and '#heading' parts are dropped."""
+    source and <target>/00-index.md; then a bare name (no folder) that is the file name of exactly ONE note, case
+    ignored, so a link such as bug-cards finds _shared/bug-cards.md. A name two notes share stays dead: guessing
+    would link to the wrong one. '|alias' and '#heading' parts are dropped. Pass `stems` (stems_of(existing)) when
+    resolving many links against one `existing`."""
     t = target.split("|", 1)[0].split("#", 1)[0].strip().replace("\\", "/").strip("/")
     if not t:
         return None
@@ -105,7 +125,23 @@ def resolve(target, src_rel, existing):
     for cand in (base, f"{src_dir}/{base}", f"{t}/00-index.md"):
         if cand in existing:
             return cand
+    if "/" not in t:
+        found = (stems if stems is not None else stems_of(existing)).get(base[:-3].lower(), [])
+        if len(found) == 1:
+            return found[0]
     return None
+
+
+def disk_rels():
+    """The KB-relative paths of every note on disk right now."""
+    return {p.relative_to(kb_audit.ROOT).as_posix() for p in notes()}
+
+
+def live_links(rel, existing, stems=None):
+    """The notes that `rel` links to according to its CURRENT text (not the index), resolved against `existing`."""
+    raw = savelock.read_text(kb_audit.ROOT / rel)
+    stems = stems_of(existing) if stems is None else stems
+    return {d for _n, t in links_for(raw) if (d := resolve(t, rel, existing, stems))}
 
 
 def build(db=None):
@@ -124,25 +160,37 @@ def build(db=None):
         con.executescript("""
             create table note(path text primary key, mtime_ns int, size int, title text);
             create table link(src text, line int, raw text, dst text);
+            create table section(path text, line int, heading text, rid int);
+            create index section_path on section(path);
             create table meta(k text primary key, v text);
         """ + ("create virtual table chunk using fts5(path unindexed, line unindexed, heading, body, "
+               "tokenize='porter unicode61 remove_diacritics 2');"
+               "create virtual table notefts using fts5(path unindexed, pathwords, title, headings, "
                "tokenize='porter unicode61 remove_diacritics 2');" if fts else
-               "create table chunk(path text, line int, heading text, body text);"))
-        nchunks = 0
+               "create table chunk(path text, line int, heading text, body text);"
+               "create table notefts(path text, pathwords text, title text, headings text);"))
+        stems = stems_of(rels)
+        nchunks = 0          # also the rowid of the last chunk: ids are explicit so `section` can point at them
         for rel, p in rels.items():
             try:
                 st = p.stat()
                 raw = savelock.read_text(p)
             except OSError:
                 continue
-            con.execute("insert into note values (?,?,?,?)", (rel, st.st_mtime_ns, st.st_size, title_of(raw, rel)))
-            rows = [(rel, line, h, body) for line, h, body in chunks_for(raw)]
-            con.executemany("insert into chunk(path, line, heading, body) values (?,?,?,?)", rows)
+            title = title_of(raw, rel)
+            con.execute("insert into note values (?,?,?,?)", (rel, st.st_mtime_ns, st.st_size, title))
+            chs = chunks_for(raw)
+            rows = [(nchunks + i, rel, line, h, body) for i, (line, h, body) in enumerate(chs, 1)]
+            con.executemany("insert into chunk(rowid, path, line, heading, body) values (?,?,?,?,?)", rows)
+            con.executemany("insert into section values (?,?,?,?)", [(rel, r[2], r[3], r[0]) for r in rows])
             nchunks += len(rows)
+            heads = " | ".join(dict.fromkeys(h for _l, h, _b in chs if h))[:HEADINGS_MAX]
+            con.execute("insert into notefts(path, pathwords, title, headings) values (?,?,?,?)",
+                        (rel, re.sub(r"[\W_]+", " ", rel.rsplit(".", 1)[0]).strip(), title, heads))
             con.executemany("insert into link values (?,?,?,?)",
-                            [(rel, n, t, resolve(t, rel, rels)) for n, t in links_for(raw)])
+                            [(rel, n, t, resolve(t, rel, rels, stems)) for n, t in links_for(raw)])
         con.executemany("insert into meta values (?,?)", [("built_at", str(time.time())), ("kb_root", root.as_posix()),
-                                                         ("fts", "1" if fts else "0")])
+                                                         ("fts", "1" if fts else "0"), ("schema", SCHEMA)])
         con.commit()
     finally:
         con.close()
@@ -160,6 +208,8 @@ def stale(db=None):
         con = sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True)
         try:
             known = dict(con.execute("select path, mtime_ns from note"))
+            if dict(con.execute("select k, v from meta")).get("schema") != SCHEMA:
+                return "index format is older than this kit"
         finally:
             con.close()
     except sqlite3.Error as e:

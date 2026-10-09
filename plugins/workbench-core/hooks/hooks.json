@@ -55,7 +55,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash|PowerShell|Edit|Write|MultiEdit|NotebookEdit|Read|Grep|Glob|WebFetch|Agent|mcp__.*([Pp]laywright|[Cc]hrome|[Pp]uppeteer|[Bb]rowser).*",
+        "matcher": "Bash|PowerShell|Edit|Write|MultiEdit|NotebookEdit|Read|Grep|Glob|WebFetch|Agent|mcp__.*([Pp]laywright|[Cc]hrome|[Pp]uppeteer|[Bb]rowser).*|mcp__.*([Pp][Oo][Ss][Tt][Gg][Rr][Ee][Ss]|[Ss][Qq][Ll]|[Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee]).*",
         "hooks": [
           {
             "type": "command",
@@ -121,6 +121,21 @@
             "args": [
               "-S",
               "${CLAUDE_PLUGIN_ROOT}/scripts/ponytail_auto.py"
+            ],
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${user_config.python}",
+            "args": [
+              "-S",
+              "${CLAUDE_PLUGIN_ROOT}/scripts/bug_hint.py"
             ],
             "timeout": 10
           }

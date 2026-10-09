@@ -1,5 +1,8 @@
 """Tests for scrub_scan.py with a throwaway tree and denylist. Run: python -m unittest discover -s tools -p "test_scrub*"
 Every "personal" value below is assembled at runtime, so this file itself scans clean."""
+import importlib.util
+import os
+import re
 import shutil
 import struct
 import subprocess
@@ -9,7 +12,10 @@ import unittest
 import zipfile
 import zlib
 from pathlib import Path
+from unittest import mock
 
+REQUIRE = os.environ.get("WB_REQUIRE_ALL") == "1"
+HAVE_GIT = bool(shutil.which("git"))
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import scrub_scan  # noqa: E402
@@ -18,6 +24,7 @@ AT = "@"
 DOT = "."
 DOC_IP, LOOP_IP, VERSION = DOT.join("192 0 2 10".split()), DOT.join("127 0 0 1".split()), DOT.join("12345")
 TERM = "zebra" + "corp"
+L, R = "[" * 2, "]" * 2          # wiki link brackets, built so this file holds no literal link
 
 
 class ScrubScan(unittest.TestCase):
@@ -77,7 +84,7 @@ class ScrubScan(unittest.TestCase):
     def test_scrub_ok_never_silences_a_denylist_term(self):
         self.assertEqual(self.rules(f"{TERM}  # scrub-ok: it is public anyway"), ["D2"])
 
-    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    @unittest.skipUnless(HAVE_GIT or REQUIRE, "git not installed")
     def test_git_work_tree_uses_ls_files(self):
         repo = self.tmp / "repo"
         repo.mkdir()
@@ -108,6 +115,35 @@ class ScrubScan(unittest.TestCase):
         self.assertEqual(self.run_scan("--allow-binary"), 0)
         (self.tree / "pic.jpg").write_bytes(b"\xff\xd8\xff")
         self.assertEqual(self.run_scan(), 1)
+
+    def run_cli(self, tree):
+        return subprocess.run([sys.executable, str(HERE / "scrub_scan.py"), str(tree), "--root", str(tree),
+                               "--denylist", str(self.deny)], capture_output=True, text=True, timeout=60)
+
+    def test_walk_mode_fails_on_a_skipped_directory(self):
+        self.write("a.md", "clean\n")
+        self.assertEqual(self.run_scan(), 0, "VCS metadata and tool caches are skipped quietly")
+        (self.tree / "__pycache__").mkdir()
+        self.assertEqual(self.run_scan(), 0)
+        for name in ("build", "dist", "node_modules", ".venv"):
+            (self.tree / name).mkdir()
+            (self.tree / name / "x.md").write_text(f"{TERM}\n", encoding="utf-8")
+            r = self.run_cli(self.tree)
+            self.assertEqual(r.returncode, 1, name)
+            self.assertIn("FAIL: walk mode skipped", r.stdout)
+            self.assertNotIn(TERM, r.stdout.lower())
+            shutil.rmtree(self.tree / name)
+        self.assertEqual(self.run_scan(), 0)
+
+    @unittest.skipUnless(HAVE_GIT or REQUIRE, "git not installed")
+    def test_git_mode_scans_build_output_and_does_not_fail_on_it(self):
+        repo = self.tmp / "repo3"
+        (repo / "build").mkdir(parents=True)
+        subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True, capture_output=True)
+        (repo / "build" / "x.md").write_text("clean\n", encoding="utf-8")
+        r = self.run_cli(repo)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertNotIn("walk mode skipped", r.stdout)
 
     def test_zero_files_fails(self):
         self.assertEqual(self.run_scan(), 1)
@@ -189,6 +225,70 @@ class ScrubScan(unittest.TestCase):
                            capture_output=True, text=True, timeout=60,
                            env={**__import__("os").environ, "WORKBENCH_DENYLIST": str(self.deny)})
         self.assertEqual(r.returncode, 1)
+
+    # ---- G5: a wikilink is a hit, except one in kb-template/ whose target is a note in kb-template/ ----
+    def put(self, files):
+        for rel, text in files.items():
+            p = self.tree / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(text, encoding="utf-8")
+
+    def link_hits(self, files, deny=None):
+        """sorted [(path, line, rule)] of the unallowed hits over a tree holding `files`."""
+        self.put(files)
+        _, hits = scrub_scan.scan([self.tree], self.tree, scrub_scan.load_denylist(deny or self.deny))
+        return sorted({(h[0], h[1], h[2]) for h in hits if not h[3]})
+
+    NOTES = {"kb-template/00-index.md": "# index\n", "kb-template/ops/note.md": "n\n",
+             "kb-template/_shared/bug-cards.md": "c\n", "kb-template/projects/demo/00-index.md": "d\n",
+             "kb-template/ops/HOT.md": "h\n", "kb-template/infra/HOT.md": "h\n"}
+
+    def test_template_links_to_template_notes_are_allowed(self):
+        files = {**self.NOTES, "kb-template/ai/HOT.md": "\n".join([
+            f"- part_of {L}00-index{R}", f"- {L}ops/note{R}", f"- {L}note{R}", f"- {L}ops/note|alias{R}",
+            f"- {L}ops/note#Heading{R}", f"- {L}ops/note.md{R}", f"- {L}projects/demo{R}", f"- {L}Bug-Cards{R}"]) + "\n"}
+        self.assertEqual(self.link_hits(files), [])
+
+    def test_template_links_with_no_note_behind_them_are_hits(self):
+        files = {**self.NOTES, "kb-template/ai/links.md": "\n".join([
+            f"- {L}nowhere{R}", f"- {L}ops/missing{R}", f"- {L}HOT{R}", f"- {L}../docs/x{R}", f"- {L}00-index{R}"]) + "\n"}
+        self.assertEqual(self.link_hits(files), [("kb-template/ai/links.md", n, "G5") for n in (1, 2, 3, 4)],
+                         "a dead target, an ambiguous bare name (two HOT.md) and a path escape are hits; the live link is not")
+
+    def test_links_outside_the_template_stay_hits_even_with_a_live_target(self):
+        files = {**self.NOTES, "x.md": f"{L}00-index{R}\n", "docs/x.md": f"{L}00-index{R}\n",
+                 "docs/kb-template/y.md": f"{L}00-index{R}\n", "tools/kb-template/z.md": f"{L}00-index{R}\n",
+                 "kb-template-old/w.md": f"{L}00-index{R}\n", "kb-templatex/v.md": f"{L}00-index{R}\n",
+                 "kb-template/ok.md": f"{L}00-index{R}\n"}
+        self.assertEqual(self.link_hits(files), sorted((rel, 1, "G5") for rel in (
+            "x.md", "docs/x.md", "docs/kb-template/y.md", "tools/kb-template/z.md", "kb-template-old/w.md", "kb-templatex/v.md")))
+
+    def test_the_denylist_still_reads_the_target_of_an_allowed_link(self):
+        deny = self.tmp / "deny2.txt"
+        deny.write_text(f"# c\n{TERM}\nre:{re.escape(L)}[^\\]]+{re.escape(R)}\n", encoding="utf-8")   # D2 a term, D3 the link syntax
+        files = {**self.NOTES, f"kb-template/{TERM}-notes.md": "z\n",
+                 "kb-template/ok.md": f"{L}00-index{R}\n", "kb-template/term.md": f"{L}{TERM}-notes{R}\n",
+                 "kb-template/dead.md": f"{L}nowhere{R}\n", "docs/x.md": f"{L}00-index{R}\n"}
+        self.assertEqual(self.link_hits(files, deny), [("docs/x.md", 1, "D3"), ("docs/x.md", 1, "G5"),
+                                                       ("kb-template/dead.md", 1, "D3"), ("kb-template/dead.md", 1, "G5"),
+                                                       ("kb-template/term.md", 1, "D2")])
+
+    def test_template_link_rule_agrees_with_kb_index_resolve(self):
+        scripts = HERE.parent / "plugins" / "workbench-kb" / "scripts"
+        with mock.patch.dict(os.environ, {"WORKBENCH_KB_ROOT": str(self.tmp / "kb"), "CLAUDE_CONFIG_DIR": str(self.tmp / "cc")}):
+            sys.path.insert(0, str(scripts))
+            try:
+                spec = importlib.util.spec_from_file_location("kb_index_for_scrub_test", scripts / "kb_index.py")
+                kb_index = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(kb_index)
+            finally:
+                sys.path.remove(str(scripts))
+        notes = {k[len("kb-template/"):] for k in self.NOTES}
+        for src in ("ai/HOT.md", "ops/note.md", "00-index.md", "projects/demo/00-index.md"):
+            for target in ("00-index", "ops/note", "note", "note|alias", "ops/note#h", "ops/note.md", "projects/demo", "Bug-Cards",
+                           "bug-cards", "HOT", "ops/missing", "nowhere", "../docs/x", "", "|alias", "ops\\note", "demo"):
+                self.assertEqual(scrub_scan.template_link_ok(target, src, notes), kb_index.resolve(target, src, notes) is not None,
+                                 f"{target!r} from {src}")
 
 
 if __name__ == "__main__":

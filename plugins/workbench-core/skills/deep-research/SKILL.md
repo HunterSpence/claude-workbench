@@ -1,6 +1,6 @@
 ---
 name: deep-research
-description: Deep, verified web research that ends in a decision list (critical / yes / maybe / no). Use for "deep research", "/workbench-core:deep-research", "research everything", or a question that needs many sources checked and adversarially verified (vendor or tool evaluation, "what changed in X", "should we adopt Y"). Not for a single fact (answer inline) and not for code search.
+description: Deep, verified web research that ends in a decision list (critical / yes / maybe / no). Use for "deep research", "/workbench-core:deep-research", "research in depth", or a question that needs many sources checked and adversarially verified (vendor or tool evaluation, "should we adopt Y"). Not for a single fact (answer inline) and not for code search.
 ---
 
 # /workbench-core:deep-research

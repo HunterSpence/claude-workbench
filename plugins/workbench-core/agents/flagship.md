@@ -1,6 +1,6 @@
 ---
 name: flagship
-description: "Hard, ambiguous, or long-horizon BUILD work that needs flagship-tier reasoning and effort: a design or migration with no obvious shape, a multi-hour mission, an irreversible change, or a problem that has already defeated a worker-tier attempt. Domain-agnostic: name the KB domain in the prompt. NOT for review gates or verification (use blue-verify), NOT for adversarial passes (use red-team), NOT for routine work a worker can do."
+description: "Hard, ambiguous or long-horizon BUILD work that needs flagship-tier reasoning and effort: a design or migration with no obvious shape, a multi-hour build, an irreversible change, or a problem a worker already failed; also regulated work (legal, tax, medical, compliance) and final documents for a person or a third party. Domain-agnostic: name the KB domain in the prompt. NOT for review gates or verification (blue-verify), adversarial passes (red-team), or work a worker can do: collecting, running ops on a machine, implementing an already-planned slice, hunting through files you were given, reviews."
 model: claude-opus-5-5
 effort: xhigh
 disallowedTools: [Agent]

@@ -1,4 +1,4 @@
-"""Status line: [model] effort, context used, folder, cost, rate limits, and a fallback warning. Reads the status
+"""Status line: [model] effort, context used, prompt-cache hit % and warm/cold, folder, cost, rate limits, and a fallback warning. Reads the status
 JSON on stdin; never throws (degrades to "[Claude]"). No network. The bootstrap copies this file to
 <claude home>/workbench/statusline.py, which the settings fragment's statusLine command runs."""
 import json
@@ -61,6 +61,14 @@ def line(j):
     pct = (j.get("context_window") or {}).get("used_percentage")
     if pct is not None:
         parts.append(f"ctx:{round(float(pct))}%")
+    try:    # prompt_cache.hit_ratio (0-1, null early) and .warm (docs: statusline "Prompt cache fields"); absent = nothing shown
+        pc = j.get("prompt_cache")
+        hit, warm = pc.get("hit_ratio"), pc.get("warm")
+        if pc.get("caching_observed") is not False and (hit is not None or warm is not None):
+            parts.append("cache:" + (f"{round(float(hit) * 100)}%" if hit is not None else "")
+                         + ("" if warm is None else (" " if hit is not None else "") + ("warm" if warm else "cold")))
+    except Exception:
+        pass
     cd = (j.get("workspace") or {}).get("current_dir") or j.get("cwd") or ""
     if cd:
         parts.append(os.path.basename(cd.rstrip("\\/")))

@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+"""__NAME__ guard: a PreToolUse hook for the Bash tool.
+
+Reads the hook event (JSON) from stdin. Blocks a forced git push (exit 2, the reason goes to stderr) and keeps a log of
+the first word of each Bash command in ${CLAUDE_PLUGIN_DATA}/guard.log. It fails OPEN: unreadable input or an unwritable
+log never blocks a tool call. Stdlib only; no network access and no environment secrets.
+"""
+import json
+import os
+import re
+import sys
+
+FORCED_PUSH = re.compile(r"\bgit\s+push\b.*(\s--force(?!-with-lease)\b|\s-f\b)")
+
+
+def main():
+    try:
+        event = json.load(sys.stdin)
+    except ValueError:
+        return 0
+    command = str((event.get("tool_input") or {}).get("command", ""))
+    data = os.environ.get("CLAUDE_PLUGIN_DATA")
+    if data:
+        try:
+            os.makedirs(data, exist_ok=True)
+            with open(os.path.join(data, "guard.log"), "a", encoding="utf-8") as f:
+                f.write((command.split() or [""])[0] + "\n")
+        except OSError:
+            pass
+    if event.get("tool_name") == "Bash" and FORCED_PUSH.search(command):
+        print("blocked: forced git push; use --force-with-lease or ask first", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

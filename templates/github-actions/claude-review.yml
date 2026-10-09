@@ -1,0 +1,41 @@
+# Docs-only template: copy to .github/workflows/claude-review.yml in a repository you control, then read README.md first.
+# Reviews every non-draft pull request opened from a branch of THIS repository and comments on it.
+# Fork pull requests are skipped on purpose: they get no secrets, and pull_request_target would hand them to untrusted code.
+name: Claude review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+permissions: {}
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write   # to post the review comments
+      issues: read
+      id-token: write        # OIDC token for the Claude GitHub App (see claude.yml)
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Review the pull request
+        uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}      # or one of the other options listed in claude.yml
+          plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
+          plugins: "code-review@claude-code-plugins"
+          prompt: "/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
+          claude_args: |
+            --max-turns 20

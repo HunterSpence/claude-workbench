@@ -1,0 +1,7 @@
+[
+  {
+    "id": "primes-sum",
+    "kind": "arithmetic",
+    "prompt": "List the three smallest prime numbers greater than 20, then give their sum."
+  }
+]

@@ -14,6 +14,10 @@ Known limits: see "_known_limits" in corporate-allowlist.template.json.
   block_public_repos    default true
   send_endpoints        extra regexes for HTTP endpoints that send a message (added to the defaults below)
   extra_secret_paths    extra credential-file regexes (read by the generic pack's secret-path rule)
+  production_hosts      hosts (names or ssh aliases, case-insensitive) where nothing is built or deployed over ssh;
+                        default [] = the prod-build guard has no opinion
+  protected_db_tables   tables (schema.table allowed, case-insensitive) that no SQL write may touch; default [] = the
+                        protected-db-write guard has no opinion
 
 Guard ids:
   public-repo             gh/glab repo create --public, a visibility flip to public (gh repo edit, gh api)
@@ -25,11 +29,30 @@ Guard ids:
                           Invoke-WebRequest -InFile or -Body (Get-Content ...)) to a host that is not approved
   outbound-send           email / chat / webhook sends: the user is ASKED to confirm (never auto-approved)
   publish-confirm         publishing or sharing outside the machine: the user is ASKED (never auto-approved). gh gist
-                          create, gh release create / upload, npm / pnpm / yarn publish, twine upload, poetry publish,
+                          create, gh release create / upload, gh api with a write method or any field flag (the list is
+                          gh_write_verbs.json), npm / pnpm / yarn publish, twine upload, poetry publish,
                           cargo publish, gem push, dotnet nuget push, docker / podman push, scp / rsync / sftp to a
                           remote host, aws s3 cp|sync|mv to s3://, az storage blob upload, gsutil / gcloud storage
                           cp|rsync|mv to gs://, gh pr merge --admin, gh pr review --approve, gh pr comment, gh issue comment. A
                           copy to a host or bucket listed in upload_hosts is not asked about.
+  prod-build              a build or deploy command (docker build, npm run build, kubectl apply ...) run over ssh on a
+                          host listed in production_hosts
+  protected-db-write      a SQL write (insert / update / delete / truncate / drop / alter / merge / copy from) on a table
+                          in protected_db_tables, from a shell database client (psql, mysql, sqlite3, sqlcmd ...; a
+                          .sql file it reads is read too) or a database MCP tool
+  security-tooling-change elevation (runas, Start-Process -Verb RunAs), Set-ExecutionPolicy, Defender exclusion or
+                          protection changes, root-CA installs (certutil -addstore root, Import-Certificate into a Root
+                          store) and HKLM registry writes. Reading (Get-MpPreference, reg query HKLM) is untouched.
+  browser-cli             `playwright-cli` (also via npx): the user is ASKED before it uploads or drops a file (upload,
+                          drop), runs code in the page (eval, run-code), goes to a URL that is not localhost
+                          or a loopback address and not a host in git_remote_hosts or upload_hosts (open, goto, tab-new),
+                          attaches to an already running browser (attach), loads saved cookies and logins (state-load)
+                          or calls a tool the page registered (webmcp-call); with --profile, --persistent or --extension
+                          anywhere in the call, or --cdp unless it names localhost (a profile folder or running browser
+                          with its signed-in identity); and for the commands that print, change or save stored session
+                          values (cookie-*, localstorage-*, sessionstorage-*, state-save).
+                          A URL the guard cannot read (a variable, a glob) is asked about too. Other commands pass, route
+                          among them: it only changes what pages in the CLI's own browser receive.
   tls-verify-off          turning TLS certificate checks off (git http.sslVerify false, NODE_TLS_REJECT_UNAUTHORIZED=0,
                           npm strict-ssl false, pip trusted-host, PYTHONHTTPSVERIFY=0). Behind a TLS-inspecting proxy
                           the fix is the corporate CA bundle, not switching verification off.
@@ -47,7 +70,8 @@ import engine as E
 import _wb
 
 DEFAULTS = {"enabled": True, "git_remote_hosts": [], "upload_hosts": [],
-            "block_public_repos": True, "send_endpoints": [], "extra_secret_paths": []}
+            "block_public_repos": True, "send_endpoints": [], "extra_secret_paths": [],
+            "production_hosts": [], "protected_db_tables": []}
 DEFAULT_SEND_ENDPOINTS = [
     r"graph\.microsoft\.com/[^\s\"']*/sendMail",
     r"graph\.microsoft\.com/[^\s\"']*/(?:chats|channels)/[^\s\"']*/messages",   # Teams chat / channel post
@@ -523,6 +547,32 @@ def uploads(c):
 _REMOTE_PATH = re.compile(r"^(?:[^@/\s:]+@)?(\x5b[0-9A-Fa-f:.]+\x5d|[^:/\\\s]{2,}):")   # [user@]host:path, [v6]:path (not C:\path)
 
 
+def _gh_api_rules():
+    """The "api" part of gh_write_verbs.json (the one list of GitHub write commands), {} when unreadable (logged)."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "gh_write_verbs.json"),
+                  encoding="utf-8-sig") as f:
+            return json.load(f).get("api") or {}
+    except (OSError, ValueError, AttributeError) as e:
+        E.log(f"ERROR gh_write_verbs.json unreadable, gh api writes are not asked about: {e!r}"[:300])
+        return {}
+
+
+def _gh_api_writes(args):
+    """True when `gh api` args carry a write method (-X POST, -XPOST, --method=DELETE ...) or any field / body flag."""
+    api = _gh_api_rules()
+    methods, flags = {str(m).upper() for m in api.get("methods") or []}, [str(f) for f in api.get("field_flags") or []]
+    for i, t in enumerate(args):
+        val = (args[i + 1] if i + 1 < len(args) else "") if t in ("-X", "--method") else \
+            t.split("=", 1)[1] if t.startswith("--method=") else t[2:] if t.startswith("-X") else None
+        if val is not None and val.strip("\"'").upper() in methods:
+            return True
+        if any(t == f or (f.startswith("--") and t.startswith(f + "=")) or (len(f) == 2 and len(t) > 2 and t.startswith(f)
+                                                                        and not t.startswith("--")) for f in flags):
+            return True
+    return False
+
+
 def _publish_what(toks):
     """What a statement publishes or shares, and the host/bucket it goes to (None when it names none), or None."""
     h = os.path.basename(toks[0]).lower().removesuffix(".exe") if toks else ""
@@ -540,6 +590,8 @@ def _publish_what(toks):
             return "posts an approving review", None
         if pos[:2] in (["pr", "comment"], ["issue", "comment"]):
             return "posts a comment others will read", None
+        if pos[:1] == ["api"] and _gh_api_writes(a):
+            return "calls the GitHub API with a write method or fields", None
     if (h in ("npm", "pnpm") and pos[:1] == ["publish"]) or (h == "yarn" and (pos[:1] == ["publish"] or pos[:2] == ["npm", "publish"])):
         return "publishes a package to a registry", None
     if (h == "twine" and pos[:1] == ["upload"]) or (h in ("poetry", "cargo") and pos[:1] == ["publish"]) \
@@ -686,4 +738,273 @@ def tls_verify_off(c):
                     "cafile <bundle>. Your IT team publishes the bundle.", "tls-verify-off", m.group(0))
 
 
-SHELL = (public_repo, remotes, uploads, publish, tls_verify_off, send)
+# ── production hosts: no builds or deploys over ssh ─────────────────────────────────────────────────────────
+_BUILD = re.compile(r"""(?ix)(?<![\w.-])(?:
+      (?:docker|podman|nerdctl)(?:\s+-\S+(?:\s+[^\s-]\S*)?)*\s+(?:(?:image|builder|buildx)\s+)?(?:build|bake)\b
+    | (?:docker|podman)(?:\s+|-)compose\b[^;&|\n]*?\b(?:build|up\b[^;&|\n]*--build)\b | docker\s+stack\s+deploy\b
+    | (?:npm|pnpm|yarn|bun)\s+(?:run\s+)?build\b | (?:mvn|mvnw|gradle|gradlew|msbuild|cargo|go|dotnet)\s+(?:build|publish|package)\b
+    | make(?![\w-]) | kubectl\s+(?:apply|replace|rollout|set\s+image)\b | helm\s+(?:upgrade|install|rollback)\b
+    | terraform\s+apply\b)""")
+
+
+def _ssh_target(seg):
+    """(host, the rest of the command line after it) for an ssh statement, else None. Host: user@ dropped, lower case."""
+    toks = E._cmd_toks(seg)
+    if not toks or os.path.basename(toks[0]).lower().removesuffix(".exe") != "ssh":
+        return None
+    line = " ".join(toks[1:])
+    m = E._SSH_HOST.match(line)
+    host = m.group(0).split()[-1].strip("\"'").rpartition("@")[2].lower() if m else ""   # last word: options come first
+    return (host, line[m.end():]) if host and not host.startswith("-") else None
+
+
+def _list(conf, key):
+    v = conf.get(key) if conf else None
+    return [str(x).strip().lower() for x in v if str(x).strip()] if isinstance(v, list) else []
+
+
+def prod_build(c):
+    """A build or deploy command run over ssh on a host in production_hosts. Reading (logs, status) is untouched."""
+    conf = cfg() or {}
+    hosts = set(_hosts(conf, "production_hosts")) if isinstance(conf.get("production_hosts"), list) else set()
+    if not hosts:
+        return
+    stmts = E.statements(c)
+    prod = [t for t in (_ssh_target(s) for s, _ in stmts) if t and t[0] in hosts]
+    # the words after the host (an unquoted `ssh host docker build .`) and every statement an ssh string runs remotely
+    for host, seg in prod + [(prod[0][0], s) for s, remote in stmts if remote and prod]:
+        m = _BUILD.search(seg)
+        if m:
+            E.block(f"`{m.group(0).strip()}` over ssh on {host} is blocked: {host} is a production host (production_hosts "
+                    "in the corporate settings file). Production gets its code from the project's pipeline, not from a "
+                    "build run by hand. Reading (logs, status) over ssh is fine.", "prod-build", seg[:160])
+
+
+# ── protected database tables: no SQL writes ─────────────────────────────────────────────────────────────────
+_DB_CLIENT = re.compile(r"(?i)(?<![\w.-])(?:psql|pgcli|mysql|mariadb|mycli|sqlite3|sqlcmd|osql|isql|usql|duckdb|"
+                        r"clickhouse-client|invoke-sqlcmd|invoke-dbaquery)(?:\.exe)?(?![\w.-])")
+_SQL_FILE = re.compile(r"""(?i)(?:^|\s)(?:-f|--file|-i|--input-file|<|\.read)\s*=?\s*["']?([^\s"';&|<>]+\.sql)\b""")
+_SQL_VERBS = (r"(?:insert\s+(?:or\s+\w+\s+)?into|update(?:\s+only)?|delete\s+from(?:\s+only)?|truncate(?:\s+table)?(?:\s+only)?|"
+              r"replace\s+into|merge\s+into|drop\s+table(?:\s+if\s+exists)?|alter\s+table(?:\s+if\s+exists)?(?:\s+only)?|"
+              r"lock\s+table)")
+
+
+def _sql_write(text, tables):
+    """The first protected table a SQL write in text touches, else None. Identifier quotes are dropped first; an
+    unqualified name matches in any schema, a schema.table name only itself."""
+    t = re.sub(r'["`\[\]]', "", text)
+    for name in tables:
+        ident = re.escape(name) if "." in name else r"(?:\w+\.)?" + re.escape(name)
+        if re.search(rf"(?i)\b{_SQL_VERBS}\s+(?:[\w.]+\s*,\s*)*{ident}(?![\w.])|\bcopy\s+{ident}(?:\s*\([^)]*\))?\s+from\b", t):
+            return name
+    return None
+
+
+def _db_message(table):
+    return (f"A SQL write on {table} is blocked: it is listed in protected_db_tables in the corporate settings file. Changes "
+            "to that table go through the project's reviewed migrations. Reading (SELECT) is fine.")
+
+
+def protected_db_write(c):
+    """A SQL write on a protected table through a shell database client (also over ssh or docker exec; a .sql file it
+    reads is read too). A commit message or echo that only names the table is prose and is not judged."""
+    tables = _list(cfg(), "protected_db_tables")
+    if not tables or not any(_DB_CLIENT.search(s) and E._head(s) not in E._INERT for s, _ in E.statements(c)):
+        return
+    view = E.raw_view(c)
+    rels = [m.group(1) for m in _SQL_FILE.finditer(view)]
+    for text in [view] + [src for _, src in E.local_files(view, c.cwd, rels)]:
+        hit = _sql_write(text, tables)
+        if hit:
+            E.block(_db_message(hit), "protected-db-write", hit)
+
+
+def _strings(v):
+    if isinstance(v, str):
+        yield v
+    elif isinstance(v, dict):
+        for x in v.values():
+            yield from _strings(x)
+    elif isinstance(v, (list, tuple)):
+        for x in v:
+            yield from _strings(x)
+
+
+def protected_db_tool(c):
+    """The same rule for a database MCP tool (execute_sql and friends): any string in its input. The engine routes a
+    tool whose name holds postgres / sql / database in any letter case (E.DB_MCP) here."""
+    tables = _list(cfg(), "protected_db_tables")
+    if not tables or not E.DB_MCP.fullmatch(c.tool):
+        return
+    for s in _strings(c.ti):
+        hit = _sql_write(s, tables)
+        if hit:
+            E.block(_db_message(hit), "protected-db-write", f"{c.tool} {hit}")
+
+
+# ── security tooling: no elevation, no Defender exclusions, no root CAs, no HKLM writes ─────────────────────────
+_HKLM = r"(?:\bHKLM\b|\bHKEY_LOCAL_MACHINE\b)"
+_SECURITY = [
+    (re.compile(r"(?i)-Verb\b\s*[:=]?\s*[\"']?runas\b|\.Verb\s*=\s*[\"']?runas\b"), "Starting a program elevated (RunAs)"),
+    (re.compile(r"(?i)(?<![\w.-])Set-ExecutionPolicy\b"), "Changing the PowerShell execution policy"),
+    (re.compile(r"(?i)(?<![\w.-])(?:Add|Set|Remove)-MpPreference\b[^\n;&|]*\s-(?:Exclusion|Disable)\w*"),
+     "Changing Defender exclusions or switching its protection off"),
+    (re.compile(r"(?i)(?<![\w.-])certutil(?:\.exe)?\b[^\n;&|]*\s-addstore\b[^\n;&|]*(?<![\w.-])(?:authroot|root)(?![\w.-])"),
+     "Installing a root certificate authority"),
+    (re.compile(r"(?i)(?<![\w.-])Import-(?:Pfx)?Certificate\b[^\n;&|]*Cert:[\\/]+(?:LocalMachine|CurrentUser)[\\/]+(?:Auth)?Root\b"),
+     "Installing a root certificate authority"),
+    (re.compile(r"(?i)(?<![\w.-])reg(?:\.exe)?\s+(?:add|delete)\s+[\"']?" + _HKLM), "Writing to the machine-wide registry (HKLM)"),
+]
+_REG_WRITERS = {"new-itemproperty", "set-itemproperty", "remove-itemproperty", "clear-itemproperty", "rename-itemproperty",
+                "copy-itemproperty", "move-itemproperty", "new-item", "set-item", "remove-item", "sp", "rp", "ni", "si", "ri"}
+
+
+def _word_statements(c):
+    """Like E.statements, but a quoted string keeps its value as one word (a registry key or path with a space in it is
+    still the argument), plus decoded PowerShell -EncodedCommand payloads."""
+    out, todo = [], [(t, c.ps, 0) for t, _ in c.L.shell_texts()]
+    while todo:
+        t, ps, d = todo.pop()
+        flat, inner = E.blank_prose(t, ps, "words")
+        out += E._walk(flat, ps).segs
+        todo += [(s, p, E._deeper(d)) for s, _r, p in inner]
+    for dec in E.live_encoded(c):
+        out += E._walk(dec, True).segs if dec else []
+    return [s for s in out if s.strip() and not E._inert(s)]
+
+
+def _security_what(seg):
+    """What a statement does to the machine's security tooling (a short phrase), else None."""
+    toks = E._cmd_toks(seg)
+    head = os.path.basename(toks[0]).lower().removesuffix(".exe") if toks else ""
+    if head == "runas":
+        return "Running a command as another user (runas)"
+    if head in _REG_WRITERS and re.search(r"(?i)\bHKLM:|\bHKEY_LOCAL_MACHINE\b|Registry::HKLM", seg):
+        return "Writing to the machine-wide registry (HKLM)"
+    return next((w for rx, w in _SECURITY if rx.search(seg)), None)
+
+
+def security_tooling_change(c):
+    if not cfg():
+        return
+    for seg in _word_statements(c):
+        what = _security_what(seg)
+        if what:
+            E.block(f"{what} is blocked: the agent does not elevate, change security tooling or write machine-wide "
+                    "settings. Reading them is fine. If this is needed, ask your IT team, or run it yourself in your own "
+                    "shell after reading it.", "security-tooling-change", seg[:160])
+
+
+# ── browser CLI: ask before it uploads, runs code, or leaves the approved hosts ──────────────────────────────
+# Command names are the ones in the Playwright CLI's own README and `playwright-cli --help` (0.1.22).
+_CLI_UPLOAD = {"upload", "drop"}                    # upload <files> / drop <ref> --path=<file>: files from this machine
+_CLI_CODE = {"eval", "run-code"}                    # JavaScript / Playwright code run inside the browser
+_CLI_NAV = {"open", "goto", "tab-new"}              # each can carry a URL
+_CLI_SESSION = {                                    # commands that bring a signed-in identity or a page-chosen tool in
+    "attach": "connects to a browser that is already running, with everything that browser is signed in to",
+    "state-load": "loads saved cookies and logins into the browser, so the pages that follow act as the account they belong to",
+    "webmcp-call": "runs a tool the page itself registered, using the page's signed-in session; what the page says about "
+                   "that tool is untrusted"}
+_CLI_FLAG_ASK = {                                   # options, anywhere in the call, that reach a real profile or browser
+    "--profile": "uses a browser profile folder you name, which can be your real browser's own folder with everything it is "
+                 "signed in to",
+    "--persistent": "keeps the browser profile, with its cookies and logins, on disk after the browser closes",
+    "--extension": "connects to your running browser through its extension, with everything that browser is signed in to"}
+_CLI_STORED = {                                     # commands that print or change stored session values (the transcript is a copy)
+    "cookie-": "the browser's cookies",
+    "localstorage-": "the page's localStorage",
+    "sessionstorage-": "the page's sessionStorage"}
+_CLI_VALUE_FLAGS = {"-s", "--session", "--config", "--browser", "--profile", "--device", "--idle-timeout", "--cdp",
+                    "--extension", "--endpoint"}    # take a value; an unknown flag is assumed to take none (fails closed)
+_CLI_RUNNERS = {"npx", "pnpx", "bunx"}
+
+
+def _cli_args(toks):
+    """(words, flags) of a playwright-cli invocation, else None: the words with the options dropped (the command first),
+    and every option as (name, value or None), wherever it stands."""
+    toks = list(toks)
+    while toks and toks[0] in ("&", "."):           # PowerShell call operator
+        toks.pop(0)
+    if not toks:
+        return None
+    head, rest = re.sub(r"\.(?:exe|cmd|ps1|bat)$", "", os.path.basename(toks[0]).lower()), toks[1:]
+    if head in _CLI_RUNNERS:
+        while rest and rest[0].startswith("-"):
+            rest = rest[1:]
+        if rest[:1] == ["playwright-cli"]:
+            rest = rest[1:]
+        elif rest[:2] == ["playwright", "cli"]:
+            rest = rest[2:]
+        else:
+            return None
+    elif head != "playwright-cli":
+        return None
+    words, flags, k = [], [], 0
+    while k < len(rest):
+        t = rest[k].strip("\"'")
+        k += 1
+        if t.startswith("-") and len(t) > 1:
+            name, eq, val = t.partition("=")
+            if not eq:
+                val = None
+                if name in _CLI_VALUE_FLAGS and k < len(rest):
+                    val, k = rest[k].strip("\"'"), k + 1
+            flags.append((name.lower(), val))
+            continue
+        words.append(t)
+    return words, flags
+
+
+def browser_cli(c):
+    conf = cfg()
+    if not conf:
+        return
+    for seg, _ in E.statements(c):
+        if "playwright" not in seg.lower():
+            continue
+        args = _cli_args(E._cmd_toks(seg))
+        if not args:
+            continue
+        words, flags = args
+        for name, val in flags:
+            if name in _CLI_FLAG_ASK:
+                E.ask(f"playwright-cli {name} {_CLI_FLAG_ASK[name]}. Approve only if you meant to and your organisation "
+                      "approves that use.", "browser-cli", seg[:160])
+            elif name == "--cdp":
+                host = _url_host(val) if val else None
+                if host is None or not _local(host):
+                    where = host or "a target the guard cannot read"
+                    E.ask(f"playwright-cli --cdp connects to a browser that is already running ({where}), which is not "
+                          "localhost, with everything that browser is signed in to. Approve only if you meant to and your "
+                          "organisation approves that use.", "browser-cli", seg[:160])
+        if not words:
+            continue
+        cmd = words[0].lower()
+        if cmd in _CLI_UPLOAD:
+            E.ask(f"playwright-cli {cmd} puts a file from this machine into the page the browser is on, and that site can "
+                  "read it. Approve only if you meant to and your organisation approves that site.", "browser-cli", seg[:160])
+        elif cmd in _CLI_CODE:
+            E.ask(f"playwright-cli {cmd} runs code inside the browser page, with everything that page and its signed-in "
+                  "session can reach. Read the code first; approve only if you meant to run it.", "browser-cli", seg[:160])
+        elif cmd in _CLI_SESSION:
+            E.ask(f"playwright-cli {cmd} {_CLI_SESSION[cmd]}. Approve only if you meant to and your organisation approves "
+                  "that use.", "browser-cli", seg[:160])
+        elif cmd == "state-save":
+            E.ask("playwright-cli state-save writes the browser's cookies and logins to a file on disk. Approve only if you "
+                  "meant to and know where that file will be kept.", "browser-cli", seg[:160])
+        elif any(cmd.startswith(pre) for pre in _CLI_STORED):
+            what = next(w for pre, w in _CLI_STORED.items() if cmd.startswith(pre))
+            E.ask(f"playwright-cli {cmd} reads or changes {what}, which hold session tokens and logins, and what it prints "
+                  "is copied into the transcript. Approve only if you meant to and nothing secret will be shown.",
+                  "browser-cli", seg[:160])
+        elif cmd in _CLI_NAV and len(words) > 1 and words[1].lower() != "about:blank":
+            host = _url_host(words[1])
+            if host is None or not (_local(host) or _allowed(host, conf, "git_remote_hosts", "upload_hosts")):
+                E.ask(f"playwright-cli {cmd} opens {host or 'a URL the guard cannot read'}, which is not localhost and not an "
+                      "approved host (git_remote_hosts or upload_hosts in the corporate settings file). Approve only if you "
+                      "meant to visit it.", "browser-cli", seg[:160])
+
+
+SHELL = (public_repo, remotes, uploads, publish, tls_verify_off, send, prod_build, protected_db_write,
+         security_tooling_change, browser_cli)
+TOOL = (protected_db_tool,)

@@ -51,6 +51,10 @@ Domains are the KB root's folders that hold a `HOT.md` (the `domains` field of `
 4. **Subagent `## DISCOVERIES` blocks**: route each to its `domain:` and `note:`.
 
 Work facts stay inside the knowledge base your organisation allows. Never write a credential value anywhere.
+- **No re-reads.** Do not read a file back after Edit or Write to check it: an edit applies only when its checks pass, so a call that succeeded has changed the file.
+- **The driver writes the daily log** (`daily/`, one line per save) and stamps `updated:` in front matter. Do not write
+  either by hand. A fact registered in `_shared/facts.json` has one owner note: change it there, and run
+  `kb_health.py facts` (same `scripts/` folder) if you moved a value.
 
 ## Step 3: active-context.md (through the driver only)
 Write your full new version to a scratch file (stay within `ac_bytes_left` bytes; in-flight items only, no rules).
@@ -70,7 +74,8 @@ DRIVER --ac-write <draft-file> --base <ac_base>
 DRIVER --post --domains ops,infra --note "<one-line summary>" --files <file1> <file2>
 ```
 `--files`: every KB file you wrote, as separate arguments. Add `--push` only when the user asked for it and the
-KB folder has a remote they configured.
+KB folder has a remote they configured. A scheduled backup of the knowledge base must never commit to the repository
+this driver commits to: give it its own repository or folder.
 
 | Result | Meaning, and what to do |
 |---|---|
@@ -79,6 +84,8 @@ KB folder has a remote they configured.
 | exit 0 + `action_required` | read it; several reasons are joined by `ALSO:` |
 | `THIS SAVE DID NOT COMPLETE` | active-context is past its cap and grace band: trim through `--ac-write`, re-run |
 | `cred_unscanned` | a `--files` path does not exist, so it was not scanned: fix the path, re-run |
+| `stamped` / `stamp_skipped` | notes given a fresh `updated:` (only those named in `--files` whose content changed since `--pre`); a skipped one says why (no front matter, over its cap): no action unless you expected a stamp |
+| `advisories` | one line each: the size of the always-loaded instructions, and weekly the notes marked deprecated. Information only. `skipped: ...` means that tool is missing or failed; the save is unaffected |
 | `git_commit` / `git_push` | `skipped` unless the KB is a git repository / you passed `--push` with a remote |
 
 ## Step 5: report (at most 5 lines)

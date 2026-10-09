@@ -1,0 +1,45 @@
+{
+ "version": 1,
+ "questions": [
+  {
+   "q": "I just got a managed laptop and want Claude Code and the toolkit working today. What do I run first?",
+   "expect": "docs/howto/01-setup-first-day.md"
+  },
+  {
+   "q": "Downloads fail with certificate errors because our network inspects encrypted traffic. What should I do?",
+   "expect": "docs/howto/04-proxies-and-tls-inspection.md"
+  },
+  {
+   "q": "Claude asks me to approve almost every command. How do I change how often it asks?",
+   "expect": "docs/howto/08-permission-modes-and-prompts.md"
+  },
+  {
+   "q": "How can I have Claude run a task every night without me sitting at the keyboard?",
+   "expect": "docs/howto/12-headless-and-scheduled-runs.md"
+  },
+  {
+   "q": "I was handed a codebase I do not trust. How do I look through it without letting anything run?",
+   "expect": "docs/howto/17-review-an-unfamiliar-repo-safely.md"
+  },
+  {
+   "q": "Our team has an internal REST service. How do I let Claude call it as a tool?",
+   "expect": "docs/howto/23-wrap-an-api-as-mcp.md"
+  },
+  {
+   "q": "I need to find an old answer somewhere in my documents and the shared drive. How do I search them?",
+   "expect": "docs/howto/27-find-a-file-or-an-answer.md"
+  },
+  {
+   "q": "A customer sent a long spec. How do I turn it into a backlog of user stories?",
+   "expect": "docs/howto/33-requirements-to-stories.md"
+  },
+  {
+   "q": "Before I email this deck, how do I strip hidden slides, comments and tracked changes?",
+   "expect": "docs/howto/36-scrub-a-document-before-sending.md"
+  },
+  {
+   "q": "I think I pasted a secret key into a chat by mistake. What are my first steps?",
+   "expect": "docs/howto/40-incident-first-steps.md"
+  }
+ ]
+}

@@ -76,10 +76,10 @@ design skills: `tools/fetch-upstream --optional`, after approval (`THIRD-PARTY.m
 2. Read the whole thread first. Answer what was asked.
 3. Write in the user's voice: short and direct, the answer first, then any asks, each with an owner
    and a date. No filler.
-4. Quote only what you reply to, under the thread's own "On <date>, <name> wrote:" line.
-5. Email gets two versions: plain text, and HTML with real paragraphs, bulleted lists with bold
-   lead-ins, and the user's signature. If you build the draft as a file, set `In-Reply-To` and
-   `References` so it threads.
+4. Quote only what you reply to, under the thread's own quote header.
+5. Email gets two versions, plain text and HTML, in the style USER.md describes under "How I write"
+   (default: plain paragraphs and the user's signature). If you build the draft as a file, set
+   `In-Reply-To` and `References` so it threads.
 6. Run a `humanizer` pass, then re-read it as the recipient.
 7. Nothing confidential leaves its audience: check every recipient, attachment and quoted line.
 - **Done:** a draft the user can send unchanged, with the recipients and subject stated.

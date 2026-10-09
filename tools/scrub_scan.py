@@ -8,7 +8,9 @@ names (tracked plus untracked-not-ignored: what would be published, build/ and d
 skips .git, caches, virtualenvs and build output. Office files (.docx/.pptx/.xlsx and their macro and template
 variants) are scanned through their metadata parts (docProps/core.xml, app.xml, custom.xml) and PNG files through
 their tEXt/zTXt/iTXt chunks. Every skipped file is printed with its reason. The scan FAILS (exit 1) when it scanned
-no file, or when it skipped a binary or NUL-containing file, unless --allow-binary. Two rule sets:
+no file, when it skipped a binary or NUL-containing file (unless --allow-binary), or when walk mode skipped a directory
+it was asked to scan (build output, dependencies, virtualenvs; only VCS metadata and tool caches are skipped quietly,
+git mode skips nothing). Two rule sets:
   built-in (G*)  G1 e-mail addresses (example.com/.org/.net, *.example, *.test, *.invalid, localhost and the
                     git@ SSH user are fine)
                  G2 IPv4 addresses (the RFC 5737 documentation ranges, loopback, the unspecified and broadcast
@@ -16,7 +18,9 @@ no file, or when it skipped a binary or NUL-containing file, unless --allow-bina
                  G3 absolute per-user paths: C:\\Users\\<name>, /c/Users/<name>, /mnt/c/Users/<name>, /home/<name>,
                     /Users/<name> (placeholders such as <user>, %USERNAME% and Public are fine)
                  G4 phone numbers
-                 G5 double-bracket wiki links (a personal knowledge-base link)
+                 G5 double-bracket wiki links (a personal knowledge-base link). The one exception: a link in a file
+                    under kb-template/ whose target is a note in kb-template/ (the template links its own notes;
+                    kb_index.resolve is the rule). A link there to anything else, and every link elsewhere, is a hit.
                  G6 credential shapes (the workbench secret scanner's patterns)
                  G7 author metadata in an Office file or PNG (creator, last modified by, company, manager, Author):
                     any value except a generator's default (python-docx, openpyxl, ...)
@@ -26,7 +30,9 @@ no file, or when it skipped a binary or NUL-containing file, unless --allow-bina
                  is a case-sensitive Python regex (add `(?i)` for case-insensitive); `#` starts a comment. Rule numbers
                  are the line numbers in that file.
 A built-in (G) hit is allowed only when the same line contains `scrub-ok:` followed by a reason; allowed hits are still
-counted. `scrub-ok:` never silences a denylist (D) hit: a private term has to leave the file.
+counted. `scrub-ok:` never silences a denylist (D) hit: a private term has to leave the file. An allowed kb-template link
+is read by the denylist without its double brackets (the target text is still matched), so a denylist rule that only
+describes the link syntax does not fire on the template's own links.
 Output never prints a denylist term: console and report name the rule number instead. The Markdown report names no
 matched text at all (only rule, file and line), so it can be published. Exit 1 on any unallowed hit.
 """
@@ -45,6 +51,7 @@ from pathlib import Path
 
 SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv", ".mypy_cache", ".pytest_cache", ".ruff_cache",
              ".tox", "dist", "build", ".state"}
+QUIET_DIRS = {".git", "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox"}   # never published content
 BINARY_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".zip", ".gz", ".tgz", ".7z", ".exe", ".dll",
               ".so", ".dylib", ".pyc", ".db", ".sqlite", ".woff", ".woff2", ".ttf", ".otf", ".docx", ".xlsx", ".pptx"}
 ALLOW = re.compile(r"scrub-ok:\s*\S")
@@ -71,6 +78,27 @@ _USERPATH = re.compile(r"(?i)(?:[A-Za-z]:[\\/]+Users|/mnt/[a-z]/Users|/[a-z]/Use
 _PHONE = re.compile(r"(?<![\w.+-])(?:\+\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}(?![\w.-]*\d)|"
                     r"(?<![\w+])\+\d{11,15}(?!\d)")
 _WIKI = re.compile(r"\[\[[^\[\]\n]{1,300}\]\]")
+KB_TEMPLATE = "kb-template"
+
+
+def kb_template_notes(root):
+    """The Markdown notes of kb-template/ as paths relative to it (what a template wikilink may name)."""
+    base = Path(root) / KB_TEMPLATE
+    return {p.relative_to(base).as_posix() for p in base.rglob("*.md")} if base.is_dir() else set()
+
+
+def template_link_ok(target, src_rel, notes):
+    """True when a wikilink target names a note in `notes`: <t>.md from the template root, beside the source,
+    <t>/00-index.md, or a bare name that is the file name of exactly one note. (The rule of kb_index.resolve; a test
+    holds the two together.)"""
+    t = target.split("|", 1)[0].split("#", 1)[0].strip().replace("\\", "/").strip("/")
+    if not t:
+        return False
+    base = t if t.endswith(".md") else t + ".md"
+    src_dir = src_rel.rsplit("/", 1)[0] if "/" in src_rel else "."
+    if any(c in notes for c in (base, f"{src_dir}/{base}", f"{t}/00-index.md")):
+        return True
+    return "/" not in t and sum(1 for n in notes if n.rsplit("/", 1)[-1][:-3].lower() == base[:-3].lower()) == 1
 
 
 def _secret_patterns(root):
@@ -240,7 +268,7 @@ def scan(paths, root, deny_rules, skip=(), skipped=None):
     """-> (files scanned, hits). A hit is (path, line, rule, allowed, shown text) where shown text is the match for a
     built-in rule and None for a denylist rule. skipped (a list) receives (path, reason) for every file not scanned."""
     scan_secrets = _secret_patterns(root)
-    hits, nfiles = [], 0
+    hits, nfiles, template_notes = [], 0, None
     skipped = [] if skipped is None else skipped
     skip = {Path(s).resolve() for s in skip}
     for fp in iter_files(paths, skip, skipped):
@@ -266,12 +294,20 @@ def scan(paths, root, deny_rules, skip=(), skipped=None):
             skipped.append((fp, "binary: NUL bytes or unreadable"))
             continue
         nfiles += 1
+        in_template = rel.startswith(KB_TEMPLATE + "/")
         for n, line in enumerate(text.splitlines(), 1):
             ok = bool(ALLOW.search(line))
+            seen = line
             for rule, a, b in generic_hits(line, scan_secrets):
+                if rule == "G5" and in_template:
+                    if template_notes is None:
+                        template_notes = kb_template_notes(root)
+                    if template_link_ok(line[a + 2:b - 2], rel[len(KB_TEMPLATE) + 1:], template_notes):
+                        seen = seen[:a] + "  " + seen[a + 2:b - 2] + "  " + seen[b:]   # not a hit; the denylist still reads the target
+                        continue
                 hits.append((rel, n, rule, ok, line[a:b]))
             for rule, rx in deny_rules:
-                if rx.search(line):
+                if rx.search(seen):
                     hits.append((rel, n, rule, False, None))      # scrub-ok never covers a denylist term
     return nfiles, hits
 
@@ -326,6 +362,7 @@ def main(argv=None):
     print(f"scanned {nfiles} files, {len(deny)} denylist rules: {len(bad)} unallowed hit(s), "
           f"{len(hits) - len(bad)} allowed by scrub-ok, {len(skipped)} skipped")
     binaries = [fp for fp, why in skipped if why.startswith("binary")]
+    skipped_dirs = [fp for fp, why in skipped if why.startswith("directory skipped") and fp.name not in QUIET_DIRS]
     fail = bool(bad)
     if nfiles == 0:
         print("FAIL: no file was scanned (wrong path, or everything was skipped)")
@@ -333,6 +370,10 @@ def main(argv=None):
     if binaries and not a.allow_binary:
         print(f"FAIL: {len(binaries)} binary or NUL-containing file(s) could not be scanned; remove them, or pass "
               "--allow-binary after checking each by hand")
+        fail = True
+    if skipped_dirs:
+        print(f"FAIL: walk mode skipped {len(skipped_dirs)} director(ies) it was asked to scan; scan them through git "
+              "or pass the paths that matter")
         fail = True
     if a.report:
         write_report(a.report, nfiles, hits, len(deny))

@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "<server-name>": {
+      "command": "ssh",
+      "args": [
+        "-T",
+        "-o", "BatchMode=yes",
+        "-o", "ServerAliveInterval=30",
+        "<host>",
+        "<remote-dir>/.venv/bin/python",
+        "<remote-dir>/bridge.py"
+      ],
+      "env": {}
+    }
+  }
+}

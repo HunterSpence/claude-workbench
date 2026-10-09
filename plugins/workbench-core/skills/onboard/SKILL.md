@@ -1,6 +1,6 @@
 ---
 name: onboard
-description: Short onboarding interview that fills in your work identity (USER.md) and seeds the knowledge base - name, role, team, time zone and hours, how you write, the repos and tools you use, review and merge norms, and what Claude must never do. Run it once after install, or again when your role or team changes. User-invoked: /workbench-core:onboard.
+description: Short onboarding interview that fills in your work identity (USER.md) and seeds the knowledge base - name, role, team, time zone and hours, how you write, the repos and tools you use, review and merge norms, and what Claude must never do. Run it once after install, or again when your role or team changes. User-invoked as /workbench-core:onboard.
 disable-model-invocation: true
 ---
 

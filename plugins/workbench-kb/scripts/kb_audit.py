@@ -9,9 +9,11 @@ Layout under the KB root (see kb-template/README.md):
   <domain>/history.md          session records (rolled into <domain>/history/YYYY-MM.md past the cap)
   <domain>/<topic>.md          topic notes with frontmatter
   daily/YYYY-MM-DD.md          one line per save
-  .state/                      locks, flags, snapshots, metrics (derived; keep it out of git)
-The search index is NOT in the KB (a synced folder such as OneDrive can corrupt a live SQLite file): it lives in
-<workbench home>/cache/kb-<hash>.db.
+Nothing derived lives in the KB. A synced folder such as OneDrive can corrupt a live SQLite file and cannot hold a lock,
+so the search index sits in <workbench home>/cache/kb-<key>.db and the state (save.lock, precompact flags, snapshots,
+save metrics, journal windows) in <workbench home>/kb-state/<key>/. <key> is kb_key(): 8 hex digits of the KB root path.
+An earlier kit kept the state in <KB>/.state/; save_driver.py --pre COPIES it across once (see migrate_state) and the old
+folder stays readable for one release.
 
 KB root: WORKBENCH_KB_ROOT, else <workbench home>/config.json "kb_root", else ~/claude-kb.
 Domains: every folder of the KB root that holds a HOT.md (the template ships _shared, platform, infra, data, ai,
@@ -53,20 +55,35 @@ def kb_root():
 
 ROOT = kb_root()
 KB = ROOT                      # domain folders sit directly under the root
-STATE = ROOT / ".state"
+
+
+def kb_key(root=None):
+    """8 hex digits naming one KB root, so two KBs never share an index file or a state folder."""
+    return hashlib.sha256(Path(root or ROOT).resolve().as_posix().lower().encode()).hexdigest()[:8]
+
+
+def state_dir(root=None):
+    """Locks, flags, snapshots and metrics of a KB: local to this machine, never inside the (possibly synced) KB.
+    workbench-core's hooks hold a copy of this rule as _wb.kb_state_dir; a test asserts the two agree."""
+    return workbench_home() / "kb-state" / kb_key(root)
+
+
+STATE = state_dir()
 SNAPSHOTS = STATE / "snapshots"
-SAVE_LOCK = STATE / "locks" / "save.lock"
+SAVE_LOCK = STATE / "save.lock"
+OLD_STATE = ROOT / ".state"    # where an earlier kit kept all of it: read, copied once, never written again
+OLD_SNAPSHOTS = OLD_STATE / "snapshots"
+OLD_SAVE_LOCK = OLD_STATE / "locks" / "save.lock"
 AC = ROOT / "active-context.md"
 INBOX = ROOT / "inbox.jsonl"
 DAILY = ROOT / "daily"
 
 
 def index_db():
-    """The FTS index file, keyed by the KB root so two KBs never share one. KB_INDEX_DB overrides (tests)."""
+    """The FTS index file, keyed by the KB root. KB_INDEX_DB overrides (tests)."""
     if os.environ.get("KB_INDEX_DB"):
         return Path(os.environ["KB_INDEX_DB"])
-    key = hashlib.sha256(ROOT.resolve().as_posix().lower().encode()).hexdigest()[:8]
-    return workbench_home() / "cache" / f"kb-{key}.db"
+    return workbench_home() / "cache" / f"kb-{kb_key()}.db"
 
 
 # Caps. HOT.md is byte-capped, not line-capped (a line cap is gamed by long lines). Over the warn cap: demote with
@@ -88,6 +105,7 @@ def link(target):
 AC_BYTES_CAP = 8_192              # active-context.md: the one hard gate is bytes
 AC_LINES_ADVISORY = 60
 AC_LINE_BYTES_ADVISORY = 320      # a line over this is a compound line: split it
+AC_DECISIONS_ADVISORY = 10        # more open "Waiting on you" items than this: the user has a backlog to settle
 KEEP_DAYS = 7
 MIN_KEEP_ENTRIES = 5
 
@@ -111,6 +129,22 @@ def lf_bytes(p):
     return len(b) - b.count(b"\r\n")
 
 
+_WAITING = re.compile(r"##\s+waiting on you\s*$", re.I)
+_ITEM = re.compile(r"\s*(?:[-*+]|\d+[.)])\s+\S")
+
+
+def open_decisions(text):
+    """How many open items sit under the '## Waiting on you' heading (actions or decisions only the user can take).
+    A struck-through (~~) or ticked ([x]) item is closed."""
+    n, inside = 0, False
+    for ln in text.split("\n"):
+        if re.match(r"#{1,6}\s", ln):
+            inside = bool(_WAITING.match(ln))
+        elif inside and _ITEM.match(ln) and not re.search(r"~~|\[x\]", ln, re.I):
+            n += 1
+    return n
+
+
 def ac_report(text):
     """active-context advisories. None blocks: the byte cap is the only gate."""
     lines = text.split("\n")
@@ -120,7 +154,11 @@ def ac_report(text):
         adv["lines"] = f"{len(lines)} lines (advisory {AC_LINES_ADVISORY}). Facts belong in <domain>/ notes."
     if long_:
         adv["line-len"] = f"{len(long_)} line(s) over {AC_LINE_BYTES_ADVISORY} B (lines {long_[:5]}): split, don't golf."
-    return {"lines": len(lines), "advisories": adv}
+    waiting = open_decisions(text)
+    if waiting > AC_DECISIONS_ADVISORY:
+        adv["decisions"] = (f"open user decisions: {waiting} (advisory {AC_DECISIONS_ADVISORY}). Put the oldest to the "
+                            "user for a yes or no, or close the ones that no longer matter.")
+    return {"lines": len(lines), "decisions": waiting, "advisories": adv}
 
 
 def _append(path, body):
@@ -244,7 +282,8 @@ def rollover_age_adaptive(domain):
 def caps():
     return {"hot_warn": HOT_WARN_BYTES, "hot_hard": HOT_HARDFAIL_BYTES, "shared_hot_warn": SHARED_HOT_WARN_BYTES,
             "hist": HIST_BYTES_CAP, "ac_bytes": AC_BYTES_CAP, "ac_lines": AC_LINES_ADVISORY,
-            "ac_line_bytes": AC_LINE_BYTES_ADVISORY, "kb_root": ROOT.as_posix(), "domains": domains()}
+            "ac_line_bytes": AC_LINE_BYTES_ADVISORY, "ac_decisions": AC_DECISIONS_ADVISORY, "kb_root": ROOT.as_posix(),
+            "state_dir": STATE.as_posix(), "domains": domains()}
 
 
 def main():

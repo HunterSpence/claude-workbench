@@ -9,7 +9,10 @@ the stack). Demoting is one command instead:
   kb_demote.py --over-cap                     # list what to demote, change nothing
 
 Safety: the lines are appended to history.md and READ BACK from disk before they are removed from HOT.md. If the
-append cannot be verified, HOT.md is not touched. Both writes are atomic, under the save driver's lock.
+append cannot be verified, HOT.md is not touched. Both writes are atomic, under the save driver's lock: the same
+save_driver.save_lock() a save takes, so a session still on an earlier kit (which holds the lock inside the KB) blocks
+a demote exactly as it blocks a save. Another session holding it past SAVE_LOCK_TIMEOUT (default 120 s) is an error,
+not a hang, and nothing is changed.
 """
 import argparse
 import sys
@@ -18,9 +21,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import kb_audit  # noqa: E402  (caps, paths and domains: the one home)
+import save_driver  # noqa: E402  (save_lock(): the one definition of which lock files a write takes)
 import savelock  # noqa: E402
 
-KB, LOCK = kb_audit.KB, kb_audit.SAVE_LOCK
+KB = kb_audit.KB
 _read = savelock.read_text
 MAX_HITS = 5   # above this, require --force: a loose --match must not gut a file
 
@@ -35,7 +39,7 @@ def demote(domain, match, leave_link=False, dry_run=False, force=False):
     if not match.strip():
         return {"error": "refusing a whitespace-only --match: it matches every line"}
 
-    with savelock.filelock(LOCK, timeout=120):
+    with save_driver.save_lock():   # raises savelock.LockBusy past SAVE_LOCK_TIMEOUT; main() reports it
         lines = _read(hot).splitlines()
         m = match.lower()
         hits = [i for i, l in enumerate(lines) if m in l.lower()]
@@ -151,7 +155,10 @@ def main():
         return 1
 
     import json
-    res = demote(a.domain, a.match, a.leave_link, a.dry_run, a.force)
+    try:
+        res = demote(a.domain, a.match, a.leave_link, a.dry_run, a.force)
+    except savelock.LockBusy as e:
+        res = {"error": f"another session holds the save lock ({e}); nothing was changed, try again"}
     print(json.dumps(res, indent=1, ensure_ascii=False))
     return 1 if res.get("error") else 0
 

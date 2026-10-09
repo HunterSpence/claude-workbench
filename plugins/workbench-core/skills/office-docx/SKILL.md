@@ -77,6 +77,17 @@ render. Tracked changes and comments are not supported by python-docx: for a rev
 user to apply your suggested edits in Word with Track Changes on, or produce a new version plus a
 change list. Never overwrite the user's original; write a new file.
 
+## Before it leaves the organisation
+Render check first (section above), then scrub a copy and send only the copy:
+```bash
+"${user_config.python}" "${CLAUDE_SKILL_DIR}/../office-render/scripts/scrub.py" memo.docx --out memo-send.docx --json
+```
+It accepts tracked changes (deleted text is gone) and removes comments, author and company names and the preview image. The sensitivity label stays. Details and limits: the office-render skill.
+
+## Starter outlines
+`${CLAUDE_SKILL_DIR}/templates/requirements-pack.json` and `${CLAUDE_SKILL_DIR}/templates/decision-log.json` are outlines for the `build` command: copy one, fill the
+`<placeholders>`, build. Both end with a Provenance section (AI assistance line, reviewer, date): complete it or delete it on purpose.
+
 ## Alternatives
 Anthropic's official `document-skills` plugin and the Claude for Word add-in are optional,
 separately licensed alternatives; see `THIRD-PARTY.md` before installing either.

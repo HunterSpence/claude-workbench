@@ -1,5 +1,5 @@
 {
-  "_readme": "Template for tools/mcp-healer/mcp_healer.py. Copy it to a file you own, fill every {{PLACEHOLDER}}, and set each server's action: ensure (install), park (keep but do not load), remove, or ignore (leave untouched). Keys are ${ENV} references: put the values in your environment (or OS credential store), never in this file. 'egress' says where your data goes; check it against your organisation's policy before enabling a server. Optional servers ship as ignore. Versions verified when this release was built; re-pin deliberately.",
+  "_readme": "Template for tools/mcp-healer/mcp_healer.py. Copy it to a file you own, fill every {{PLACEHOLDER}}, and set each server's action: ensure (install), park (keep but do not load), remove, or ignore (leave untouched). Optional servers ship as ignore (off). Keys are ${ENV} references or a headersHelper command: put the values in your environment (or OS credential store), never in this file; the healer refuses an entry whose placeholder or ${VAR} is still unset. 'egress' says where your data goes; check it against your organisation's policy before enabling a server. Versions verified when this release was built; re-pin deliberately.",
   "servers": {
     "tokensave": {
       "action": "ensure",
@@ -12,7 +12,7 @@
       "reason": "Local code graph: callers, impact, dead code, without reading whole files. Pinned, checksum-verified binary; see mcp/README.md."
     },
     "playwright": {
-      "action": "ensure",
+      "action": "ignore",
       "egress": "local browser; reaches only the sites you point it at",
       "command": "npx",
       "args": [
@@ -22,7 +22,7 @@
         "--isolated"
       ],
       "alwaysLoad": false,
-      "reason": "Browser automation for testing your own web apps. Exact version pinned (never @latest); isolated profile, so it never uses your signed-in browser."
+      "reason": "OPTIONAL, off by default: the Playwright CLI (package playwright-cli, guide 45) is the preferred browser path. Browser automation for testing your own web apps. Exact version pinned (never @latest); isolated profile, so it never uses your signed-in browser."
     },
     "chrome-devtools": {
       "action": "ignore",
@@ -55,14 +55,148 @@
     },
     "github": {
       "action": "ignore",
-      "egress": "HOSTED: GitHub's MCP endpoint; repository data you can already read flows to the session",
+      "egress": "HOSTED: GitHub's MCP endpoint, read-only tools; repository data your account can already read flows into the session",
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/readonly",
+      "headersHelper": "{{PYTHON}} {{WORKBENCH_HOME}}/kit/mcp/bin/gh_mcp_headers.py github.com",
+      "headers": {
+        "X-MCP-Toolsets": "context,repos,issues,pull_requests,actions",
+        "X-MCP-Lockdown": "true"
+      },
+      "alwaysLoad": false,
+      "reason": "OPTIONAL. Default for github.com, SAML and Enterprise Managed Users orgs: the token comes from your gh login through headersHelper, so there is no new secret in any file. Needs the GitHub CLI OAuth app approved for your org. The /readonly URL limits the tools, not the token, which stays as broad as your gh login: use github-pat for a narrow token. An organisation IP allow list blocks this hosted endpoint (HTTP 403): use github-local. Dynamic toolsets no longer exist upstream; X-MCP-Toolsets picks what is exposed."
+    },
+    "github-pat": {
+      "action": "ignore",
+      "egress": "HOSTED: GitHub's MCP endpoint, read-only tools; repository data the token can read flows into the session",
       "type": "http",
       "url": "https://api.githubcopilot.com/mcp/readonly",
       "headers": {
-        "Authorization": "Bearer ${GITHUB_MCP_PAT}"
+        "Authorization": "Bearer ${WB_GITHUB_MCP_PAT}",
+        "X-MCP-Toolsets": "context,repos,issues,pull_requests,actions",
+        "X-MCP-Lockdown": "true"
       },
       "alwaysLoad": false,
-      "reason": "OPTIONAL, read-only toolset (the /readonly URL). GHE.com tenants: https://copilot-api.<tenant>.ghe.com/mcp. GitHub Enterprise Server has no remote endpoint: run the local github-mcp-server with GITHUB_HOST and --read-only, or just use the gh CLI (the github skill). Use a fine-grained token with read scopes your org allows."
+      "reason": "OPTIONAL, least privilege: a fine-grained token limited to the repositories you name, read access to contents, issues, pull requests and actions. The variable has its own name on purpose: Claude Code reads some well-known credential names as empty in remote headers. An organisation may need an owner to approve the token, and Enterprise Managed Users orgs must allow personal tokens. Keep the value in your environment or credential store."
+    },
+    "github-ghe": {
+      "action": "ignore",
+      "egress": "HOSTED: your GHE.com tenant's MCP endpoint, read-only; repository data the token can read flows into the session",
+      "type": "http",
+      "url": "https://copilot-api.{{GHE_SUBDOMAIN}}.ghe.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${WB_GITHUB_MCP_PAT}",
+        "X-MCP-Readonly": "true",
+        "X-MCP-Lockdown": "true"
+      },
+      "alwaysLoad": false,
+      "reason": "OPTIONAL, GHE.com data-residency tenants (replace {{GHE_SUBDOMAIN}} with your tenant name; the healer refuses the entry until you do). Read-only comes from the header because a /readonly path is not documented for this host. The enterprise must allow personal tokens. GitHub Enterprise Server has no remote endpoint: use github-local or the gh CLI."
+    },
+    "github-local": {
+      "action": "ignore",
+      "egress": "LOCAL process; calls the GitHub API from your own network with your gh token; read-only, lockdown on",
+      "command": "{{PYTHON}}",
+      "args": [
+        "{{WORKBENCH_HOME}}/kit/mcp/bin/gh_mcp_local.py",
+        "github.com"
+      ],
+      "alwaysLoad": false,
+      "reason": "OPTIONAL fallback when an organisation IP allow list blocks the hosted endpoint. Run gh_mcp_local.py github.com --install once (pinned release, SHA-256 checked). Replace github.com with your tenant host for GHE.com. GitHub Enterprise Server is EXPERIMENTAL: GitHub documents the local server there, Anthropic's GHES page says use the gh CLI, so prove it on your instance first."
+    },
+    "find": {
+      "action": "ensure",
+      "egress": "none: local index on this machine",
+      "command": "{{KNOWLEDGE_PYTHON}}",
+      "args": [
+        "{{WORKBENCH_HOME}}/kit/plugins/workbench-core/skills/find/scripts/find_mcp.py"
+      ],
+      "alwaysLoad": false,
+      "reason": "Registered by setup: the find skill's search, show and related as MCP tools for subagents and the desktop app. Local index, no network. The skill and CLI stay the primary interface."
+    },
+    "mslearn": {
+      "action": "ignore",
+      "egress": "HOSTED: queries go to Microsoft; public documentation only, no sign-in",
+      "type": "http",
+      "url": "https://learn.microsoft.com/api/mcp",
+      "alwaysLoad": false,
+      "reason": "OPTIONAL: search and fetch Microsoft Learn documentation. Needs no account. Never put internal names or code in a query."
+    },
+    "azure": {
+      "action": "ignore",
+      "egress": "LOCAL process; calls Azure Resource Manager with your own az login and RBAC rights; results enter the session",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@azure/mcp@2.0.5",
+        "server",
+        "start",
+        "--read-only"
+      ],
+      "alwaysLoad": false,
+      "reason": "OPTIONAL Azure MCP server (MIT), read-only, stable 2.0 line pinned. Acts with whatever your az login can already reach; it adds no access. Run az login first."
+    },
+    "azure-devops": {
+      "action": "ignore",
+      "egress": "LOCAL process; calls Azure DevOps for the organisation you name, with your az login; results enter the session",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@azure-devops/mcp@2.10.0",
+        "{{ADO_ORG}}",
+        "--authentication",
+        "azcli"
+      ],
+      "alwaysLoad": false,
+      "reason": "OPTIONAL Azure DevOps MCP server (MIT), local mode on your Azure CLI login. Replace {{ADO_ORG}} with your organisation name. The hosted remote endpoint needs your own Entra app registration for Claude Code, so it is not listed."
+    },
+    "atlassian": {
+      "action": "ignore",
+      "egress": "HOSTED: Atlassian's Rovo MCP endpoint; Jira and Confluence content your account can read flows into the session; some calls use Rovo credits",
+      "type": "http",
+      "url": "https://mcp.atlassian.com/v2/mcp",
+      "alwaysLoad": false,
+      "reason": "OPTIONAL, Jira and Confluence Cloud only (Data Center is not supported by this endpoint). Sign in with /mcp (OAuth). An Atlassian admin can block the endpoint ('Allow Atlassian supported domains'). Write tools exist: review what you approve."
+    },
+    "bigquery": {
+      "action": "ignore",
+      "egress": "HOSTED: Google Cloud's BigQuery MCP endpoint; query text and results for projects you can access, audit-logged by Google",
+      "type": "http",
+      "url": "https://bigquery.googleapis.com/mcp",
+      "oauth": {
+        "clientId": "${WB_GOOGLE_OAUTH_CLIENT_ID}"
+      },
+      "alwaysLoad": false,
+      "reason": "OPTIONAL. Needs a Google Cloud project with the BigQuery API enabled and the roles MCP Tool User, BigQuery Job User and BigQuery Data Viewer for your identity, plus your own OAuth client (desktop type); enter its secret when Claude Code asks, never in this file. Prefer a separate read-only identity."
+    },
+    "gcloud": {
+      "action": "ignore",
+      "egress": "HOSTED: Google Cloud CLI remote MCP endpoint (public preview); runs gcloud and bq commands as you, audit-logged by Google",
+      "type": "http",
+      "url": "https://cloudcli.googleapis.com/mcp",
+      "oauth": {
+        "clientId": "${WB_GOOGLE_OAUTH_CLIENT_ID}"
+      },
+      "alwaysLoad": false,
+      "reason": "OPTIONAL, PREVIEW. Needs the cloudcli API enabled and the MCP Tool User role in the project, plus your own OAuth client (desktop type). It can run mutating commands with your rights: leave it off unless you need it."
+    },
+    "ms365": {
+      "action": "ignore",
+      "egress": "Microsoft Graph only",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@softeria/ms-365-mcp-server@0.159.1",
+        "--org-mode",
+        "--read-only",
+        "--enabled-tools",
+        "^(list-mail-messages|list-mail-folders|list-mail-folder-messages|get-mail-message|list-calendars|list-calendar-events|get-calendar-event|get-calendar-view|list-online-meetings|get-online-meeting|list-meeting-transcripts|get-meeting-transcript|get-meeting-transcript-content)$"
+      ],
+      "env": {
+        "MS365_MCP_CLIENT_ID": "${WB_MS365_CLIENT_ID}",
+        "MS365_MCP_TENANT_ID": "${WB_MS365_TENANT_ID}"
+      },
+      "alwaysLoad": false,
+      "reason": "OPTIONAL community server (MIT, not bundled): read-only mail, calendar and meeting transcripts through YOUR OWN tenant app registration (public client, delegated permissions Mail.Read, Calendars.Read, OnlineMeetings.Read, OnlineMeetingTranscript.Read.All). Needs tenant-admin consent for those permissions, and the tenant must allow transcripts (the Graph transcript calls return 403 when policy turns them off). Set WB_MS365_CLIENT_ID and WB_MS365_TENANT_ID first: the healer refuses this entry until both are set, and the vendor's built-in multi-tenant app is never used. Have your security team review the package at this pinned version before you enable it. Sign in once with the package's --login in a folder you own."
     },
     "brave-search": {
       "action": "ignore",

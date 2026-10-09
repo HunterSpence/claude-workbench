@@ -13,8 +13,11 @@ evidence. ctx retrieves source material; you do the analysis. Keep every conclus
 retrieved evidence. Curated knowledge belongs in the knowledge base; ctx is the raw record.
 
 ## Setup (once, by the user; ask before installing anything)
-- Check your organisation allows it. Install a **pinned release binary** and verify its checksum;
-  never pipe an install script into a shell:
+- Check your organisation allows it. The kit's own route is `setup.py run --with ctx` (see the setup
+  skill): it downloads the release pinned in `bootstrap/packages.json`, checks its SHA-256, sets the
+  three variables and the manual index mode below, and `setup.py undo-config --apply` takes them
+  back out. By hand, install a **pinned release binary** and verify its checksum; never pipe an
+  install script into a shell:
   ```bash
   gh release download <tag> -R ctxrs/ctx -p '<asset for your OS>' -p SHA256SUMS
   grep ' <asset>$' SHA256SUMS | sha256sum -c -
@@ -83,3 +86,7 @@ across sessions, note conflicts and gaps, then write a short synthesis with cita
   (`credential present in session <id>`).
 - The ctx data root and transcript paths are private local data. Keep them out of every synced,
   backed-up-to-cloud or pushed folder.
+- Privacy: ctx reads your own agent transcripts on this machine and keeps its index here. With the
+  settings above (analytics, background service and automatic upgrades off, manual indexing) it
+  sends nothing anywhere and runs only when you run it. Transcripts can hold what you or a tool
+  printed, so some organisations do not want them indexed: ask before turning it on.

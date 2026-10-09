@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "{{name}}"
+version = "0.1.0"
+description = "MCP server {{name}}"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp==2.3.0",
+    # @@ if http
+    "uvicorn==0.54.0",
+    # @@ end
+    # @@ if auth=oauth
+    "PyJWT[crypto]==2.15.1",
+    # @@ end
+]
+
+[tool.setuptools]
+py-modules = ["server", "engine", "schemas"]

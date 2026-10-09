@@ -3,6 +3,7 @@
 Shell mechanics; the environment itself is `rules/corporate-environment.md`.
 
 ## Paths and quoting
+- Keep repos outside OneDrive-synced folders (Desktop and Documents are often redirected there).
 - Python and the Edit/Write tools take `C:/...` paths, never Git Bash's `/c/...` form. In Git Bash,
   use forward slashes.
 - Remote or quote-heavy commands: send a heredoc, `ssh <host> bash -s <<'EOF'` ... `EOF`, never
@@ -22,10 +23,6 @@ Shell mechanics; the environment itself is `rules/corporate-environment.md`.
   restricts PowerShell on purpose: `Add-Type` and many .NET calls fail by design. Don't try to
   escape it; use another approved tool or ask IT.
 
-## Where files live
-- Keep repos outside OneDrive-synced folders (for example `%USERPROFILE%\src`): Desktop and
-  Documents are often redirected into OneDrive, and a synced `.git` means conflicts and uploads.
-
 ## Processes and long jobs
 - **Never fork a subagent:** spawn a fresh one and pass the context. Both settings profiles turn
   fork mode off (`CLAUDE_CODE_FORK_SUBAGENT=0`); forks fail inside workflow workers.
@@ -37,7 +34,7 @@ Shell mechanics; the environment itself is `rules/corporate-environment.md`.
   (`taskkill /T /PID <pid>`).
 
 ## Memory and parallelism on a laptop
-- **At most two heavy jobs at once** (test suites, evals, local models), sized to the free memory,
+- **Run heavy jobs a few at a time** (test suites, builds, evals), sized to the free memory,
   not the core count: give each a cap with `{{WORKBENCH_HOME}}/kit/tools/memcap/memcap.py --mb <MB> --
   <command>` and run the heaviest alone. Parallel subagents each starting a test suite add up fast.
 - Run stress, fuzz or pathological-input tests under an OS memory cap (a Windows job object, or
@@ -48,5 +45,3 @@ Shell mechanics; the environment itself is `rules/corporate-environment.md`.
   cap the rate and the number of connections, and pause them when the user needs the bandwidth.
 - The Microsoft Store `python.exe` alias (under `WindowsApps`) is a stub, not an interpreter: hooks
   and scripts that call it fail. Use `py -3` or the path the installer recorded.
-- WSL has its own Claude Code configuration: limits, certificates and setup are in
-  `corporate-setup.md`.

@@ -1,4 +1,0 @@
-# Converts docx/pptx/xlsx/pdf/html to Markdown (MIT). Search itself needs only the Python stdlib.
-markitdown[docx,pptx,xlsx,pdf]==0.1.8
-# Tests only (tiny sample documents are generated on the fly):
-# python-docx==1.2.0

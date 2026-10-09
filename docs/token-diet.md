@@ -1,15 +1,16 @@
 # Token diet for Claude Code
 
-What actually reduces Claude Code token spend, measured on Opus 5.5 and Sonnet 5.5 in headless
-Claude Code sessions. These are one benchmark's numbers on one repo: measure your own before you
-keep anything (section 5).
+What actually reduces Claude Code token spend. Section 3 reports directions from one small run of headless Claude
+Code sessions on one open-source repository, not numbers to plan with: measure your own before you keep anything
+(section 5).
 
 ## 1. Know where your tokens go first
 
 Method: take a couple of weeks of your own session logs, price every request at API rates, and
 split the cost by token type: cache writes (context growth and cache misses), cache reads
 (re-reading context on every call), thinking, code and tool-call arguments, and the prose the model
-writes to you.
+writes to you. `py -3 <KIT>/tools/token-split/token_split.py` does this from your local transcripts: it reads usage fields
+only, never message text, and prices them with the table in section 6. `<KIT>` is the kit folder.
 
 In typical heavy use, most of the cost is cache reads and writes, and very little is prose. So
 "talk shorter" tricks can only touch a sliver. **Context size is the big lever.** Run `/usage`
@@ -22,43 +23,43 @@ and `/context` to see your own split before you change anything.
 - Hand exploration ("find where X is used", "read these 20 files") to a subagent. Only its summary
   comes back into your context.
 - Use `/effort` deliberately. Routine edits rarely need the top level, and thinking is billed as output.
+- **Lower the effort; Claude Code cannot turn thinking off** on Opus 5.5, Sonnet 5.5, Haiku 5.5 or the Fable models. For
+  Haiku 5.5 the vendor found, in its own testing, that telling the model to answer directly did not stop it thinking
+  (evidence E13 in `docs/model-routing.md`), so lower the level with `/effort` instead.
+- **Pick the effort at the start of a task.** On Opus 5.5, Sonnet 5.5, Haiku 5.5 and Fable 5.1 with an API key or a Claude
+  subscription, `/effort` mid-session keeps the prompt cache. On Bedrock, Google Cloud (Vertex), a Claude apps gateway, with
+  `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` set, under a HIPAA configuration, and on older models, a mid-session change makes
+  the next request re-read the whole conversation uncached, and Claude Code asks you to confirm while the cache is warm.
+- **In API conversations, keep effort constant.** If your own script or app calls the API, changing the top-level effort
+  between requests invalidates the prompt cache for that conversation. A per-message effort change keeps it, but only with
+  the vendor's per-message effort beta header, with adaptive thinking (with thinking off, a per-message change returns an
+  error), and not on Bedrock for Sonnet 5.5 or Haiku 5.5.
 - Keep `CLAUDE.md` and everything it imports short: it is re-read on every call of every session.
 - Leave MCP servers you aren't using disconnected, and leave MCP tool search on (it is on by
   default; don't set `ENABLE_TOOL_SEARCH=false`) so unused tool definitions stay out of context.
 
 ## 3. What this kit uses, and the plain-text alternative
 
-The build personas (`flagship`, `implementer`) carry the ponytail text (MIT). On Opus it saves about as much as the plain-text block below; on Sonnet the
-block saved more. To switch, replace the ponytail section of a persona with this block. It needs no
-plugin, hook or marketplace approval:
+The build personas (`flagship`, `implementer`) carry the ponytail text (MIT). The plain-text block below is the
+alternative: it needs no plugin, hook or marketplace approval. To switch, replace the ponytail section of a persona
+with it:
 
 > Be brief. Follow YAGNI: build only what is asked, and prefer the standard library and the
 > simplest solution that meets every stated requirement. Never drop input validation, security
 > checks, or error handling that prevents data loss. When asked to explain, teach, review, or
 > write a procedure or runbook, be complete: keep every step and say why.
 
-**In build sessions it is the big saver.** Tested on 12 one-line feature tickets in an open-source
-FastAPI + React app, each a real headless Claude Code session, 2 reps each:
-- Session cost fell 49% on Opus 5.5 (xhigh) and 31% on Sonnet 5.5 (high).
-- The agent took 29-41% fewer turns, so it re-read its context less. That is where the saving
-  comes from.
-- Half the tickets invited over-building. On plain CRUD tickets the saving was smaller: 35% on
-  Opus, 17% on Sonnet.
-- Two blind judges found no measured loss in completeness and no security gaps (no endpoint
-  exposed another user's data).
-- Agents wrote about half as many test lines, though not much less often. **Ask for tests when you
-  want them.**
-
-**In single answers it is the safe option.** The bill changed by about -2.5% on Opus and about 0 on
-Sonnet, with 0 failures, and every explanation stayed complete.
-
-Alternatives measured in the same benchmark:
-- **ponytail** (MIT plugin): about the same saving on Opus in build sessions (-53%), less on Sonnet
-  (-23%). It made Sonnet 5.5 cost more on single answers, dropped explanation steps, carries about
-  16 times the standing context of the block, and needs marketplace approval.
-- **"be brief."** alone: 6-8% saved on single answers, but a third of its explanations missed a
-  point and one runbook it wrote didn't work. Fine for code-only sessions.
-- **caveman**: left explanations too terse for a junior reader.
+What the small run showed (direction only):
+- **In build sessions both are the big saver.** Session cost fell on both models, mostly because the agent took
+  fewer turns and so re-read its context less. The saving was largest on tickets that invited over-building and
+  smaller on plain CRUD tickets. Blind review found no loss in completeness and no security gap.
+- **Agents wrote fewer test lines**, though not much less often. Ask for tests when you want them.
+- **In single answers the block is the safe option:** cost barely moved and every explanation stayed complete.
+  The ponytail plugin made single answers on the mid-tier model cost more and dropped explanation steps, carries
+  much more standing context than the block, and needs marketplace approval.
+- **"Be brief." alone** saved a little on single answers, but some explanations missed a point and one runbook it
+  wrote did not work. Fine for code-only sessions.
+- **caveman** left explanations too terse for a junior reader.
 
 ## 4. Do not install
 
@@ -76,8 +77,36 @@ Alternatives measured in the same benchmark:
 
 ## 5. Measure your own
 
-Use `/usage` and `/context` in Claude Code, or `npx ccusage` (MIT) over your local session logs.
+Use `/usage` and `/context` in Claude Code, `py -3 <KIT>/tools/token-split/token_split.py` for the split by token class, or
+`npx ccusage` (MIT) over your local session logs.
 Compare one normal week with one week on the diet before you keep it. Before you trust a result,
 check that the change was actually applied and that both weeks had comparable work
 (`instructions/rules/verification.md`): a saving measured on the wrong workload, or with the
 change silently not applied, is not a saving.
+
+## 6. Will a cheaper model save money?
+
+Compare per token class, not by the headline price. The vendor's price table for the Anthropic API, in dollars per million
+tokens (October 2026; check the pricing page before you rely on it). These numbers live in the `prices` key of
+`settings/model-evidence.json`, are repeated for all four models in [Models at a glance](models.md), and a test keeps this
+table equal to them:
+
+| Token class | Haiku 5.5, prompt up to 100K tokens | Haiku 5.5, prompt over 100K | Sonnet 5.5 | Opus 5.5 |
+|---|---|---|---|---|
+| Input | 0.10 | 0.50 | 2 | 4 |
+| Output | 0.50 | 2.50 | 10 | 20 |
+| Cache write (5 minutes) | 0.125 | 0.625 | 2.50 | 5 |
+| Cache read | 0.01 | 0.05 | 0.10 | 0.20 |
+
+So Sonnet 5.5 costs twenty times Haiku 5.5 for input, output and cache writes on prompts up to 100K tokens, but only ten
+times for cache reads. Above 100K tokens the gaps shrink to four times and two times. Opus 5.5 costs twice Sonnet 5.5 in
+every class. Agent sessions spend most of their money on cache reads and writes, and most agent turns carry long prompts
+(evidence O2 in `docs/model-routing.md`), so the long-prompt ratios decide: two times for cache reads, four times for
+cache writes. On long prompts Haiku 5.5 is sure to cost less than Sonnet 5.5 while it uses under twice the tokens, and cannot
+cost less at four times or more; in between, the token mix decides (mostly cache reads). Up to 100K tokens the bounds are ten
+and twenty times. Sonnet 5.5 costs less than Opus 5.5 while it uses under twice the tokens.
+
+Two things to recheck when you move work to Haiku 5.5. It counts about 30 percent more tokens for the same text than the
+previous small model did, so a token cap, budget or cost estimate tuned on that model needs recomputing. Its minimum
+cacheable prompt is 512 tokens, against 4,096 on the previous small model, so short prompts that never cached before can
+now be cached.

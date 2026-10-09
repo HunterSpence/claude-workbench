@@ -8,16 +8,26 @@
   --profile corporate|permissive  settings profile (default corporate). permissive implies --upstream-plugins
   --upstream-plugins            also merge settings/upstream-plugins.fragment.json
   --upstream-plugins-optional   also merge settings/upstream-plugins.optional.fragment.json (never implied)
-  --kb-root PATH                knowledge-base folder (default: the last install's, else ~/claude-kb)
+  --kb-root PATH                knowledge-base folder (default: the last install's, else <data root>/kb)
+  --data-root PATH              workbench data folder (default: the last install's, else <work OneDrive>/Workbench
+                                when exactly one verified work OneDrive exists, else ~/Workbench)
   --git-hosts h1,h2             the git hosts company code may be pushed to (written to the corporate allowlist)
   --force                       replace settings keys you already set to something else
   --no-cli                      never call the claude CLI; print its commands instead
-  --uninstall                   undo installs, newest first (also a dry run unless --apply)
+  --setup auto|plan             after --apply: show the capability report, then provision this machine in the
+                                background (auto) or only write the plan (plan). Absent: print the next command.
+  --with LIST                   opt-ins: tokensave, pm-pack, upstream-skills, capture, nightly, claude-winget,
+                                claude-autoupdate, ctx, update-latest (comma-separated; passed on to setup)
+  --no-nightly                  permissive profile: do not register the nightly knowledge refresh task
+  --no-update                   passed on to setup: skip its update phase
+  --uninstall                   undo installs, newest first, and the machine changes setup recorded (dry run
+                                unless --apply)
 
-No network, no admin rights, no git remote, no change to managed settings. Every changed file is backed up to
-<workbench home>/backups/<timestamp>/ with a manifest that --uninstall replays. Paths: CLAUDE_HOME = CLAUDE_CONFIG_DIR
-or ~/.claude; WORKBENCH_HOME = <CLAUDE_HOME>/workbench. The kit is copied to <WORKBENCH_HOME>/kit and the plugin
-marketplace is registered from there, so the folder you unpacked can be moved or deleted afterwards.
+No network, no admin rights, no git remote, no change to managed settings (setup, run separately or through --setup,
+is what installs software). Every changed file is backed up to <workbench home>/backups/<timestamp>/ with a manifest
+that --uninstall replays. Paths: CLAUDE_HOME = CLAUDE_CONFIG_DIR or ~/.claude; WORKBENCH_HOME = <CLAUDE_HOME>/workbench.
+The kit is copied to <WORKBENCH_HOME>/kit and the plugin marketplace is registered from there, so the folder you
+unpacked can be moved or deleted afterwards. CLAUDE_CONFIG_DIR inside a OneDrive folder is refused.
 
 Values with ONE owner, rewritten on every install (a change is printed as a warning): the KB root (env
 WORKBENCH_KB_ROOT, permissions.additionalDirectories, config.json, the instruction text) and the Python path
@@ -25,7 +35,8 @@ WORKBENCH_KB_ROOT, permissions.additionalDirectories, config.json, the instructi
 
 Exit codes: 0 done (or dry run) · 1 unexpected error · 2 environment problem (old Python, unreadable settings.json,
 bad option) · 3 blocked by your organisation's policy (ask your IT team) · 4 an apply step failed (see the output).
-Test seam: WORKBENCH_MANAGED_SETTINGS (os.pathsep-separated JSON files) is read as an extra managed source.
+Test seams: WORKBENCH_MANAGED_SETTINGS (os.pathsep-separated JSON files) is read as an extra managed source;
+WORKBENCH_FAKE_REGISTRY (a JSON file) replaces registry reads; WORKBENCH_REPORT_CLI replaces bootstrap/report.py.
 """
 import argparse
 import copy
@@ -42,9 +53,16 @@ import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 MARKETPLACE = "workbench"
-PLUGIN_IDS = ("workbench-core@workbench", "workbench-kb@workbench")
+PLUGIN_IDS = ("workbench-core@workbench", "workbench-kb@workbench")    # pluginConfigs.<id>.options.python: these only
+DEFAULT_PLUGINS = PLUGIN_IDS + ("workbench-biz@workbench",)
+CAPTURE_PLUGIN = "workbench-capture@workbench"                          # only with --with capture
+EXTRAS = ("tokensave", "pm-pack", "upstream-skills", "capture", "nightly", "claude-winget", "claude-autoupdate", "ctx",
+          "update-latest")
+# KB files an upgrade refreshes when the user has not edited them. The cards and their detectors move as ONE pair, so a
+# detector never names a card the user's file lacks; digests move one file at a time.
+KB_PAIR = ("_shared/bug-cards.md", "_shared/bug-detectors.json")
 BUILTIN_MARKETPLACES = {"claude-plugins-official": {"source": "github", "repo": "anthropics/claude-plugins-official"}}
 KIT_IGNORE = shutil.ignore_patterns(".git", "__pycache__", "*.pyc", ".venv", "venv", "node_modules", ".pytest_cache",
                                     "*.bak*", "installed-config.json")
@@ -117,6 +135,173 @@ def statusline_command(python, script):
         q = lambda s: "'" + fwd(s).replace("'", "''") + "'"  # noqa: E731
         return f'powershell -NoProfile -NonInteractive -Command "& {q(python)} {q(script)}"'
     return f"{shlex.quote(fwd(python))} {shlex.quote(fwd(script))}"
+
+
+# ── paths, registry reads, OneDrive placement (shared with setup.py and profile.py) ──────────────────────────
+def claude_home():
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude").expanduser()
+
+
+def lad():
+    """%LOCALAPPDATA% on Windows, ~/.cache elsewhere (layout token <LAD>)."""
+    v = os.environ.get("LOCALAPPDATA") if os.name == "nt" else None
+    return Path(v) if v else Path.home() / ".cache"
+
+
+def under(child, parent):
+    """True when child is parent or inside it (case-insensitive on Windows, separators normalised)."""
+    if not child or not parent:
+        return False
+    c, p = (fwd(os.path.abspath(str(x))).rstrip("/") for x in (child, parent))
+    if os.name == "nt":
+        c, p = c.lower(), p.lower()
+    return c == p or c.startswith(p + "/")
+
+
+_HIVES = {"HKLM": "HKEY_LOCAL_MACHINE", "HKCU": "HKEY_CURRENT_USER"}
+
+
+def _rkey(k):
+    return k.replace("/", "\\").strip("\\").lower()
+
+
+def fake_registry():
+    """The JSON test registry {"HKCU\\\\Key": {"Value": data | [data, type]}} or None when the real one is used."""
+    f = os.environ.get("WORKBENCH_FAKE_REGISTRY")
+    if not f:
+        return None
+    try:
+        return read_json(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def _winreg_open(key):
+    import winreg
+    hive, _, sub = key.replace("/", "\\").partition("\\")
+    return winreg.OpenKey(getattr(winreg, _HIVES.get(hive.upper(), hive.upper())), sub)
+
+
+def reg_values(key):
+    """{name: (data, type)} of a registry key, or None when the key does not exist. Read-only."""
+    fake = fake_registry()
+    if fake is not None:
+        for k, vals in fake.items():
+            if _rkey(k) == _rkey(key):
+                return {n: tuple(v) if isinstance(v, list) else (v, 4 if isinstance(v, int) else 1)
+                        for n, v in (vals or {}).items()}
+        return None
+    if os.name != "nt":
+        return None
+    import winreg
+    try:
+        with _winreg_open(key) as h:
+            out, i = {}, 0
+            while True:
+                try:
+                    n, d, t = winreg.EnumValue(h, i)
+                except OSError:
+                    return out
+                out[n], i = (d, t), i + 1
+    except OSError:
+        return None
+
+
+def reg_get(key, name):
+    """(data, type) of one registry value, or None. Value names are case-insensitive, as in Windows."""
+    for n, v in (reg_values(key) or {}).items():
+        if n.lower() == name.lower():
+            return v
+    return None
+
+
+def reg_subkeys(key):
+    fake = fake_registry()
+    if fake is not None:
+        pre = _rkey(key) + "\\"
+        return sorted({k.replace("/", "\\").strip("\\")[len(pre):].split("\\")[0]
+                       for k in fake if _rkey(k).startswith(pre)})
+    if os.name != "nt":
+        return []
+    import winreg
+    try:
+        with _winreg_open(key) as h:
+            out, i = [], 0
+            while True:
+                try:
+                    out.append(winreg.EnumKey(h, i))
+                except OSError:
+                    return out
+                i += 1
+    except OSError:
+        return []
+
+
+ONEDRIVE_ACCOUNTS = r"HKCU\Software\Microsoft\OneDrive\Accounts"
+TENANT_ALLOW = r"HKLM\SOFTWARE\Policies\Microsoft\OneDrive\AllowTenantList"
+
+
+def onedrive_roots():
+    """(work, personal, every_root). work = [(folder, tenant id or None)] from Accounts\\Business<N> (N is not always 1)
+    plus %OneDriveCommercial%; personal = Accounts\\Personal plus %OneDriveConsumer%; every_root adds %OneDrive%,
+    which can point at either and is never used alone to pick a work folder. Tenant value name ConfiguredTenantId is
+    ASSUMED (confirm on a managed laptop)."""
+    work, personal = [], []
+    for sub in reg_subkeys(ONEDRIVE_ACCOUNTS):
+        key = ONEDRIVE_ACCOUNTS + "\\" + sub
+        folder = (reg_get(key, "UserFolder") or (None,))[0]
+        if not folder:
+            continue
+        if re.fullmatch(r"business\d+", sub, re.I):
+            work.append((folder, (reg_get(key, "ConfiguredTenantId") or (None,))[0]))
+        elif sub.lower() == "personal":
+            personal.append(folder)
+    env = os.environ
+    if env.get("OneDriveCommercial") and not any(under(env["OneDriveCommercial"], w) and under(w, env["OneDriveCommercial"])
+                                                 for w, _ in work):
+        work.append((env["OneDriveCommercial"], None))
+    if env.get("OneDriveConsumer"):
+        personal.append(env["OneDriveConsumer"])
+    every = [w for w, _ in work] + personal + ([env["OneDrive"]] if env.get("OneDrive") else [])
+    return work, personal, every
+
+
+def work_onedrive():
+    """(root, candidates): root is the single verified work OneDrive folder, else None. A candidate must exist, must not
+    sit under a personal OneDrive and, when the machine policy AllowTenantList exists, must carry a listed tenant."""
+    work, personal, _ = onedrive_roots()
+    allow = reg_values(TENANT_ALLOW)
+    allowed = None if allow is None else {str(x).lower() for n, (d, _) in allow.items() for x in (n, d)}
+    seen = {}
+    for folder, tenant in work:
+        p = Path(folder)
+        if not p.is_dir() or any(under(p, q) for q in personal):
+            continue
+        if allowed is not None and (not tenant or str(tenant).lower() not in allowed):
+            continue
+        seen.setdefault(fwd(p).lower(), p)
+    cands = list(seen.values())
+    return (cands[0] if len(cands) == 1 else None), cands
+
+
+def in_onedrive(path):
+    """True when path is inside any OneDrive folder (work or personal)."""
+    return any(under(path, r) for r in onedrive_roots()[2])
+
+
+def resolve_data_root(arg, prev):
+    """(data root, work OneDrive root or None). Order: --data-root, the last install's data_root, then the single
+    verified work OneDrive + /Workbench, else ~/Workbench. Two or more work folders stop the install: the user picks."""
+    if arg:
+        return Path(os.path.abspath(os.path.expanduser(arg))), work_onedrive()[0]
+    root, cands = work_onedrive()
+    if prev.get("data_root"):
+        return Path(prev["data_root"]), root
+    if len(cands) > 1:
+        raise Stop(2, "More than one work OneDrive folder is synced on this machine (" + ", ".join(fwd(c) for c in cands)
+                   + "). Choose where workbench data lives: re-run with --data-root <folder>/Workbench (one of them, "
+                     "or a local folder). It is never picked automatically.")
+    return (root / "Workbench" if root else Path.home() / "Workbench"), root
 
 
 # ── managed settings ─────────────────────────────────────────────────────────────────────────────────────────
@@ -225,9 +410,11 @@ def marketplace_allowed(src, managed):
 
 
 # ── settings merge ───────────────────────────────────────────────────────────────────────────────────────────
-def merge_settings(user, frag, managed, force, ops, notes, path=()):
+def merge_settings(user, frag, managed, force, ops, notes, path=(), prev=None):
     """Merge frag into user in place: a key the user set is kept (unless force), arrays are unioned, a key a managed
-    source sets as a scalar is skipped. Records undo ops; notes skipped keys as (path, why)."""
+    source sets as a scalar is skipped. prev = {path tuple: value} an earlier kit install wrote: a value still equal to
+    it is the kit's, so an upgrade updates it. Records undo ops; notes skipped keys as (path, why)."""
+    prev = prev or {}
     for k, v in frag.items():
         if k == "$schema" and not path:
             continue
@@ -240,7 +427,7 @@ def merge_settings(user, frag, managed, force, ops, notes, path=()):
             if k not in user:
                 user[k] = {}
                 ops.append({"op": "set", "path": list(p), "value": {}, "old": ABSENT, "container": True})
-            merge_settings(user[k], v, managed, force, ops, notes, p)
+            merge_settings(user[k], v, managed, force, ops, notes, p, prev)
         elif isinstance(v, list) and isinstance(user.get(k), list):
             add = [x for x in v if x not in user[k]]
             if add:
@@ -250,10 +437,10 @@ def merge_settings(user, frag, managed, force, ops, notes, path=()):
             user[k] = copy.deepcopy(v)
             ops.append({"op": "set", "path": list(p), "value": v, "old": ABSENT})
         elif user[k] != v:
-            if force:
+            if force or (p in prev and prev[p] == user[k]):
                 ops.append({"op": "set", "path": list(p), "value": v, "old": user[k]})
                 user[k] = copy.deepcopy(v)
-                notes.append((dotted, "replaced (--force)"))
+                notes.append((dotted, "replaced (--force)" if force else "updated: still the value the previous kit wrote"))
             else:
                 notes.append((dotted, "you already set it (kept; --force replaces)"))
 
@@ -337,7 +524,11 @@ def store_python(exe):
 class Installer:
     def __init__(self, a):
         self.a = a
-        self.claude_home = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude").expanduser()
+        self.claude_home = claude_home()
+        if in_onedrive(self.claude_home):
+            raise Stop(2, f"CLAUDE_CONFIG_DIR ({fwd(self.claude_home)}) is inside a OneDrive folder. Claude Code keeps "
+                          "session history, plugin caches and sign-in state there, which must stay on this machine. "
+                          "Unset it (default ~/.claude) or point it at a local folder; nothing was changed.")
         self.wb = self.claude_home / "workbench"
         self.kit = self.wb / "kit"
         self.python = fwd(sys.executable)
@@ -345,8 +536,14 @@ class Installer:
             self.prev = read_json(self.wb / "config.json")
         except (OSError, ValueError):
             self.prev = {}
-        kb = a.kb_root or self.prev.get("kb_root") or str(Path.home() / "claude-kb")
+        self.with_ = [w.strip() for w in (a.with_ or "").split(",") if w.strip()]
+        bad = [w for w in self.with_ if w not in EXTRAS]
+        if bad:
+            raise Stop(2, f"--with: unknown option(s) {', '.join(bad)}; known: {', '.join(EXTRAS)}")
+        self.data, self.od_work = resolve_data_root(a.data_root, self.prev)
+        kb = a.kb_root or self.prev.get("kb_root") or str(self.data / "kb")
         self.kb = Path(os.path.abspath(os.path.expanduser(kb)))
+        self.prior = [json.loads(p.read_text(encoding="utf-8")) for p in sorted((self.wb / "backups").glob("*/manifest.json"))]
         self.upstream = a.upstream_plugins or a.profile == "permissive"
         self.values = {"CLAUDE_HOME": fwd(self.claude_home), "WORKBENCH_HOME": fwd(self.wb), "KB_ROOT": fwd(self.kb),
                        "PYTHON": f'"{self.python}"' if " " in self.python else self.python}
@@ -361,7 +558,8 @@ class Installer:
         self.stamp = stamp + (f"-{n}" if n else "")
         self.backup = self.wb / "backups" / self.stamp
         self.manifest = {"version": VERSION, "ts": self.stamp, "repo": fwd(REPO), "profile": a.profile, "files": [],
-                         "created": [], "created_trees": [], "settings_ops": [], "cli": [], "no_cli": bool(a.no_cli)}
+                         "created": [], "created_trees": [], "settings_ops": [], "cli": [], "no_cli": bool(a.no_cli),
+                         "kb_root": fwd(self.kb), "kb_seeded": []}
         self.claude = None if a.no_cli else shutil.which("claude")
 
     def todo(self, text, fn=None):
@@ -492,10 +690,12 @@ class Installer:
             self.warnings.append(f"Python changes from {self.prev['python']} to {self.python}: the hooks and the "
                                  "statusline are updated")
         cfg = self.wb / "config.json"
-        body = lambda: json.dumps({"version": VERSION, "kb_root": fwd(self.kb), "python": self.python,  # noqa: E731
-                                   "profile": self.a.profile, "kit": fwd(self.kit), "statusLine": self.statusline()},
-                                  indent=2) + "\n"
-        self.todo(f"[files] write {fwd(cfg)} (kb_root, python, statusLine)", lambda: self.write_file(cfg, body()))
+        mine = {"version": VERSION, "kb_root": fwd(self.kb), "data_root": fwd(self.data), "python": self.python,
+                "profile": self.a.profile, "kit": fwd(self.kit)}
+        # keys setup.py and profile.py own (knowledge_python, knowledge_db, ...) survive a re-install
+        body = lambda: json.dumps({**{k: v for k, v in self.prev.items() if k not in mine},  # noqa: E731
+                                   **mine, "statusLine": self.statusline()}, indent=2) + "\n"
+        self.todo(f"[files] write {fwd(cfg)} (kb_root, data_root, python, statusLine)", lambda: self.write_file(cfg, body()))
         self.plan_allowlist()
 
     def plan_allowlist(self):
@@ -526,20 +726,83 @@ class Installer:
                                  "--git-hosts <your company's git hosts>, or edit corporate-allowlist.json by hand.")
 
     def plan_kb(self):
-        if "onedrive" in fwd(self.kb).lower():
+        if in_onedrive(self.kb) or "onedrive" in fwd(self.kb).lower():
             self.warnings.append(f"The KB root {fwd(self.kb)} is inside a OneDrive folder. That works (the search "
                                  "index lives outside it), but do not make it a git repository there, and check your "
                                  "organisation allows this data in that location.")
+        tpl = REPO / "kb-template"
+        files = sorted(fwd(p.relative_to(tpl)) for p in tpl.rglob("*") if p.is_file()) if tpl.is_dir() else []
+        self.todo(f"[data] workbench data root {fwd(self.data)} ("
+                  + (f"in the work OneDrive {fwd(self.od_work)}; pinned to stay on this device"
+                     if self.od_work and under(self.data, self.od_work) else "local") + ")", self.make_data)
         if self.kb.exists() and any(self.kb.iterdir()):
-            self.todo(f"[kb] keep the existing knowledge base at {fwd(self.kb)}")
+            # MAJ12: seed template files the KB lacks, but never one an earlier install seeded and the user deleted
+            known = {s["path"] for m in self.prior for s in m.get("kb_seeded") or []} | \
+                    {fwd(Path(m["kb_created"]) / f) for m in self.prior if m.get("kb_created") for f in m.get("kb_files") or []}
+            shas = {}   # KB path -> every hash an install put there
+            for m in self.prior:
+                for s in m.get("kb_seeded") or []:
+                    shas.setdefault(s["path"], set()).add(s["sha256"])
+                for k, h in (m.get("kb_shas") or {}).items():
+                    shas.setdefault(k, set()).add(h)
+
+            def state(rel):
+                # stock = byte-equal to the previous kit copy (still on disk: the kit is replaced at apply) or a recorded hash
+                dst = self.kb / rel
+                if not dst.exists():
+                    return "deleted" if fwd(dst) in known else "missing"
+                h, prev = sha(dst), sha(self.kit / "kb-template" / rel)
+                return "current" if h == sha(tpl / rel) else "stock" if h == prev or h in shas.get(fwd(dst), ()) else "edited"
+            st = {f: state(f) for f in files if f in KB_PAIR or f.startswith("_shared/digests/")}
+            pair_ok = all(st[f] in ("stock", "current", "missing") for f in KB_PAIR if f in st)
+            todo_pair = [f for f in KB_PAIR if f in st and pair_ok and st[f] in ("stock", "missing")]
+            seed = [f for f in files if not (self.kb / f).exists() and fwd(self.kb / f) not in known and f not in KB_PAIR]
+            seed += [f for f in todo_pair if st[f] == "missing"]
+            refresh = [f for f in todo_pair + sorted(f for f in st if f not in KB_PAIR) if st[f] == "stock"]
+            if not pair_ok:
+                why = ", ".join(f"{Path(f).name} is {'edited' if st[f] == 'edited' else 'removed'}"
+                                for f in KB_PAIR if st.get(f) in ("edited", "deleted"))
+                self.warnings.append(f"Kept your bug-cards.md and bug-detectors.json as they are: they update together, and "
+                                     f"{why}. This release's pair is in {fwd(self.kit / 'kb-template' / '_shared')}; "
+                                     "copy both over yours to take it.")
+            for f in (f for f in st if st[f] == "edited" and f not in KB_PAIR):
+                self.warnings.append(f"Kept your edited {f}; this release's copy is at {fwd(self.kit / 'kb-template' / f)}.")
+            if not seed and not refresh:
+                self.todo(f"[kb] keep the existing knowledge base at {fwd(self.kb)}")
+                return
+
+            def add():
+                for f in seed:
+                    dst = self.kb / f
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(tpl / f, dst)
+                    self.manifest["kb_seeded"].append({"path": fwd(dst), "sha256": sha(dst)})
+                for f in refresh:   # backed up and recorded like any changed file: uninstall puts the old copy back
+                    self.write_bytes(self.kb / f, (tpl / f).read_bytes())
+                    self.manifest.setdefault("kb_shas", {})[fwd(self.kb / f)] = sha(self.kb / f)
+            self.todo(f"[kb] keep the knowledge base at {fwd(self.kb)}"
+                      + (f"; add {len(seed)} new template file(s): " + ", ".join(seed) + " (uninstall removes them only if unchanged)"
+                         if seed else "")
+                      + (f"; refresh {len(refresh)} unedited file(s) to this release: " + ", ".join(refresh)
+                         + " (uninstall restores the old copy)" if refresh else ""), add)
             return
 
         def make():
             if self.kb.exists():
                 self.kb.rmdir()
-            shutil.copytree(REPO / "kb-template", self.kb)
+            shutil.copytree(tpl, self.kb)
             self.manifest["kb_created"] = fwd(self.kb)
+            self.manifest["kb_files"] = files
+            self.manifest["kb_shas"] = {fwd(self.kb / f): sha(self.kb / f) for f in files
+                                        if f in KB_PAIR or f.startswith("_shared/digests/")}
         self.todo(f"[kb] create the knowledge base at {fwd(self.kb)} from kb-template/ (uninstall never deletes it)", make)
+
+    def make_data(self):
+        new = not self.data.exists()
+        self.data.mkdir(parents=True, exist_ok=True)
+        if new and os.name == "nt" and self.od_work and under(self.data, self.od_work) and shutil.which("attrib"):
+            # "Always keep on this device": reads never trigger a cloud download and work offline
+            subprocess.run(["attrib", "+P", "-U", str(self.data)], capture_output=True, timeout=60)
 
     def fragment(self):
         p = REPO / "settings" / "profiles" / f"{self.a.profile}.fragment.json"
@@ -585,7 +848,9 @@ class Installer:
         if self.a.upstream_plugins_optional:
             deep_merge(frag, self._upstream("upstream-plugins.optional.fragment.json"))
         ops, notes = [], []
-        merge_settings(settings, frag, self.managed, self.a.force, ops, notes)
+        prev = {tuple(op["path"]): op["value"] for m in self.prior for op in m.get("settings_ops") or []
+                if op.get("op") == "set" and not op.get("container")}
+        merge_settings(settings, frag, self.managed, self.a.force, ops, notes, prev=prev)
         self.plan.append(f"[settings] profile {self.a.profile} ({fwd(src.relative_to(REPO))}); upstream plugins: "
                          f"{'yes' if self.upstream else 'no'}; optional upstream plugins: "
                          f"{'yes' if self.a.upstream_plugins_optional else 'no'}")
@@ -626,13 +891,19 @@ class Installer:
 
     def plan_plugins(self):
         src = self.kit if REPO.resolve() != self.kit.resolve() else REPO
+        ids = []
+        for i in DEFAULT_PLUGINS + ((CAPTURE_PLUGIN,) if "capture" in self.with_ else ()):
+            if (REPO / "plugins" / i.split("@")[0]).is_dir():
+                ids.append(i)
+            else:
+                self.warnings.append(f"plugin {i} is not in this copy of the kit: skipped")
         cmds = [["claude", "plugin", "marketplace", "remove", MARKETPLACE],
                 ["claude", "plugin", "marketplace", "add", fwd(src)]] + \
-               [["claude", "plugin", "install", i] for i in PLUGIN_IDS]
+               [["claude", "plugin", "install", i] for i in ids]
         shown = "\n".join(f"      {show(c)}" for c in cmds[1:])
         if not self.claude:
             self.todo("[plugins] the claude CLI is not on PATH (or --no-cli was given): after --apply, run:\n" + shown)
-            self.manifest["cli_pending"] = list(PLUGIN_IDS)
+            self.manifest["cli_pending"] = ids
             return
 
         def run():
@@ -705,6 +976,38 @@ class Installer:
               "scratch repo; it must be blocked. That is the only proof the installed hooks run.")
         return ok
 
+    # ── --setup: the capability report first, then provisioning ──
+    def setup_cmds(self):
+        kit = self.kit if (self.kit / "bootstrap" / "setup.py").exists() else REPO
+        py, setup = fwd(sys.executable), fwd(kit / "bootstrap" / "setup.py")
+        extra = (["--with", ",".join(self.with_)] if self.with_ else []) + (["--no-nightly"] if self.a.no_nightly else []) + \
+                (["--no-update"] if self.a.no_update else [])
+        report = os.environ.get("WORKBENCH_REPORT_CLI") or fwd(kit / "bootstrap" / "report.py")
+        pre = [py, report, "run", "--phase", "pre", "--packages", fwd(kit / "bootstrap" / "packages.json")] + \
+              (["--git-hosts", self.a.git_hosts] if self.a.git_hosts else [])
+        return pre, [py, setup, "plan", *extra], [py, setup, "run", "--detach", *extra], [py, setup, "status", "--json", "--wait", "60"]
+
+    def chain_setup(self):
+        """--setup auto: report pre (shown before any install), then the detached setup runner; plan: report + plan."""
+        pre, plan, run, poll = self.setup_cmds()
+        if not self.a.setup:
+            print("Next, to provision this machine (capability report first, then installs; it stops only for a UAC "
+                  "prompt, a reboot or something your IT team must allow):\n  " + show(run) + "\n  then poll: " + show(poll))
+            return 0
+        if Path(pre[1]).exists():
+            print("Capability report (before anything is installed):", flush=True)
+            r = subprocess.run(pre, timeout=600)
+            if r.returncode:
+                print(f"WARNING: the capability report exited {r.returncode}; setup continues")
+        else:
+            print(f"WARNING: {pre[1]} is not in this copy of the kit: no capability report")
+        if self.a.setup == "plan":
+            return subprocess.run(plan, timeout=600).returncode
+        r = subprocess.run(run, timeout=120)
+        if r.returncode == 0:
+            print("Setup is running in the background. Poll it with:\n  " + show(poll))
+        return r.returncode
+
 
 # ── uninstall ────────────────────────────────────────────────────────────────────────────────────────────────
 def _rewrite_text_file(p, keep_line):
@@ -714,17 +1017,56 @@ def _rewrite_text_file(p, keep_line):
     p.write_bytes((b"\xef\xbb\xbf" if bom else b"") + out.encode(enc if enc != "latin-1" else "utf-8"))
 
 
+def layout_resolved(home):
+    """[(entry, absolute path or None)] for the layout.json dir/file entries, tokens resolved for this install."""
+    wb = home / "workbench"
+    try:
+        cfg = read_json(wb / "config.json")
+    except (OSError, ValueError):
+        cfg = {}
+    dev = cfg.get("dev_drive")
+    tok = {"<CH>": home, "<WB>": wb, "<KIT>": wb / "kit", "<LAD>": lad(), "<HOME>": Path.home(),
+           "<DATA>": cfg.get("data_root"), "<KB>": cfg.get("kb_root"), "<DEVDRIVE>": dev,
+           "<SRC>": Path(dev) / "src" if dev else Path.home() / "src"}
+    if cfg.get("profile_of"):     # a per-client profile shares <LAD> with the main install: never remove its caches
+        tok["<LAD>"] = None
+    try:
+        entries = read_json(Path(__file__).resolve().parent / "layout.json")["paths"]
+    except (OSError, ValueError, KeyError):
+        return []
+    out = []
+    for e in entries:
+        if e.get("kind") in ("dir", "file"):
+            t, _, rest = e["path"].partition("/")
+            out.append((e, Path(tok[t]) / rest if tok.get(t) else None))
+    return out
+
+
+def layout_removals(home):
+    """Paths layout.json marks uninstall=remove. Task, registry and env entries are setup's undo-config job."""
+    return [p for e, p in layout_resolved(home) if p and e.get("uninstall") == "remove"]
+
+
 def uninstall(a):
-    claude_home = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude").expanduser()
-    wb = claude_home / "workbench"
+    claude_home_ = claude_home()
+    wb = claude_home_ / "workbench"
     manifests = sorted((wb / "backups").glob("*/manifest.json"), reverse=True)
     print(f"claude-workbench uninstall ({'APPLY' if a.apply else 'DRY RUN: nothing is changed; add --apply'})")
+    removals = layout_removals(claude_home_)
+    failed = False
+    try:   # machine changes setup recorded (task, RunOnce, env vars, gitconfig key, PATH shim, capture profile)
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import setup as setup_mod
+        failed = setup_mod.undo_config(apply=a.apply) != 0
+    except ImportError:
+        print("  setup.py is not next to this installer: machine changes (if any) were not undone")
     if not manifests:
         print(f"  nothing to undo: no install manifest under {fwd(wb / 'backups')}")
-        return purge_backups(a, wb, False)
+        remove_layout(a, removals)
+        return purge_backups(a, wb, failed)
     keep = wb / "backups" / f"uninstall-{time.strftime('%Y%m%d-%H%M%S')}"
     claude = None if a.no_cli else shutil.which("claude")
-    failed, ran = False, set()
+    ran = set()
     for mf in manifests:
         m = json.loads(mf.read_text(encoding="utf-8"))
         print(f"  undo install {m['ts']} (profile {m.get('profile')}):")
@@ -796,6 +1138,20 @@ def uninstall(a):
                     _rewrite_text_file(p, lambda ln: ln.strip() != m["claude_md_line"])
             elif p.exists():
                 print(f"    {f['path']} changed since the install: left as is (backup: {f.get('backup')})")
+        for s in m.get("kb_seeded") or []:
+            p = Path(s["path"])
+            if not p.exists():
+                continue
+            if sha(p) != s.get("sha256"):
+                print(f"    keep {s['path']} (a template file this install added; you edited it)")
+                continue
+            print(f"    remove {s['path']} (a template file this install added, unchanged)")
+            if a.apply:
+                p.unlink()
+                kb, d = Path(m.get("kb_root") or p.parent), p.parent
+                while d != kb and under(d, kb) and not any(d.iterdir()):
+                    d.rmdir()
+                    d = d.parent
         if m.get("kb_created"):
             print(f"    keep the knowledge base at {m['kb_created']} (your data; delete it yourself if you want)")
         if a.apply:
@@ -803,9 +1159,19 @@ def uninstall(a):
     for d in (wb / "instructions",):
         if a.apply and d.is_dir() and not any(d.iterdir()):
             d.rmdir()
+    remove_layout(a, removals)
     print(f"Done. Logs, backups and the knowledge base stay: {fwd(wb)}" if not a.purge_backups else
           f"Done. Logs and the knowledge base stay: {fwd(wb)}")
     return purge_backups(a, wb, failed)
+
+
+def remove_layout(a, removals):
+    """Runtime folders and files layout.json marks remove (state, venv, shims, caches, the capture runtime)."""
+    for p in removals:
+        if p.exists():
+            print(f"    {'remove' if a.apply else 'would remove'} {fwd(p)}")
+            if a.apply:
+                shutil.rmtree(p, ignore_errors=True) if p.is_dir() else p.unlink(missing_ok=True)
 
 
 def purge_backups(a, wb, failed):
@@ -836,8 +1202,15 @@ def main(argv=None):
     ap.add_argument("--upstream-plugins", action="store_true", help="merge settings/upstream-plugins.fragment.json")
     ap.add_argument("--upstream-plugins-optional", action="store_true",
                     help="merge settings/upstream-plugins.optional.fragment.json (never implied)")
-    ap.add_argument("--kb-root", help="knowledge-base folder (default: the last install's, else ~/claude-kb)")
+    ap.add_argument("--kb-root", help="knowledge-base folder (default: the last install's, else <data root>/kb)")
+    ap.add_argument("--data-root", help="workbench data folder (default: the last install's, else <work OneDrive>/"
+                                        "Workbench when exactly one verified work OneDrive exists, else ~/Workbench)")
     ap.add_argument("--git-hosts", help="comma-separated git hosts company code may be pushed to")
+    ap.add_argument("--setup", choices=["auto", "plan"], help="after --apply: capability report, then provision "
+                                                               "(auto, in the background) or only plan")
+    ap.add_argument("--with", dest="with_", help="opt-ins, comma-separated: " + ", ".join(EXTRAS))
+    ap.add_argument("--no-nightly", action="store_true", help="permissive profile: no nightly knowledge refresh task")
+    ap.add_argument("--no-update", action="store_true", help="passed on to setup: skip its update phase")
     ap.add_argument("--force", action="store_true", help="replace settings keys you already set")
     ap.add_argument("--no-cli", action="store_true", help="never call the claude CLI; print its commands instead")
     ap.add_argument("--uninstall", action="store_true", help="undo installs, newest first (dry run unless --apply)")
@@ -869,12 +1242,15 @@ def main(argv=None):
         if not a.apply:
             for w in inst.warnings:
                 print("WARNING: " + w)
+            if a.setup:
+                pre, plan, run, _ = inst.setup_cmds()
+                print(f"--setup {a.setup}: after --apply, would run:\n  {show(pre)}\n  {show(plan if a.setup == 'plan' else run)}")
             return 0
         inst.apply()
         if inst.failures:
             print("FAILED steps: " + "; ".join(inst.failures))
             return 4
-        return 0
+        return inst.chain_setup()
     except Stop as s:
         print(("STOP: " if s.code == 3 else "ERROR: ") + str(s))
         return s.code

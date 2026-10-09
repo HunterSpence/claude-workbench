@@ -1,7 +1,8 @@
 # Browser automation
 
 - **Default: local `playwright-cli`** (or an approved Playwright MCP). Run it visibly when the user
-  wants to watch, headless otherwise. Take a fresh snapshot before each click: the page changes
+  wants to watch, headless otherwise. On a managed laptop it drives the installed Edge, headless; prefer
+  the CLI to the Playwright MCP server, which ships off (guide 45). Take a fresh snapshot before each click: the page changes
   under you.
 - **Parallel browser work:** give each agent its own named session or profile. In a shared default
   session, another agent's page silently becomes yours.
@@ -10,8 +11,7 @@
 - **A bot wall, captcha, or 2FA prompt is a stop.** Bring the window on-screen and hand it to the
   user. Never solve, bypass or outsource a human check (Red Line: no circumvention).
 - **Never automate sites whose terms forbid it** (most social networks), and never automate
-  accounts that hold money, legal or identity status, or admin rights over infrastructure: those
-  stay human.
+  accounts with financial, legal or administrative authority: those stay human.
 - A remote desktop drawn into an HTML canvas (Citrix, Horizon or Azure Virtual Desktop web
   clients, noVNC, Guacamole): the `vdi-drive` skill, user-invoked only. It needs the desktop
   owner's written authorisation and a local authorisation note; never enter, discover or store

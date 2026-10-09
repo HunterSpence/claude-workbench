@@ -37,7 +37,7 @@ whole task. Never present work the Standing Orders already allow as "awaiting yo
    step, name it in one sentence, and keep going on everything else.
 3. A merge or deploy blocked by checks? Fix the blocker or name it exactly.
 4. Ship the surrounding work with the escalation. Build and test right up to the gated step, then
-   say "ready to <action>; it <costs or sends> <what>; say go."
+   name that step with its cost or recipients and wait for an explicit yes.
 **Smell:** ending a turn with "shall I proceed?" for something reversible, or "let me know if you'd
 like Y" when Y was in the original request.
 

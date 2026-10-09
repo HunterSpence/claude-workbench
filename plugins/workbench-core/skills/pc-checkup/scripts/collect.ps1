@@ -73,7 +73,7 @@ $checks = @(
 )
 Section "Crashes and errors (last $Days days; nothing listed = clean)" {
   foreach ($c in $checks) {
-    # a provider not installed here (e.g. AMD on an NVIDIA machine) throws "parameter is incorrect" = nothing to report
+    # a provider not installed on this machine (e.g. another GPU vendor's driver) throws "parameter is incorrect" = nothing to report
     try { $ev = @(Get-WinEvent -FilterHashtable @{LogName=$c.L; ProviderName=$c.P; Id=$c.I; StartTime=$since} -ErrorAction SilentlyContinue) }
     catch { continue }
     if ($c.K -eq 'wer') { $ev = @($ev | Where-Object { "$($_.Properties[2].Value)" -match '^(LiveKernelEvent|BlueScreen)$' }) }

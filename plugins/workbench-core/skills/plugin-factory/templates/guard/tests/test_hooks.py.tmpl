@@ -1,0 +1,58 @@
+"""Tests for the guard hook. Run from the repository root: python -m unittest discover -s plugins/__NAME__/tests -v"""
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+GUARD = Path(__file__).resolve().parents[1] / "scripts" / "guard.py"
+
+
+def run(event=None, data_dir=None, raw=None):
+    env = dict(os.environ)
+    env.pop("CLAUDE_PLUGIN_DATA", None)
+    if data_dir:
+        env["CLAUDE_PLUGIN_DATA"] = str(data_dir)
+    p = subprocess.run([sys.executable, "-I", str(GUARD)], input=raw if raw is not None else json.dumps(event),
+                       capture_output=True, text=True, env=env, timeout=30)
+    return p.returncode, p.stderr
+
+
+def bash(command):
+    return {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": command}}
+
+
+class GuardTest(unittest.TestCase):
+    def test_allows_a_normal_command_and_logs_its_first_word(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(run(bash("git status"), d)[0], 0)
+            self.assertEqual((Path(d) / "guard.log").read_text(encoding="utf-8").split(), ["git"])
+
+    def test_blocks_a_forced_push(self):
+        for cmd in ("git push --force origin main", "git push -f", "git push origin main --force"):
+            with self.subTest(cmd):
+                code, err = run(bash(cmd))
+                self.assertEqual(code, 2)
+                self.assertIn("forced git push", err)
+
+    def test_allows_force_with_lease(self):
+        self.assertEqual(run(bash("git push --force-with-lease origin topic"))[0], 0)
+
+    def test_ignores_other_tools(self):
+        self.assertEqual(run({"tool_name": "Edit", "tool_input": {"command": "git push --force"}})[0], 0)
+
+    def test_fails_open_on_bad_input(self):
+        self.assertEqual(run(raw="not json")[0], 0)
+        self.assertEqual(run(raw="")[0], 0)
+
+    def test_windows_style_paths_and_spaces_in_the_data_folder(self):
+        with tempfile.TemporaryDirectory() as d:
+            data = Path(d) / "plugin data"
+            self.assertEqual(run(bash(r"C:\tools\build.bat --release"), data)[0], 0)
+            self.assertTrue((data / "guard.log").exists())
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "_readme": "The one list of GitHub CLI commands that change something others can see. Read by the publish-confirm guard (gh api) and mirrored as ask rules in both settings profiles (a test keeps them equal). Edit here, then regenerate the profile rules.",
+  "verbs": {
+    "pr": ["create", "close", "edit", "ready", "reopen", "merge", "review", "comment"],
+    "issue": ["create", "close", "edit", "reopen", "delete", "transfer", "comment"],
+    "repo": ["create", "edit", "delete", "fork", "rename", "archive"],
+    "label": ["create", "edit", "delete"],
+    "workflow": ["run", "enable", "disable"],
+    "run": ["cancel", "rerun", "delete"],
+    "secret": ["set", "delete"],
+    "variable": ["set", "delete"],
+    "release": ["create", "upload", "edit", "delete"],
+    "gist": ["create"]
+  },
+  "api": {
+    "methods": ["POST", "PUT", "PATCH", "DELETE"],
+    "field_flags": ["-f", "-F", "--field", "--raw-field", "--input"]
+  }
+}

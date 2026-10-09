@@ -1,0 +1,4 @@
+{
+  "_comment": "One entry per fact that must have a single home: {\"id\": \"build-server-region\", \"owner\": \"infra/build-server\", \"canonical\": \"region east-a\", \"forbidden\": [\"region west-b\"]}. owner is the note that states the fact; canonical is the text it must keep stating; forbidden lists stale or competing versions that may appear nowhere else in the KB or in the always-loaded files (history records and lines marked SUPERSEDED are exempt). kb_health.py facts checks it; see README.md.",
+  "facts": []
+}

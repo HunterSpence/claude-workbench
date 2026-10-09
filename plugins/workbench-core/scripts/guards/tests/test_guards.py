@@ -3,8 +3,10 @@
 Every command here is invented for the test (example.com hosts, placeholder paths). The Claude config dir, the logs
 and the knowledge base all point at a temp dir. Every evaluated call is recorded, and NO output may ever contain
 "allow" or "updatedInput": ev() asserts it on each call, and ZCorpus re-runs the whole corpus at the end."""
+import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -12,6 +14,7 @@ import tempfile
 import unittest
 from unittest import mock
 
+REQUIRE = os.environ.get("WB_REQUIRE_ALL") == "1"   # acceptance runs: a missing dependency fails, never skips
 GUARDS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, GUARDS)
 TMP = tempfile.mkdtemp(prefix="wb-guards-")
@@ -51,6 +54,7 @@ def ev(tool, ti, cwd=None):
     out = engine.evaluate(data)
     s = json.dumps(out or {})
     assert '"allow"' not in s and "updatedInput" not in s, f"a guard answered allow / rewrote input: {s}"
+    assert not re.search(r"(?i)\ballow\b", s), f"a guard message holds the word allow: {s}"
     return out
 
 
@@ -171,7 +175,7 @@ class Generic(Case):
                     "git push --tags origin"]:
             self.allowed(cmd)
 
-    @unittest.skipUnless(HAS_GIT, "git not installed")
+    @unittest.skipUnless(HAS_GIT or REQUIRE, "git not installed")
     def test_push_to_a_default_branch_uses_the_repo(self):
         self.blocked("git push", "push-default-branch", cwd=git_repo("main"))
         self.blocked("git push -u origin HEAD", "push-default-branch", cwd=git_repo("master"))
@@ -190,7 +194,7 @@ class Generic(Case):
         self.assertNotEqual(gid(ev("Write", {"file_path": "C:/work/a.txt", "content": "x"})), "msys-path")
         self.assertNotEqual(gid(ev("Write", {"file_path": "/srv/app/a.txt", "content": "x"})), "msys-path")
 
-    @unittest.skipUnless(HAS_GIT, "git not installed")
+    @unittest.skipUnless(HAS_GIT or REQUIRE, "git not installed")
     def test_bare_force_push_uses_current_branch(self):
         self.blocked("git push --force", "force-push-main", cwd=git_repo("main"))
         self.allowed("git push --force", cwd=git_repo("feature"))
@@ -458,7 +462,7 @@ class Corporate(Case):
         self.allowed("scp build.zip deploy@host.example.com:/srv/")
         self.allowed("aws s3 cp report.csv s3://team-bucket/reports/")
 
-    @unittest.skipUnless(HAS_GIT, "git not installed")
+    @unittest.skipUnless(HAS_GIT or REQUIRE, "git not installed")
     def test_prose_and_nested_shell_pushes(self):
         ok = git_repo("feature", "https://git.example.com/acme/app.git")
         for cmd in ['git commit -m "fix: git push retry"', 'echo "git push"', 'grep -rn "git push" docs/',
@@ -523,7 +527,7 @@ class Corporate(Case):
         self.allowed("git config remote.origin.url https://git.example.com/acme/app.git")
         self.allowed("git -c url.https://git.example.com/mirror/.insteadOf=https://git.example.com/acme/ fetch")
 
-    @unittest.skipUnless(HAS_GIT, "git not installed")
+    @unittest.skipUnless(HAS_GIT or REQUIRE, "git not installed")
     def test_push_remote_names_are_resolved(self):
         self.allowed("git push origin feature", cwd=git_repo("feature", "https://git.example.com/acme/app.git"))
         self.blocked("git push origin feature", "remote-not-allowlisted",
@@ -539,7 +543,7 @@ class Corporate(Case):
         git(d, "config", "remote.origin.pushurl", "https://github.com/someone/app.git")
         self.blocked("git push origin feature", "remote-not-allowlisted", cwd=d)
 
-    @unittest.skipUnless(HAS_GIT, "git not installed")
+    @unittest.skipUnless(HAS_GIT or REQUIRE, "git not installed")
     def test_gist_and_release(self):
         for cmd in ["gh gist create notes.md", "gh release create v1 -R github.com/acme/app dist/app.zip",
                     "gh release upload v1 app.zip --repo acme/app"]:
@@ -622,7 +626,7 @@ class Corporate(Case):
         ("https://$HOST/x", None), ("https://git.example.com/%41", None),
     ]
 
-    @unittest.skipUnless(HAS_GIT, "git not installed")
+    @unittest.skipUnless(HAS_GIT or REQUIRE, "git not installed")
     def test_aliases_and_hidden_push_subcommands(self):
         ok = git_repo("feature", "https://git.example.com/acme/app.git")
         git(ok, "config", "alias.p", "push")
@@ -639,7 +643,7 @@ class Corporate(Case):
         self.allowed("git frobnicate --now", cwd=ok)         # unknown, no alias: git itself will error
         self.allowed("git lfs pull", cwd=ok)
 
-    @unittest.skipUnless(HAS_GIT, "git not installed")
+    @unittest.skipUnless(HAS_GIT or REQUIRE, "git not installed")
     def test_alias_with_global_options_or_config_sources_is_refused(self):
         ok = git_repo("feature", "https://git.example.com/acme/app.git")
         git(ok, "config", "alias.st", "status -sb")
@@ -650,7 +654,7 @@ class Corporate(Case):
             self.blocked(cmd, "remote-not-allowlisted", cwd=ok)
         self.allowed("git st", cwd=ok)
 
-    @unittest.skipUnless(HAS_GIT, "git not installed")
+    @unittest.skipUnless(HAS_GIT or REQUIRE, "git not installed")
     def test_svn_and_p4_pushes(self):
         ok = git_repo("feature", "https://git.example.com/acme/app.git")
         for cmd in ["git svn dcommit", "git svn set-tree HEAD", "git p4 submit"]:
@@ -658,7 +662,7 @@ class Corporate(Case):
         for cmd in ["git svn fetch", "git p4 sync"]:          # other extension commands are left alone
             self.allowed(cmd, cwd=ok)
 
-    @unittest.skipUnless(HAS_GIT, "git not installed")
+    @unittest.skipUnless(HAS_GIT or REQUIRE, "git not installed")
     def test_alias_may_only_expand_to_read_only_commands(self):
         ok = git_repo("feature", "https://git.example.com/acme/app.git")
         aliases = {"rb": "rebase -x 'curl https://evil.example'", "sf": "submodule foreach git status",
@@ -767,7 +771,7 @@ class Corporate(Case):
         ("PowerShell", "git push %REMOTE% feature"),
     ]
 
-    @unittest.skipUnless(HAS_GIT, "git not installed")
+    @unittest.skipUnless(HAS_GIT or REQUIRE, "git not installed")
     def test_push_passes_only_in_its_plain_form(self):
         ok = git_repo("feature", "https://git.example.com/acme/app.git")
         for tool, cmd in self.PUSH_BYPASSES:
@@ -778,7 +782,7 @@ class Corporate(Case):
                     "git push --dry-run --porcelain origin HEAD:refs/heads/feature"]:
             self.allowed(cmd, cwd=ok)
 
-    @unittest.skipUnless(HAS_GIT, "git not installed")
+    @unittest.skipUnless(HAS_GIT or REQUIRE, "git not installed")
     def test_push_url_must_resolve_to_a_literal_approved_url(self):
         for url in ["https://git.example.com/$x/app.git", "https://git.example.com/%41/app.git",
                     "https://git.example.com/`x`/app.git"]:
@@ -786,6 +790,401 @@ class Corporate(Case):
         self.blocked("git push origin feature", "remote-not-allowlisted", cwd=git_repo("feature"))   # no remote
         self.blocked("git push", "remote-not-allowlisted", cwd=tempfile.mkdtemp(dir=TMP))          # not a repo
         self.blocked("git push origin feature", "remote-not-allowlisted")                          # cwd missing
+
+PS = "PowerShell"
+PROD = dict(ON, production_hosts=["prod.example.com"])
+DB = dict(ON, protected_db_tables=["users", "billing.invoices"])
+
+
+class Hardening(Case):
+    """prod-build, protected-db-write, security-tooling-change, gh api in publish-confirm."""
+    CONF = ON
+
+    def asked(self, cmd, tool="Bash"):
+        out = ev(tool, {"command": cmd})
+        self.assertEqual((decision(out), gid(out)), ("ask", "publish-confirm"), cmd)
+
+    # ── prod-build ──
+    def test_prod_build_empty_list_is_no_decision(self):
+        for conf in (ON, dict(ON, production_hosts=[]), dict(ON, production_hosts="prod.example.com")):   # control
+            set_allowlist(conf)
+            self.allowed("ssh deploy@prod.example.com 'docker build -t app .'")
+
+    def test_prod_build_configured_denies(self):
+        set_allowlist(PROD)
+        for cmd in ["ssh deploy@prod.example.com 'cd /srv/app && docker build -t app .'",
+                    "ssh prod.example.com npm run build", 'ssh -p 2222 PROD.example.com "docker compose up -d --build"',
+                    "ssh prod.example.com bash -s <<'EOF'\ncd /srv/app\nmake\nEOF",
+                    "ssh prod.example.com 'kubectl apply -f x.yaml'", "ssh -o BatchMode=yes prod.example.com docker buildx build .",
+                    "ssh prod.example.com 'helm upgrade app ./chart'"]:
+            self.blocked(cmd, "prod-build")
+        self.blocked("ssh prod.example.com docker build .", "prod-build", tool=PS)
+
+    def test_prod_build_reads_and_other_hosts_pass(self):
+        set_allowlist(PROD)
+        for cmd in ["ssh prod.example.com 'tail -n 50 /var/log/app.log'", "ssh prod.example.com docker ps",
+                    "ssh prod.example.com docker restart app", "ssh staging.example.com 'docker build -t app .'",
+                    "docker build -t app .", 'git commit -m "document ssh prod.example.com docker build step"',
+                    'echo "ssh prod.example.com docker build ."', "grep -rn 'docker build' deploy/"]:
+            self.allowed(cmd)
+
+    # ── protected-db-write ──
+    def test_db_write_empty_list_is_no_decision(self):
+        for conf in (ON, dict(ON, protected_db_tables=[])):                                                # control
+            set_allowlist(conf)
+            self.allowed('psql -c "DELETE FROM users"')
+        out = ev("mcp__postgres-db__execute_sql", {"sql": "DELETE FROM users"})
+        self.assertIsNone(out)
+
+    def test_db_write_configured_denies(self):
+        set_allowlist(DB)
+        for cmd in ['psql -h db.example.com -c "DELETE FROM users WHERE id=1"', 'psql -c "update users set x=1"',
+                    'mysql -e "TRUNCATE TABLE Users"', "psql <<'EOF'\nINSERT INTO billing.invoices VALUES (1);\nEOF",
+                    "ssh db.example.com 'psql -c \"DROP TABLE users\"'",
+                    'docker exec db psql -U app -c "ALTER TABLE public.users ADD COLUMN x int"',
+                    'echo "delete from users" | psql', 'sqlite3 app.db "INSERT OR REPLACE INTO users VALUES(1)"',
+                    "psql -c 'COPY users FROM stdin'", 'psql -c "select 1; delete from only users"',
+                    'psql -c "with d as (delete from users returning *) select 1"']:
+            self.blocked(cmd, "protected-db-write")
+        self.blocked('Invoke-Sqlcmd -Query "UPDATE [dbo].[Users] SET a = 1"', "protected-db-write", tool=PS)
+
+    def test_db_write_reads_the_sql_file(self):
+        set_allowlist(DB)
+        bad, good = os.path.join(TMP, "mig-bad.sql"), os.path.join(TMP, "mig-good.sql")
+        for path, sql in ((bad, "begin;\nDELETE FROM users;\ncommit;\n"), (good, "select * from users;\n")):
+            with open(path, "w") as f:
+                f.write(sql)
+        self.blocked(f"psql -f {bad}", "protected-db-write")
+        self.blocked(f"mysql < {bad}", "protected-db-write")
+        self.allowed(f"psql -f {good}")
+
+    def test_db_select_and_prose_pass(self):
+        set_allowlist(DB)
+        for cmd in ['psql -c "SELECT * FROM users"', 'psql -c "select count(*) from billing.invoices"',
+                    'psql -c "UPDATE other_table SET a=1"', 'psql -c "DELETE FROM users_archive"',
+                    'psql -c "update archive.invoices set a = 1"', 'psql -c "select * from users for update"',
+                    'git commit -m "DELETE FROM users handler"', 'git commit -m "psql: delete from users"',
+                    'echo "psql -c \'delete from users\'"', 'grep -rn "delete from users" src/',
+                    'psql -c "select 1" && git commit -m "DELETE FROM users"']:
+            self.allowed(cmd)
+
+    def test_db_mcp_tool_is_judged_in_any_letter_case(self):
+        set_allowlist(DB)
+        for tool, ti in [("mcp__PoStGrEs-Db__Execute_Sql", {"sql": "DELETE FROM users"}),
+                         ("mcp__postgres-db__execute_sql", {"sql": "delete from users where id = 1"}),
+                         ("mcp__MySQL__run_query", {"query": "update Users set a=1"}),
+                         ("mcp__acme_DataBase__exec", {"statement": "TRUNCATE users"}),
+                         ("mcp__MSSQL__query", {"queries": ["select 1", "drop table billing.invoices"]})]:
+            out = ev(tool, ti)
+            self.assertEqual((decision(out), gid(out)), ("deny", "protected-db-write"), tool)
+        for tool, ti in [("mcp__postgres-db__execute_sql", {"sql": "SELECT * FROM users"}),
+                         ("mcp__postgres-db__list_objects", {"schema_name": "users"}),
+                         ("mcp__github__create_issue", {"body": "DELETE FROM users"})]:
+            self.assertIsNone(ev(tool, ti), tool)
+        for name in ("mcp__PoStGrEs__x", "mcp__MySQL__x", "mcp__DATABASE__x", "mcp__sqlite__x", "mcp__a_SqL_b__x"):
+            self.assertTrue(engine.DB_MCP.fullmatch(name), name)
+        self.assertFalse(engine.DB_MCP.fullmatch("mcp__github__create_issue"))
+
+    # ── security-tooling-change ──
+    DENIED = ["runas /user:Admin cmd", 'runas.exe /user:Administrator "cmd /c whoami"', "cmd /c runas /user:Admin x.exe",
+              "Start-Process powershell -Verb RunAs", "Start-Process -FilePath cmd.exe -Verb:runAs",
+              'powershell -Command "Start-Process cmd -Verb RunAs"', "Set-ExecutionPolicy RemoteSigned -Scope CurrentUser",
+              "Add-MpPreference -ExclusionPath C:\\work", "Set-MpPreference -ExclusionExtension .tmp",
+              'Add-MpPreference -ExclusionPath "C:\\Program Files\\Some App"', "Set-MpPreference -DisableRealtimeMonitoring $true",
+              "certutil -addstore -f Root corp.cer", 'certutil -f -addstore "Root" corp.cer',
+              "certutil -enterprise -addstore AuthRoot x.cer",
+              "Import-Certificate -FilePath x.cer -CertStoreLocation Cert:\\LocalMachine\\Root",
+              "reg add HKLM\\SOFTWARE\\Policies\\X /v a /d 1 /f", 'reg add "HKLM\\SOFTWARE\\Some Vendor\\App" /v a /d 1',
+              "reg.exe DELETE HKEY_LOCAL_MACHINE\\SOFTWARE\\X /f", 'bash -c "reg add HKLM\\\\X /f"',
+              "New-ItemProperty -Path HKLM:\\SOFTWARE\\X -Name a -Value 1",
+              'Set-ItemProperty -Path "HKLM:\\SOFTWARE\\Some Vendor\\App" -Name a -Value 1', "sp HKLM:\\SOFTWARE\\X a 1",
+              "powershell -EncodedCommand " + base64.b64encode("Set-ExecutionPolicy Bypass".encode("utf-16-le")).decode()]
+    READS = ["Get-MpPreference", "Get-MpPreference | Select-Object ExclusionPath", "reg query HKLM\\SOFTWARE\\X",
+             "reg add HKCU\\Software\\X /v a /d 1 /f", "Set-ItemProperty -Path HKCU:\\Software\\X -Name a -Value 1",
+             "Get-ItemProperty HKLM:\\SOFTWARE\\X", "Get-ExecutionPolicy", "certutil -store Root", "certutil -addstore My x.cer",
+             "Import-Certificate -FilePath x.cer -CertStoreLocation Cert:\\CurrentUser\\My", "Start-Process notepad",
+             'git commit -m "document runas and Set-ExecutionPolicy"', 'echo "reg add HKLM"',
+             "grep -rn 'Add-MpPreference' docs/"]
+
+    def test_security_tooling_denies_each_form(self):
+        for cmd in self.DENIED:
+            self.blocked(cmd, "security-tooling-change")
+            self.blocked(cmd, "security-tooling-change", tool=PS)
+
+    def test_security_tooling_reads_and_other_hives_pass(self):
+        for cmd in self.READS:
+            self.allowed(cmd)
+            self.allowed(cmd, tool=PS)
+
+    def test_security_tooling_follows_the_pack_switch(self):
+        set_allowlist(OFF)
+        self.allowed("Set-ExecutionPolicy RemoteSigned")
+
+    # ── gh api ──
+    def test_gh_api_write_methods_and_fields_ask(self):
+        for cmd in ["gh api repos/o/r/issues -X POST -f title=x", "gh api -XDELETE repos/o/r/issues/1",
+                    "gh api --method=PATCH repos/o/r", "gh api --method PUT repos/o/r/topics", "gh api -X put repos/o/r/topics",
+                    "gh api graphql -f query=x", "gh api repos/o/r -F a=b", "gh api repos/o/r -fa=b",
+                    "gh api repos/o/r --raw-field a=b", "gh api repos/o/r --field=a=b", "gh api repos/o/r --input body.json"]:
+            self.asked(cmd)
+        self.asked("gh api repos/o/r -X POST", tool=PS)
+
+    def test_gh_api_reads_pass(self):
+        for cmd in ["gh api repos/o/r", "gh api repos/o/r/pulls --jq '.[].number'", "gh api -X GET repos/o/r",
+                    "gh api --paginate repos/o/r/issues -H 'Accept: application/json'", "gh api user", "gh api --method GET user"]:
+            self.allowed(cmd)
+
+    def test_gh_write_verbs_file_is_the_one_list(self):
+        with open(os.path.join(GUARDS, "gh_write_verbs.json"), encoding="utf-8") as f:
+            d = json.load(f)
+        self.assertEqual(sum(len(v) for v in d["verbs"].values()), 39)
+        self.assertIn("transfer", d["verbs"]["issue"])
+        self.assertEqual(d["api"]["methods"], ["POST", "PUT", "PATCH", "DELETE"])
+        self.assertEqual(d["api"]["field_flags"], ["-f", "-F", "--field", "--raw-field", "--input"])
+
+    def test_template_carries_the_new_keys(self):
+        with open(os.path.join(GUARDS, "corporate-allowlist.template.json"), encoding="utf-8") as f:
+            d = json.load(f)
+        self.assertEqual((d["production_hosts"], d["protected_db_tables"]), ([], []))
+
+
+class Heartbeat(unittest.TestCase):
+    """I20: the PreToolUse hook stamps <workbench home>/state/guard-heartbeat.json on every invocation."""
+    ENTRY = os.path.join(GUARDS, "pretooluse.py")
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp(dir=TMP)
+        self.env = dict(os.environ, CLAUDE_CONFIG_DIR=self.home, GUARDS_LOG_DIR=os.path.join(self.home, "logs"))
+        self.beat = os.path.join(self.home, "workbench", "state", "guard-heartbeat.json")
+
+    def run_hook(self, raw):
+        r = subprocess.run([sys.executable, "-S", self.ENTRY], input=raw, capture_output=True, text=True, env=self.env, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r
+
+    def read(self):
+        with open(self.beat, encoding="utf-8") as f:
+            return json.load(f)
+
+    def test_every_invocation_updates_it(self):
+        ok = json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": TMP})
+        self.run_hook(ok)
+        d = self.read()
+        self.assertEqual((d["version"], d["sessions_since_fire"], d["fired_total"]), (1, 0, 1))
+        self.assertRegex(d["last_fired"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+        with open(self.beat, "w") as f:
+            json.dump({"version": 1, "last_fired": None, "sessions_since_fire": 5, "fired_total": 7}, f)
+        self.run_hook(ok)
+        self.assertEqual((self.read()["sessions_since_fire"], self.read()["fired_total"]), (0, 8))
+        for bad in ("not json", "", "[]"):       # even a call the guard cannot parse proves the hook ran
+            before = self.read()["fired_total"]
+            self.run_hook(bad)
+            self.assertEqual(self.read()["fired_total"], before + 1, bad)
+
+    def test_a_deny_is_still_printed_and_state_is_atomic(self):
+        r = self.run_hook(json.dumps({"tool_name": "Bash", "tool_input": {"command": "git push --force origin main"}, "cwd": TMP}))
+        self.assertEqual(json.loads(r.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertEqual([n for n in os.listdir(os.path.dirname(self.beat)) if n.endswith(".tmp")], [])
+
+    def test_unwritable_state_folder_still_exits_cleanly(self):
+        os.makedirs(os.path.join(self.home, "workbench"))
+        with open(os.path.join(self.home, "workbench", "state"), "w") as f:     # a file where the folder should be
+            f.write("x")
+        r = self.run_hook(json.dumps({"tool_name": "Bash", "tool_input": {"command": "git push --force origin main"}, "cwd": TMP}))
+        self.assertEqual(json.loads(r.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertEqual(self.run_hook(json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}})).stdout.strip(), "")
+        if os.name != "nt":                                                      # and a read-only folder
+            os.remove(os.path.join(self.home, "workbench", "state"))
+            os.makedirs(os.path.dirname(self.beat))
+            os.chmod(os.path.dirname(self.beat), 0o500)
+            try:
+                self.run_hook("{}")
+            finally:
+                os.chmod(os.path.dirname(self.beat), 0o700)
+
+
+LOOP = "127" + ".0.0.1"           # built at runtime: no address literal in this file
+
+
+class BrowserCli(Case):
+    """playwright-cli in the corporate pack: ASK on upload / drop, eval / run-code, and navigation to a host that is not
+    localhost and not in git_remote_hosts or upload_hosts. The permissive profile (pack off) has no opinion."""
+    CONF = ON
+
+    def asked(self, cmd, tool="Bash"):
+        out = ev(tool, {"command": cmd})
+        self.assertEqual((decision(out), gid(out)), ("ask", "browser-cli"), cmd)
+
+    def test_upload_and_file_drops_ask(self):
+        for cmd in ["playwright-cli upload report.pdf", "playwright-cli upload a.txt b.txt", "playwright-cli drop e12 --path=a.zip",
+                    "playwright-cli -s=work upload a.txt", "npx playwright-cli upload a.txt", "npx --no-install playwright cli drop e3 --path=x",
+                    "playwright-cli.cmd upload a.txt", "cd app && playwright-cli upload a.txt", "FOO=1 playwright-cli upload a.txt",
+                    "playwright-cli --config c.json upload a.txt", "UPLOAD=1 playwright-cli UPLOAD a.txt"]:
+            self.asked(cmd)
+        self.asked("& playwright-cli upload a.txt", tool=PS)
+        self.asked("playwright-cli.ps1 drop e1 --path=a.zip", tool=PS)
+
+    def test_eval_and_run_code_ask(self):
+        for cmd in ["playwright-cli eval \"document.cookie\"", "playwright-cli eval \"el => el.value\" e5", "playwright-cli run-code \"async page => {}\"",
+                    "playwright-cli run-code --filename=steps.js", "npx playwright-cli eval 1", "playwright-cli -s=a eval 1"]:
+            self.asked(cmd)
+        self.asked("playwright-cli eval 1", tool=PS)
+
+    def test_attach_to_a_running_browser_asks(self):
+        for cmd in ["playwright-cli attach", "playwright-cli attach work", "playwright-cli attach --cdp=msedge",
+                    "playwright-cli attach --cdp=http://localhost:9222", "playwright-cli attach --cdp msedge",
+                    "playwright-cli attach --extension=msedge", "playwright-cli attach --extension chrome",
+                    "playwright-cli attach --endpoint ws://localhost:3000/x", "playwright-cli --endpoint ws://localhost:3000/x attach",
+                    "playwright-cli -s=a attach", "playwright-cli --session a attach --cdp=msedge", "npx playwright-cli attach",
+                    "npx --no-install playwright cli attach --extension=chrome", "playwright-cli.cmd attach", "cd app && playwright-cli attach",
+                    "FOO=1 playwright-cli ATTACH"]:
+            self.asked(cmd)
+        self.asked("& playwright-cli attach --cdp=msedge", tool=PS)
+
+    def test_loading_saved_cookies_and_logins_asks(self):
+        for cmd in ["playwright-cli state-load auth.json", "playwright-cli state-load ./state/work.json", "playwright-cli -s=a state-load a.json",
+                    "playwright-cli --config c.json state-load a.json", "npx playwright-cli state-load a.json",
+                    "npx playwright cli state-load a.json", "playwright-cli.cmd state-load a.json", "cd app && playwright-cli state-load a.json",
+                    "FOO=1 playwright-cli STATE-LOAD a.json"]:
+            self.asked(cmd)
+        self.asked("& playwright-cli state-load auth.json", tool=PS)
+
+    def test_calling_a_tool_the_page_registered_asks(self):
+        for cmd in ["playwright-cli webmcp-call search", "playwright-cli webmcp-call search --params='{\"query\":\"cats\"}'",
+                    "playwright-cli webmcp-call search --frame=f1", "playwright-cli -s=a webmcp-call t", "npx playwright-cli webmcp-call t",
+                    "npx playwright cli webmcp-call t --params={}", "playwright-cli.cmd webmcp-call t", "cd app && playwright-cli webmcp-call t",
+                    "FOO=1 playwright-cli WEBMCP-CALL t"]:
+            self.asked(cmd)
+        self.asked("& playwright-cli webmcp-call search", tool=PS)
+
+    # ── options that reach a real profile or browser ──
+    def forms(self, tail, *extra):
+        """tail = a command line without the program name; asked in every way the program can be spelled."""
+        for cmd in [f"playwright-cli {tail}", f"npx playwright-cli {tail}", f"npx --no-install playwright cli {tail}",
+                    f"playwright-cli.cmd {tail}", f"cd app && playwright-cli {tail}", f"FOO=1 playwright-cli {tail}", *extra]:
+            self.asked(cmd)
+        self.asked(f"& playwright-cli {tail}", tool=PS)
+
+    def test_a_profile_folder_asks(self):
+        self.forms("open --profile=./p")
+        for cmd in ["playwright-cli open --profile ./p", 'playwright-cli open --profile="C:/Users/me/Edge/User Data"',
+                    "playwright-cli open https://localhost:3000 --profile=p", "playwright-cli --profile=p open", "playwright-cli --profile p open",
+                    "playwright-cli -s=a open --profile=p", "playwright-cli snapshot --profile=p", "playwright-cli open --profile",
+                    "playwright-cli --config c.json open --profile=p"]:
+            self.asked(cmd)
+
+    def test_a_persistent_profile_asks(self):
+        self.forms("open --persistent")
+        for cmd in ["playwright-cli -s=example open https://localhost:3000 --persistent", "playwright-cli --persistent open",
+                    "playwright-cli open --persistent=true", "playwright-cli snapshot --persistent"]:
+            self.asked(cmd)
+
+    def test_cdp_to_a_target_that_is_not_localhost_asks(self):
+        self.forms("open --cdp=msedge")
+        for cmd in ["playwright-cli open --cdp msedge", "playwright-cli open --cdp=chrome", "playwright-cli open --cdp=http://dev-box.example.net:9222",
+                    "playwright-cli open --cdp=ws://dev-box.example.net:9222/devtools/browser/abc", "playwright-cli open --cdp=http://localhost.evil.example.net:9222",
+                    "playwright-cli open --cdp=http://user@dev-box.example.net:9222", "playwright-cli open --cdp=$ENDPOINT", "playwright-cli open --cdp",
+                    "playwright-cli --cdp=msedge snapshot", "playwright-cli snapshot --cdp=file:///C:/x"]:
+            self.asked(cmd)
+
+    def test_the_extension_option_asks(self):
+        self.forms("open --extension=chrome")
+        for cmd in ["playwright-cli open --extension chrome", "playwright-cli open --extension", "playwright-cli --extension=msedge snapshot",
+                    "playwright-cli open --extension=localhost"]:
+            self.asked(cmd)
+
+    def test_cookie_commands_ask(self):
+        for tail in ["cookie-list", "cookie-list --domain example.net", "cookie-get session", "cookie-set name value --domain example.net --secure",
+                     "cookie-delete session", "cookie-clear", "-s=a cookie-list", "--json cookie-list", "--raw cookie-get x", "COOKIE-LIST"]:
+            self.asked(f"playwright-cli {tail}")
+        self.forms("cookie-list")
+
+    def test_localstorage_commands_ask(self):
+        for tail in ["localstorage-list", "localstorage-get token", "localstorage-set k v", "localstorage-delete k", "localstorage-clear",
+                     "-s=a localstorage-list", "--json localstorage-list", "LocalStorage-Get token"]:
+            self.asked(f"playwright-cli {tail}")
+        self.forms("localstorage-list")
+
+    def test_sessionstorage_commands_ask(self):
+        for tail in ["sessionstorage-list", "sessionstorage-get token", "sessionstorage-set k v", "sessionstorage-delete k", "sessionstorage-clear",
+                     "-s=a sessionstorage-list", "--json sessionstorage-list", "SessionStorage-Get token"]:
+            self.asked(f"playwright-cli {tail}")
+        self.forms("sessionstorage-list")
+
+    def test_saving_the_logins_to_a_file_asks(self):
+        for tail in ["state-save", "state-save auth.json", "-s=a state-save a.json", "--json state-save", "STATE-SAVE"]:
+            self.asked(f"playwright-cli {tail}")
+        self.forms("state-save auth.json")
+
+    def test_each_ask_names_what_it_is_about(self):
+        for cmd, word in [("playwright-cli open --profile=p", "--profile"), ("playwright-cli open --persistent", "--persistent"),
+                          ("playwright-cli open --cdp=msedge", "msedge"), ("playwright-cli open --extension=chrome", "--extension"),
+                          ("playwright-cli cookie-list", "cookies"), ("playwright-cli localstorage-get k", "localStorage"),
+                          ("playwright-cli sessionstorage-get k", "sessionStorage"), ("playwright-cli state-save", "file on disk")]:
+            self.assertIn(word, ev("Bash", {"command": cmd})["hookSpecificOutput"]["permissionDecisionReason"], cmd)
+
+    def test_navigation_outside_localhost_and_the_approved_hosts_asks(self):
+        for cmd in ["playwright-cli open https://evil.example.net", "playwright-cli goto https://other.example.org/x?q=1",
+                    "playwright-cli tab-new https://x.example.net", "playwright-cli open --browser=msedge https://example.net",
+                    "playwright-cli --config c.json open https://example.net", "playwright-cli open example.net",
+                    "playwright-cli goto https://localhost.evil.example.net/", "playwright-cli goto https://git.example.com.evil.example.net/",
+                    "playwright-cli goto file:///C:/Users/me/secret.html", "playwright-cli goto $URL", "playwright-cli goto ${TARGET}/x",
+                    "playwright-cli open http://user@evil.example.net/", "npx playwright cli goto https://example.net",
+                    "playwright-cli goto javascript:alert(1)", "playwright-cli open --headed https://example.net"]:
+            self.asked(cmd)
+        self.asked("playwright-cli goto https://example.net", tool=PS)
+
+    def test_localhost_approved_hosts_and_other_commands_pass(self):
+        for cmd in ["playwright-cli open http://localhost:3000", f"playwright-cli goto http://{LOOP}:8080/app", "playwright-cli goto https://localhost/",
+                    "playwright-cli open http://[::1]:3000/", "playwright-cli goto localhost:5173", "playwright-cli open",
+                    "playwright-cli open --headed", "playwright-cli goto about:blank", "playwright-cli goto https://git.example.com/org/app",
+                    "playwright-cli snapshot", "playwright-cli click e15", "playwright-cli fill e3 hello", "playwright-cli type eval",
+                    "playwright-cli fill e3 upload", "playwright-cli screenshot --filename=a.png", "playwright-cli press Enter",
+                    "playwright-cli -s=a close", "playwright-cli list", "playwright-cli --version", "playwright-cli install --skills --global",
+                    "playwright-cli detach", "playwright-cli webmcp-list", "playwright-cli fill e3 attach", "playwright-cli type state-load",
+                    "playwright-cli fill e3 webmcp-call", "playwright-cli fill e3 cookie-list", "playwright-cli type localstorage-clear",
+                    "playwright-cli fill e3 state-save", "playwright-cli press sessionstorage-get",
+                    # route is deliberately allowed: it changes what pages in the CLI's own browser receive and prints nothing stored
+                    "playwright-cli route **/*.png", "playwright-cli route https://api.example.net/** --status=404", "playwright-cli route-list",
+                    "playwright-cli unroute", "playwright-cli network-state-set offline", "playwright-cli requests",
+                    # a debugging endpoint on this machine is not a running browser somewhere else
+                    "playwright-cli open --cdp=http://localhost:9222", "playwright-cli snapshot --cdp=localhost:9222", "playwright-cli open --cdp http://[::1]:9222",
+                    f"playwright-cli open --cdp=ws://{LOOP}:9222/devtools/browser/abc"]:
+            self.allowed(cmd)
+        for cmd in ['echo "playwright-cli upload a.txt"', "grep -rn 'playwright-cli eval' docs/", 'git commit -m "playwright-cli run-code docs"',
+                    'echo "playwright-cli attach --cdp=msedge"', "grep -rn 'playwright-cli state-load' docs/", 'git commit -m "playwright-cli webmcp-call docs"',
+                    'echo "playwright-cli open --profile=p --persistent"', "grep -rn 'playwright-cli cookie-list' docs/", 'git commit -m "playwright-cli state-save docs"',
+                    "cat <<EOF > notes.md\nplaywright-cli goto https://example.net\nEOF", "npx playwright test", "npx tsc --noEmit"]:
+            self.allowed(cmd)
+        set_allowlist(dict(ON, upload_hosts=["files.example.net"]))
+        self.allowed("playwright-cli goto https://files.example.net/x")
+        self.allowed("playwright-cli goto https://FILES.example.net:8443/x")
+        self.asked("playwright-cli goto https://example.net")
+
+    def test_the_hosts_match_exactly_not_by_suffix(self):
+        set_allowlist(dict(ON, git_remote_hosts=["git.example.com"]))
+        self.asked("playwright-cli goto https://example.com/")
+        self.asked("playwright-cli goto https://sub.git.example.com/")
+        self.allowed("playwright-cli goto https://git.example.com/")
+
+    def test_a_pack_that_is_off_has_no_opinion(self):
+        for conf in (OFF, {"enabled": False, "git_remote_hosts": []}):
+            set_allowlist(conf)
+            for cmd in ["playwright-cli upload a.txt", "playwright-cli eval 1", "playwright-cli run-code x", "playwright-cli drop e1 --path=a",
+                        "playwright-cli goto https://evil.example.net", "playwright-cli goto $URL", "playwright-cli attach --cdp=msedge",
+                        "playwright-cli state-load auth.json", "playwright-cli webmcp-call search", "playwright-cli open --profile=p",
+                        "playwright-cli open --persistent", "playwright-cli open --cdp=msedge", "playwright-cli open --extension=chrome",
+                        "playwright-cli cookie-list", "playwright-cli localstorage-get k", "playwright-cli sessionstorage-clear", "playwright-cli state-save"]:
+                self.allowed(cmd)
+                self.assertIsNone(ev("PowerShell", {"command": cmd}), cmd)
+
+    def test_it_asks_and_never_denies_and_a_deny_still_outranks(self):
+        out = ev("Bash", {"command": "playwright-cli eval 1"})
+        self.assertEqual(decision(out), "ask")
+        self.assertNotIn("SAID", json.dumps(out))
+        out = ev("Bash", {"command": "export NODE_TLS_REJECT_UNAUTHORIZED=0; playwright-cli goto https://evil.example.net"})
+        self.assertEqual((decision(out), gid(out)), ("deny", "tls-verify-off"))
+
 
 class Engine(Case):
     def test_broken_pack_fails_open_for_itself_only(self):
@@ -801,7 +1200,7 @@ class Engine(Case):
         out = self.blocked("cd C:\\work\\app && ls", "cd-backslash")
         self.assertIn("cd C:/work/app && ls", out["hookSpecificOutput"]["permissionDecisionReason"])
 
-    @unittest.skipUnless(shutil.which("bash") or os.path.exists(r"C:\Program Files\Git\bin\bash.exe"), "no bash")
+    @unittest.skipUnless(shutil.which("bash") or os.path.exists(r"C:\Program Files\Git\bin\bash.exe") or REQUIRE, "no bash")
     def test_unbalanced_quotes(self):
         self.blocked('echo "unterminated', "unbalanced-quotes")
 
@@ -833,6 +1232,7 @@ class ZCorpus(unittest.TestCase):
                 s = json.dumps(engine.evaluate(data) or {})
                 self.assertNotIn('"allow"', s, data)
                 self.assertNotIn("updatedInput", s, data)
+                self.assertNotRegex(s, r"(?i)\ballow\b", data)
 
 
 if __name__ == "__main__":

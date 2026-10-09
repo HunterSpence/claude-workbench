@@ -1,7 +1,8 @@
 # Model profiles: what degrades at each tier, and what buys it back (read on demand)
 
-Read this when you route a task or write a prompt for a worker. Routing (role, persona, model,
-effort) is owned by `rules/model-policy.md`; the worker-prompt template is the `spawn` skill's.
+Read this when you route a task or write a prompt for a worker. Routing (task type, persona, model,
+effort) is owned by `{{WORKBENCH_HOME}}/kit/docs/model-routing.md` and the rules in `rules/model-policy.md`; the
+worker-prompt template is the `spawn` skill's.
 This file is observed tendencies, not a benchmark: where your own A/B tests disagree, the tests win.
 
 ## The gap, and the structure that recovers it
@@ -67,7 +68,7 @@ misrouted: move it up a tier.
 ## Task shape to structure
 | Task shape | Route | Structure it needs |
 |---|---|---|
-| Extraction, formatting, checkpoints | Haiku | an output schema |
+| Extraction, formatting, digesting handed-over text | `scout` (Haiku) | an output schema and locators |
 | Mechanical edit sweep, templated rewrite | Sonnet worker(s) | template, file-ownership map, return contract, orchestrator diff review |
 | Domain task with good KB context | Sonnet worker | a pointer to the domain's `HOT.md` and the KB search, not a pasted copy |
 | Standard development, debugging, incidents | main session or `flagship` | judgment procedures, definition of done, evidence before done |

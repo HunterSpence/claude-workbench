@@ -1,0 +1,503 @@
+{
+ "version": 1,
+ "detectors": [
+  {
+   "card": 67,
+   "title": "The API is at capacity or failed on its side",
+   "pattern": "Overloaded errors\\. The API is at capacity|is experiencing high load|Internal server error\\. This is a server-side issue|Server error mid-response",
+   "repro": "API Error: Repeated Overloaded errors. The API is at capacity. This is usually temporary."
+  },
+  {
+   "card": 68,
+   "title": "A plan usage window or spend limit ran out",
+   "pattern": "You've hit your (session|weekly|Opus|Sonnet|Fable|monthly spend|individual spend|individual usage|org's monthly spend|channel's monthly spend) limit|You've hit your team's shared budget",
+   "repro": "You've hit your weekly limit \u00b7 resets Mon"
+  },
+  {
+   "card": 69,
+   "title": "A credential in the environment overrides or breaks the sign-in",
+   "pattern": "Credit balance is too low|Invalid API key \u00b7 Fix external API key|organization has disabled API key authentication|Your apiKeyHelper script is failing|Invalid auth token \u00b7 Fix external auth token|Invalid ANTHROPIC_CUSTOM_HEADERS|Invalid request header from the environment",
+   "repro": "Invalid API key \u00b7 Fix external API key"
+  },
+  {
+   "card": 70,
+   "title": "The saved sign-in expired or was revoked",
+   "pattern": "Not logged in \u00b7 Please run /login|Login expired \u00b7 Please run /login|OAuth token revoked|OAuth token has expired|OAuth session expired and could not be refreshed|Invalid authentication credentials|Could not resolve authentication method",
+   "repro": "Login expired \u00b7 Please run /login"
+  },
+  {
+   "card": 71,
+   "title": "The organization refuses this account or sign-in method",
+   "pattern": "disabled Claude subscription access|Claude Code access has not been granted for this account|This organization has been disabled|Your account is on hold|Gateway refused the request|Request not allowed",
+   "repro": "Your organization has disabled Claude subscription access for Claude Code \u00b7 Use an Anthropic API key instead, or ask your admin to enable access"
+  },
+  {
+   "card": 72,
+   "title": "Claude Code cannot reach the API through the corporate network",
+   "pattern": "Unable to connect to API\\. Check your internet|Can't reach the API server|Couldn't connect through your proxy|ERR_PROXY_TUNNEL|Unable to connect to Anthropic services|Connection refused \u2014 a firewall or proxy|No internet route \u2014 check your connection or VPN|Connection dropped \\(ECONNRESET\\)|proxy refused the connection",
+   "repro": "Couldn't connect through your proxy (ERR_PROXY_TUNNEL) \u2014 the proxy refused the tunnel: check its credentials and that it allows this host"
+  },
+  {
+   "card": 73,
+   "title": "A proxy or gateway rewrites, buffers or cuts the model stream",
+   "pattern": "API returned an empty or malformed response|Streaming response ended before any complete data was received|Extra inputs are not permitted|Socket is closed|No response from API",
+   "repro": "API returned an empty or malformed response (HTTP OK) \u2014 check for a proxy or gateway intercepting the request."
+  },
+  {
+   "card": 18,
+   "title": "A TLS-inspecting proxy needs its root certificate authority trusted by every runtime separately",
+   "pattern": "SSL certificate verification failed|UNABLE_TO_GET_ISSUER_CERT_LOCALLY|Could not create SSL/TLS secure channel|Could not establish trust relationship for the SSL/TLS secure channel|schannel: next InitializeSecurityContext failed",
+   "repro": "Unable to connect to API: SSL certificate verification failed (UNABLE_TO_GET_ISSUER_CERT_LOCALLY)."
+  },
+  {
+   "card": 74,
+   "title": "The conversation no longer fits the context window",
+   "pattern": "Prompt is too long|Context limit reached \u00b7 /|Input is too long for requested model|Autocompact is thrashing|Agent descriptions are over the",
+   "repro": "Context limit reached \u00b7 /compact or /clear to continue"
+  },
+  {
+   "card": 75,
+   "title": "The request body is over the API byte limit",
+   "pattern": "Request too large \\(max|Request too large for the API|Image was too large|image dimensions exceed max allowed size|request_too_large",
+   "repro": "Request too large (max <n>MB). Accumulated images and attachments in the conversation pushed the request over the limit."
+  },
+  {
+   "card": 76,
+   "title": "The selected model is unknown, not on the plan or blocked by policy",
+   "pattern": "There's an issue with the selected model|is not a recognized model id|is restricted by your organization's settings|Your organization restricts model selection|managed settings block the default model|allows only the models listed in \"availableModels\"|is not available with the Claude \\w+ plan|Model '[^']+' not found",
+   "repro": "There's an issue with the selected model (claude-x). It may not exist or you may not have access to it. Run /model to pick a different model."
+  },
+  {
+   "card": 77,
+   "title": "Claude Code is older than the model or policy requires",
+   "pattern": "does not support this model; version|older than the minimum version required by your organization",
+   "repro": "API Error: Claude Code does not support this model; version <v> or newer is required. Run 'claude update'."
+  },
+  {
+   "card": 78,
+   "title": "Tool-use history is out of step",
+   "pattern": "due to tool use concurrency issues|orphaned tool_result in conversation history|duplicate tool_use ID in conversation history|unexpected `?tool_use_id`? found in `?tool_result`? blocks",
+   "repro": "API Error: orphaned tool_result in conversation history. Run /rewind to recover the conversation."
+  },
+  {
+   "card": 79,
+   "title": "An MCP server fails to start or drops",
+   "pattern": "\u2718 Failed to connect|MCP server \"[^\"]*\" disconnected",
+   "repro": "MCP server \"docs\" disconnected \u00b7 open /mcp to reconnect"
+  },
+  {
+   "card": 80,
+   "title": "An MCP server needs its sign-in again",
+   "pattern": "needs you to sign in again \\(run /mcp|requires re-authorization \\(token expired\\)|needs additional permissions \\(scope|rejected the credential from its headersHelper|rejected the Authorization header in its config|Issuer mismatch in authorization response|Incompatible auth server: does not support dynamic client registration",
+   "repro": "MCP server \"docs\" requires re-authorization (token expired)"
+  },
+  {
+   "card": 51,
+   "title": "A policy denial is retried in another shape",
+   "pattern": "is blocked by enterprise managed policy|managed settings allow only MCP servers that plugins provide|Cannot add MCP server to scope: managed|is disabled by your organization's policy|Managed settings were not approved",
+   "repro": "MCP server docs is blocked by enterprise managed policy"
+  },
+  {
+   "card": 81,
+   "title": "A managed settings document cannot be read",
+   "pattern": "Managed settings document could not be parsed|Remote managed settings failed to load|Unable to read managed policy settings|Managed settings drop-in directory could not be read",
+   "repro": "Registry: HKLM\\SOFTWARE\\Policies\\ClaudeCode\\Settings: Managed settings document could not be parsed as a JSON object; none of its settings are in effect. Fix or remove it."
+  },
+  {
+   "card": 82,
+   "title": "A hook fails and the action goes ahead anyway",
+   "pattern": "Failed with non-blocking status code",
+   "repro": "PreToolUse:Bash hook error: Failed with non-blocking status code: /bin/sh: /path/to/hook.sh: No such file or directory"
+  },
+  {
+   "card": 83,
+   "title": "No usable shell on Windows",
+   "pattern": "requires either Git for Windows \\(for bash\\) or PowerShell|but Git Bash was not found|Denying Bash also turns off the PowerShell tool",
+   "repro": "Claude Code on Windows requires either Git for Windows (for bash) or PowerShell"
+  },
+  {
+   "card": 84,
+   "title": "The installer runs in the wrong shell or is blocked by script policy",
+   "pattern": "The token '&&' is not a valid statement separator|A parameter cannot be found that matches parameter name 'fsSL'|running scripts is disabled on this system|PSSecurityException",
+   "repro": "npm.ps1 cannot be loaded because running scripts is disabled on this system."
+  },
+  {
+   "card": 85,
+   "title": "The installer download returns a web page",
+   "pattern": "`<!DOCTYPE html>'|App unavailable in region|Failed to fetch version from downloads|The connection dropped while downloading the update",
+   "repro": "bash: line 1: `<!DOCTYPE html>'"
+  },
+  {
+   "card": 12,
+   "title": "A command-line tool is missing: command not found",
+   "pattern": "Could not locate the Claude CLI on PATH",
+   "repro": "Failed to run Claude Code: Error: Could not locate the Claude CLI on PATH."
+  },
+  {
+   "card": 86,
+   "title": "Endpoint security software intercepts Claude Code's own files",
+   "pattern": "Windows reported an error \\(EBADF\\)|Transcript writes are failing",
+   "repro": "Windows reported an error (EBADF) when Claude Code read this session's transcript file, although the file had opened normally."
+  },
+  {
+   "card": 87,
+   "title": "A network share is refused as a working directory",
+   "pattern": "is a network path, which cannot be added as a working directory|path is network-shaped|that file is on a network share",
+   "repro": "\\\\server\\share is a network path, which cannot be added as a working directory."
+  },
+  {
+   "card": 88,
+   "title": "The temp filesystem or disk quota is full",
+   "pattern": "Your disk quota is full on the filesystem|or your disk quota on it, is full \\(ENOSPC\\)|Command output was lost: the temp filesystem|ENOSPC: no space left on device",
+   "repro": "Command output was lost: the temp filesystem at <dir> is full"
+  },
+  {
+   "card": 89,
+   "title": "Project settings are ignored until the workspace is trusted",
+   "pattern": "this workspace has not been trusted|headersHelper not run \u2014 this workspace has no persisted trust|Error: workspace not trusted",
+   "repro": "Ignoring permissions.allow entries from .claude/settings.local.json: this workspace has not been trusted."
+  },
+  {
+   "card": 90,
+   "title": "A permission rule is malformed or names the wrong tool",
+   "pattern": "Malformed Tool\\(content\\) rule|is not matched by file permission checks|has a wildcard before the rest of the command",
+   "repro": "Invalid permission rule \"Bash(ls) x\" was skipped: Malformed Tool(content) rule."
+  },
+  {
+   "card": 91,
+   "title": "WebFetch cannot reach intranet hosts or its safety check is blocked",
+   "pattern": "WebFetch cannot fetch localhost or other hostnames without a dot|Unable to verify if domain \\S+ is safe to fetch|The safety check for domain \\S+ is (temporarily )?rate-limited",
+   "repro": "Unable to verify if domain wiki.example.com is safe to fetch. This may be due to network restrictions or enterprise security policies blocking claude.ai."
+  },
+  {
+   "card": 92,
+   "title": "A safety check declines the conversation",
+   "pattern": "appears to violate our Usage Policy|can't help with this\\. Start a new session to continue|safeguards flagged this (message|session)|Output blocked by content filtering policy",
+   "repro": "API Error: Output blocked by content filtering policy"
+  },
+  {
+   "card": 93,
+   "title": "Browser sign-in cannot open its local callback port",
+   "pattern": "Failed to start OAuth callback server|OAuth callback port \\d+ is already in use|No available ports for OAuth redirect|OAuth error: Invalid code",
+   "repro": "Failed to start OAuth callback server: Failed to start server. Is port 0 in use?"
+  },
+  {
+   "card": 19,
+   "title": "Parallel fan-outs hit rate limits",
+   "pattern": "Agent terminated early due to an API error|Request rejected \\(\\d+\\) \u00b7 this may be a temporary capacity",
+   "repro": "Agent terminated early due to an API error: the request failed."
+  },
+  {
+   "card": 94,
+   "title": "A helper program exists only as a shell script, so Windows cannot start it",
+   "pattern": "pdftoppm is not installed",
+   "repro": "pdftoppm is not installed. Install poppler-utils to read PDF pages."
+  },
+  {
+   "card": 67,
+   "title": "The API is at capacity or failed on its side",
+   "pattern": "['\"]api_error['\"]|\\btimeout_error\\b|\\boverloaded_error\\b",
+   "repro": "anthropic.InternalServerError: {'type': 'error', 'error': {'type': 'api_error', 'message': 'Internal server error'}}"
+  },
+  {
+   "card": 19,
+   "title": "Parallel fan-outs hit rate limits",
+   "pattern": "\\brate_limit_error\\b",
+   "repro": "anthropic.RateLimitError: {'type': 'error', 'error': {'type': 'rate_limit_error', 'message': 'Number of request tokens has exceeded your per-minute allowance'}}"
+  },
+  {
+   "card": 69,
+   "title": "A credential in the environment overrides or breaks the sign-in",
+   "pattern": "\\bbilling_error\\b",
+   "repro": "{'type': 'error', 'error': {'type': 'billing_error', 'message': 'Check your payment details'}}"
+  },
+  {
+   "card": 70,
+   "title": "The saved sign-in expired or was revoked",
+   "pattern": "\\bauthentication_error\\b|\\bauthentication_failed\\b",
+   "repro": "anthropic.AuthenticationError: {'type': 'error', 'error': {'type': 'authentication_error', 'message': 'invalid x-api-key'}}"
+  },
+  {
+   "card": 71,
+   "title": "The organization refuses this account or sign-in method",
+   "pattern": "\\bpermission_error\\b|\\boauth_org_not_allowed\\b",
+   "repro": "anthropic.PermissionDeniedError: {'type': 'error', 'error': {'type': 'permission_error', 'message': 'Your API key does not have permission to use the specified resource.'}}"
+  },
+  {
+   "card": 76,
+   "title": "The selected model is unknown, not on the plan or blocked by policy",
+   "pattern": "\\bnot_found_error\\b|\\bmodel_not_found\\b",
+   "repro": "anthropic.NotFoundError: {'type': 'error', 'error': {'type': 'not_found_error', 'message': 'model: claude-x'}}"
+  },
+  {
+   "card": 79,
+   "title": "An MCP server fails to start or drops",
+   "pattern": "input_schema: JSON schema is invalid|Property keys should match pattern|No such tool available",
+   "repro": "Error: No such tool available: mcp__docs__search"
+  },
+  {
+   "card": 61,
+   "title": "A model change is rejected by the API",
+   "pattern": "max_tokens must be greater than thinking\\.budget_tokens",
+   "repro": "invalid_request_error: max_tokens must be greater than thinking.budget_tokens"
+  },
+  {
+   "card": 24,
+   "title": "Forgotten worktrees strand branches and their fixes",
+   "pattern": "The current directory no longer exists|current working directory was deleted",
+   "repro": "The current directory no longer exists (it was deleted or moved). Start Claude Code from an existing directory."
+  },
+  {
+   "card": 19,
+   "title": "Parallel fan-outs hit rate limits",
+   "pattern": "Concurrent subagent limit reached",
+   "repro": "Concurrent subagent limit reached. Do not retry; wait for a running agent to finish."
+  },
+  {
+   "card": 3,
+   "title": "The console code page crashes Python on non-ASCII output",
+   "pattern": "UnicodeEncodeError|'charmap' codec can't (encode|decode)",
+   "repro": "UnicodeEncodeError: 'charmap' codec can't encode character '\\u2014' in position 4: character maps to <undefined>"
+  },
+  {
+   "card": 4,
+   "title": "Retrying fetches against hosts that never succeed",
+   "pattern": "socket hang up|ECONNRESET|unable to fetch|domain is not accessible",
+   "repro": "Error: socket hang up (ECONNRESET) while fetching https://example.com/page"
+  },
+  {
+   "card": 5,
+   "title": "A script assumes a data shape it never inspected",
+   "pattern": "JSONDecodeError|Expecting value: line \\d+ column \\d+|Unexpected token < in JSON|Unexpected end of JSON input|'NoneType' object is not subscriptable",
+   "repro": "json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+  },
+  {
+   "card": 6,
+   "title": "Nested quotes across ssh, `bash -c` and `python -c`",
+   "pattern": "unexpected EOF while looking for matching|unterminated quoted string|syntax error near unexpected token",
+   "repro": "bash: -c: line 1: unexpected EOF while looking for matching `''"
+  },
+  {
+   "card": 7,
+   "title": "Git Bash rewrites arguments that look like paths",
+   "pattern": "ambiguous argument 'origin\\\\main|C:/Program Files/Git/(repos|user|orgs|api)",
+   "repro": "fatal: ambiguous argument 'origin\\main;file.txt': unknown revision or path not in the working tree."
+  },
+  {
+   "card": 8,
+   "title": "Quoting differs between PowerShell and Git Bash",
+   "pattern": "The string is missing the terminator|Invalid JSON primitive|Expected property name enclosed in double quotes",
+   "repro": "The string is missing the terminator: '."
+  },
+  {
+   "card": 11,
+   "title": "Line endings: text-mode writes turn LF into CRLF",
+   "pattern": "\\$'\\\\r': command not found|bad interpreter|pipefail: invalid option|\\^M",
+   "repro": "run.sh: line 2: $'\\r': command not found"
+  },
+  {
+   "card": 12,
+   "title": "A command-line tool is missing: command not found",
+   "pattern": "(?<!\\\\r'): command not found|is not recognized as the name of a cmdlet|is not recognized as an internal or external command",
+   "repro": "bash: jq: command not found"
+  },
+  {
+   "card": 13,
+   "title": "A Python script runs under the wrong interpreter",
+   "pattern": "ModuleNotFoundError: No module named|No module named '",
+   "repro": "ModuleNotFoundError: No module named 'yaml'"
+  },
+  {
+   "card": 14,
+   "title": "An async function is called without await",
+   "pattern": "coroutine .* was never awaited|'coroutine' object is not (iterable|subscriptable)|\\[object Promise\\]",
+   "repro": "RuntimeWarning: coroutine 'fetch_items' was never awaited"
+  },
+  {
+   "card": 15,
+   "title": "A migration runner halts silently or is not idempotent",
+   "pattern": "duplicate column name|column .* already exists|relation .* already exists",
+   "repro": "ERROR: column \"status\" of relation \"items\" already exists"
+  },
+  {
+   "card": 16,
+   "title": "Cross-origin API calls fail in bursts",
+   "pattern": "TypeError: Failed to fetch|blocked by CORS policy|No 'Access-Control-Allow-Origin'",
+   "repro": "Access to fetch at 'https://api.example.com/v1/items' from origin 'https://app.example.com' has been blocked by CORS policy"
+  },
+  {
+   "card": 17,
+   "title": "The server does not send its intermediate certificate",
+   "pattern": "unable to verify the first certificate|UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+   "repro": "Error: unable to verify the first certificate"
+  },
+  {
+   "card": 18,
+   "title": "A TLS-inspecting proxy needs its root certificate authority trusted by every runtime separately",
+   "pattern": "SELF_SIGNED_CERT_IN_CHAIN|self[- ]signed certificate in certificate chain|CERTIFICATE_VERIFY_FAILED|SSL certificate problem|unable to get local issuer certificate",
+   "repro": "SSL certificate problem: self-signed certificate in certificate chain"
+  },
+  {
+   "card": 19,
+   "title": "Parallel fan-outs hit rate limits",
+   "pattern": "rate limit|too many requests|usage limit|quota exceeded",
+   "repro": "Rate limit exceeded. Retry after a few seconds."
+  },
+  {
+   "card": 21,
+   "title": "Lockfile drift breaks frozen installs",
+   "pattern": "ERR_PNPM_OUTDATED_LOCKFILE|npm ci can only install packages when your package.json and package-lock.json|lockfile .* not up to date",
+   "repro": "ERR_PNPM_OUTDATED_LOCKFILE Cannot install with \"frozen-lockfile\" because pnpm-lock.yaml is not up to date with package.json"
+  },
+  {
+   "card": 24,
+   "title": "Forgotten worktrees strand branches and their fixes",
+   "pattern": "checked out at|already used by worktree",
+   "repro": "error: Cannot delete branch 'fix-x' checked out at '/work/wt-fix'"
+  },
+  {
+   "card": 25,
+   "title": "Scripts lose their executable bit when committed from Windows",
+   "pattern": "\\./[\\w./-]+: Permission denied",
+   "repro": "bash: ./deploy.sh: Permission denied"
+  },
+  {
+   "card": 26,
+   "title": "Hook and agent definitions are snapshotted per session",
+   "pattern": "agent type '[^']*' not found",
+   "repro": "Agent type 'my-reviewer' not found. Available agents: general-purpose, Explore, Plan"
+  },
+  {
+   "card": 28,
+   "title": "Reading a whole large file exceeds the read limit",
+   "pattern": "exceeds maximum allowed tokens",
+   "repro": "File content (<n> tokens) exceeds maximum allowed tokens (<limit>). Use offset and limit to read part of the file."
+  },
+  {
+   "card": 29,
+   "title": "Invented file paths",
+   "pattern": "File does not exist|Directory does not exist",
+   "repro": "File does not exist. Did you mean src/app/main.py?"
+  },
+  {
+   "card": 30,
+   "title": "An edit fails because the file changed since it was read",
+   "pattern": "File has been modified since read",
+   "repro": "File has been modified since read, either by the user or by a linter. Read it again before attempting to write it."
+  },
+  {
+   "card": 31,
+   "title": "The command line is too long",
+   "pattern": "The command line is too long|Argument list too long",
+   "repro": "The command line is too long."
+  },
+  {
+   "card": 32,
+   "title": "Compound and inline commands trigger permission prompts",
+   "pattern": "requires approval|contains multiple operations",
+   "repro": "This command requires approval"
+  },
+  {
+   "card": 34,
+   "title": "Structured output is rejected because the payload is nested",
+   "pattern": "Output does not match required schema",
+   "repro": "Output does not match required schema: root: must have required property 'findings'"
+  },
+  {
+   "card": 44,
+   "title": "Path length limit breaks deep paths on Windows",
+   "pattern": "Filename too long|specified path, file name, or both are too long|path too long",
+   "repro": "error: unable to create file deep/dir/file.txt: Filename too long"
+  },
+  {
+   "card": 45,
+   "title": "Scheduled-task quirks on Windows",
+   "pattern": "0x800710E0|operator or administrator has refused the request",
+   "repro": "Last Result: 0x800710E0"
+  },
+  {
+   "card": 46,
+   "title": "The Microsoft Store Python alias stub hangs or denies",
+   "pattern": "Python was not found; run without arguments to install from the Microsoft Store",
+   "repro": "Python was not found; run without arguments to install from the Microsoft Store or disable this shortcut from Settings > Manage App Execution Aliases."
+  },
+  {
+   "card": 48,
+   "title": "OneDrive holds a lock on files, or syncs a git repository, virtual environment or database",
+   "pattern": "The process cannot access the file because it is being used by another process|Unable to create .*index\\.lock|resource busy or locked",
+   "repro": "PermissionError: The process cannot access the file because it is being used by another process: 'notes.db'"
+  },
+  {
+   "card": 49,
+   "title": "WSL DNS stops working while a VPN is connected",
+   "pattern": "Temporary failure in name resolution|Could not resolve host|Name or service not known|getaddrinfo EAI_AGAIN",
+   "repro": "ping: example.com: Temporary failure in name resolution"
+  },
+  {
+   "card": 50,
+   "title": "Unpinned npx and uvx runs fetch whatever is newest today",
+   "pattern": "No matching version found for|npm (ERR!|error) (code )?E404|Could not find a version that satisfies the requirement|failed to start.*(npx|uvx)",
+   "repro": "npm ERR! notarget No matching version found for example-mcp-server@latest-beta."
+  },
+  {
+   "card": 51,
+   "title": "A policy denial is retried in another shape",
+   "pattern": "blocked by (group policy|your organi[sz]ation|your administrator)|disallowed by (managed )?(policy|settings)|denied by managed settings|not allowed by (your )?(organi[sz]ation|admin)",
+   "repro": "This program is blocked by group policy. For more information, contact your system administrator."
+  },
+  {
+   "card": 52,
+   "title": "Two SSH clients on one Windows machine",
+   "pattern": "Permission denied \\(publickey\\)",
+   "repro": "git@example.com: Permission denied (publickey)."
+  },
+  {
+   "card": 53,
+   "title": "git in a plain folder reports a parent repository",
+   "pattern": "fatal: not a git repository \\(or any of the parent directories\\)",
+   "repro": "fatal: not a git repository (or any of the parent directories): .git"
+  },
+  {
+   "card": 55,
+   "title": "Untrusted text is substituted into a workflow script",
+   "pattern": "is potentially untrusted",
+   "repro": "script injection: \"github.event.pull_request.title\" is potentially untrusted. avoid using it directly in inline scripts"
+  },
+  {
+   "card": 59,
+   "title": "MCP connection gotchas",
+   "pattern": "Not Acceptable: Client must accept|Missing session ID|Mcp-Session-Id|MCP-Protocol-Version",
+   "repro": "Not Acceptable: Client must accept both application/json and text/event-stream"
+  },
+  {
+   "card": 61,
+   "title": "A model change is rejected by the API",
+   "pattern": "does not support assistant message prefill|conversation must end with a user message",
+   "repro": "anthropic.BadRequestError: {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'This model does not support assistant message prefill. The conversation must end with a user message.'}}"
+  },
+  {
+   "card": 61,
+   "title": "A model change is rejected by the API",
+   "pattern": "`?temperature`? is deprecated for this model",
+   "repro": "anthropic.BadRequestError: {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': '`temperature` is deprecated for this model.'}}"
+  },
+  {
+   "card": 62,
+   "title": "A model change returns blank or cut-off text",
+   "pattern": "'(Redacted)?ThinkingBlock' object has no attribute 'text'",
+   "repro": "AttributeError: 'ThinkingBlock' object has no attribute 'text'"
+  },
+  {
+   "card": 61,
+   "title": "A model change is rejected by the API",
+   "pattern": "\"thinking\\.type\\.(enabled|disabled)\" is not supported for this model|To turn thinking off on this model, send",
+   "repro": "\"thinking.type.enabled\" is not supported for this model. Use \"thinking.type.adaptive\" and \"output_config.effort\" to control thinking behavior."
+  },
+  {
+   "card": 61,
+   "title": "A model change is rejected by the API",
+   "pattern": "output_config\\.effort '\\w+' is not supported when thinking is disabled",
+   "repro": "output_config.effort 'xhigh' is not supported when thinking is disabled on this model. Use effort 'high' or below, or enable thinking."
+  }
+ ]
+}

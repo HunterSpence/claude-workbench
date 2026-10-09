@@ -19,6 +19,10 @@ python mcp_healer.py check --project <repo>                    # also LIST (neve
 - Secrets: keep them in your environment (servers inherit it, and `${VAR}` / `${VAR:-default}`
   expand in `command`, `args`, `env`, `url`, `headers`), or keep an existing value with
   `{"fromExisting": "VAR"}`. The tool prints server names and reasons, never values.
+- An `ensure` entry is written as is, including `headersHelper` and `oauth` (Claude Code runs the helper and does the
+  sign-in; this tool does neither). It is refused, with the reason printed, while a `{{PLACEHOLDER}}` is left anywhere in
+  it (command, args, url, headers or helper) or a `${VAR}` without a default names a variable that is not set in the
+  environment you ran the tool from. Set the variable and run it again.
 - Managed MCP policy present (file-based managed settings or `managed-mcp.json`): `apply` refuses to
   write (exit 3) and names the policy.
 - `.claude.json` location: `$CLAUDE_CONFIG_DIR/.claude.json` when that variable is set, else
@@ -33,7 +37,10 @@ python mcp_healer.py check --project <repo>                    # also LIST (neve
   must name it in its `env` block.
 - Servers that managed `allowedMcpServers` / `deniedMcpServers` would block are reported as SKIP
   and never launched.
-- HTTP servers get an `initialize` POST. Exit 1 if anything is DOWN. No scheduling, no alerts, no
+- A server with a `headersHelper` is reported as SKIP: a helper is a command, and `check` never runs one (use `/mcp`
+  inside Claude Code). It also never signs in for you.
+- HTTP servers get an `initialize` POST. Exit 1 if anything is DOWN. With no `.claude.json` yet, `check` says
+  "no config yet" and exits 0 (`--json` prints `[]`); `apply` and `unpark` say the same and exit 1. No scheduling, no alerts, no
   network calls except the probes you run.
 
 Tests: `python -m unittest discover -s tools/mcp-healer/tests`.

@@ -1,0 +1,8 @@
+{
+  "primes-sum": {
+    "all": ["\\b23\\b", "\\b29\\b", "\\b31\\b", "\\b83\\b"],
+    "none": [],
+    "good": "The three smallest primes greater than 20 are 23, 29 and 31. Their sum is 83.",
+    "bad": "The three smallest primes greater than 20 are 23, 29 and 31. Their sum is 81."
+  }
+}

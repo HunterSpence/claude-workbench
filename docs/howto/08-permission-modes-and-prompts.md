@@ -1,0 +1,35 @@
+# Understand permission modes and cut the prompts you can
+
+Automates it: none (settings are yours to change; Claude does not edit them)
+
+## When to use
+Claude asks to approve too many commands, a mode you expect will not start, or a guard message stopped a command and you
+want to know whether it is a prompt you can tune or a block you cannot.
+
+## Steps
+1. See what applies. In Claude Code run `/status`: the `Setting sources` line names every settings file, including a
+   managed one. A managed value always wins over anything below.
+2. Know the two kit profiles (`settings/SETTINGS.md`). **corporate** (default) asks before anything beyond reads and
+   turns bypass mode off. **permissive** starts in bypass mode with broad allow rules; your organisation may disable that mode,
+   and then Claude Code will not enter it.
+3. Know what never changes: deny rules (secret files such as `.env` and key files) apply in every mode, and ask rules for
+   publishing verbs (gists, releases, package publishes, uploads, PR comments and merges) prompt even in bypass mode.
+4. Cut routine prompts the safe way: allow only read-only commands, one pattern at a time, in your user settings, for example
+   `Bash(git status *)`, `Bash(git diff *)`, `Bash(git log *)`. Edit the file by hand or with `/permissions` or `/config`.
+   The guards refuse agent edits to settings files on purpose.
+5. Keep every prompt for writes, publishing and anything outward.
+6. Treat a guard message differently from a prompt: it is a stop. Read it, do what it says, and never retry the same
+   action in another shape.
+
+## Verify
+- Run `git status` through Claude: no prompt. Ask it to run a publishing command such as `gh pr comment`: it still asks.
+- `/status` still lists the same managed source as before.
+
+## Common failures
+- **Bypass mode will not start:** a managed `permissions.disableBypassPermissionsMode` is set. That is policy; ask only
+  through guide 03.
+- **Your allow rules are ignored:** a managed `allowManagedPermissionRulesOnly` ignores user rules, and allow rules have
+  no effect inside bypass mode.
+- **The prompt returns for a long command:** a rule matches the command as written, so a chained or wrapped command does
+  not match a rule for its first part. Allow the plain command.
+- **A guard blocks a push or a script:** see guide 20, or the message text; do not look for a way around it.

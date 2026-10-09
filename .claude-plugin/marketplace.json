@@ -4,6 +4,9 @@
   "owner": {
     "name": "The claude-workbench contributors"
   },
+  "metadata": {
+    "version": "0.3.0"
+  },
   "plugins": [
     {
       "name": "workbench-core",
@@ -15,6 +18,18 @@
       "name": "workbench-kb",
       "source": "./plugins/workbench-kb",
       "description": "Markdown knowledge base, full-text search and the save skill.",
+      "category": "productivity"
+    },
+    {
+      "name": "workbench-biz",
+      "source": "./plugins/workbench-biz",
+      "description": "Eight portable business skills for Claude web, desktop and CLI.",
+      "category": "productivity"
+    },
+    {
+      "name": "workbench-capture",
+      "source": "./plugins/workbench-capture",
+      "description": "Opt-in, read-only capture of intranet pages and shared files, and experimental mail and meeting ingest.",
       "category": "productivity"
     }
   ]

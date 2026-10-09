@@ -9,6 +9,11 @@ The rule: **no fix without a root cause you can demonstrate.** A report names a 
 goes where the cause is, usually in a function every caller shares, not in the one path the report
 mentions.
 
+## 0. Search the known failures first
+Starting from a symptom (an error line, a failing build or test)? Run the KB search from `rules/memory-protocol.md` as
+`kb_search.py "<symptom words>" --domain _shared --limit 5`. A matching bug card gives the root cause, the fix and the
+test that proves it; confirm it applies here before you use it, and say which card you used.
+
 ## 1. Pin the symptom
 - Write the symptom down exactly: the command, input, expected output, actual output, and the
   first error line verbatim. "It fails" is not a symptom.

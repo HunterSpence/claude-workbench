@@ -1,0 +1,8 @@
+# Repositories this machine may review with repo-review: one HOST/OWNER/REPO per line, no wildcards.
+# Add a line only after the repository's owner has agreed and you have recorded how it is classified:
+# the review sends file contents to the model service, and being able to read a repository is not
+# permission to do that. Lines starting with # are comments. OWNER/REPO alone means github.com.
+#
+# github.com/example-org/example-repo
+# ghe.example.com/example-org/internal-service
+# tenant.ghe.com/example-org/example-repo

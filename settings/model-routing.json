@@ -1,0 +1,323 @@
+{
+  "version": 1,
+  "provider_ids": {
+    "claude-opus-5-5": {
+      "anthropic": "claude-opus-5-5",
+      "bedrock": "anthropic.claude-opus-5-5",
+      "vertex": "claude-opus-5-5",
+      "foundry": "claude-opus-5-5"
+    },
+    "claude-sonnet-5-5": {
+      "anthropic": "claude-sonnet-5-5",
+      "bedrock": "anthropic.claude-sonnet-5-5",
+      "vertex": "claude-sonnet-5-5",
+      "foundry": "claude-sonnet-5-5"
+    },
+    "claude-haiku-5-5": {
+      "anthropic": "claude-haiku-5-5",
+      "bedrock": "anthropic.claude-haiku-5-5",
+      "vertex": "claude-haiku-5-5",
+      "foundry": "claude-haiku-5-5"
+    },
+    "claude-fable-5-1": {
+      "anthropic": "claude-fable-5-1",
+      "bedrock": "anthropic.claude-fable-5-1",
+      "vertex": "claude-fable-5-1",
+      "foundry": "claude-fable-5-1"
+    }
+  },
+  "rows": [
+    {
+      "id": "R-code",
+      "task_shape": "CODE: implement an already-planned slice of code and run its test",
+      "persona": "implementer",
+      "chain": [
+        {
+          "model": "claude-sonnet-5-5",
+          "effort": "xhigh"
+        },
+        {
+          "model": "claude-opus-5-5",
+          "effort": "high"
+        }
+      ],
+      "never": [
+        "claude-haiku-5-5: trails both larger models on most agentic coding benchmarks (on one vendor long-context benchmark it edges the mid-tier), so use it only for one-file edits a larger model will check",
+        "any model at max effort: flat or lower on code-editing benchmarks for several times the cost (the sonnet-max persona runs only when asked)"
+      ],
+      "evidence": [
+        "E1",
+        "E2",
+        "E3",
+        "E4",
+        "E5",
+        "E29",
+        "E30"
+      ]
+    },
+    {
+      "id": "R-breadth",
+      "task_shape": "BREADTH: search and fetch fan-outs, collecting (even for a decision), and browser, command-line or tool-server loops",
+      "persona": "general-purpose",
+      "chain": [
+        {
+          "model": "claude-sonnet-5-5",
+          "effort": "xhigh"
+        },
+        {
+          "model": "claude-opus-5-5",
+          "effort": "high"
+        }
+      ],
+      "never": [
+        "claude-haiku-5-5: its best tool-automation score sits below the mid-tier's lowest effort, and at low effort in long agent prompts it skips searches and checks",
+        "claude-fable-5-1: costs several times as much for a lower tool-automation score"
+      ],
+      "evidence": [
+        "E7",
+        "E8",
+        "E9",
+        "E13",
+        "O2",
+        "O4"
+      ]
+    },
+    {
+      "id": "R-read",
+      "task_shape": "READ: extract, classify, summarise or digest text or files that are handed over, in a few tool calls",
+      "persona": "scout",
+      "chain": [
+        {
+          "model": "claude-haiku-5-5",
+          "effort": "high"
+        },
+        {
+          "model": "claude-sonnet-5-5",
+          "effort": "high"
+        }
+      ],
+      "never": [
+        "claude-haiku-5-5: never for facts from memory, tool loops, code, ops, security, regulated work, final deliverables or gates",
+        "claude-haiku-5-5 at xhigh or max: xhigh can end a chat turn with no visible text and max spends several times the output tokens of high"
+      ],
+      "evidence": [
+        "E10",
+        "E11",
+        "E12",
+        "E13",
+        "E14",
+        "E15",
+        "O1",
+        "O3"
+      ]
+    },
+    {
+      "id": "R-build",
+      "task_shape": "BUILD: a code, configuration or infrastructure change with no obvious shape, an irreversible change, or work a worker already failed",
+      "persona": "flagship",
+      "chain": [
+        {
+          "model": "claude-opus-5-5",
+          "effort": "xhigh"
+        },
+        {
+          "model": "claude-sonnet-5-5",
+          "effort": "xhigh"
+        }
+      ],
+      "never": [
+        "claude-haiku-5-5: far behind on hard repository tasks",
+        "any model at max effort: no gain over xhigh for the top tier and a higher bill"
+      ],
+      "evidence": [
+        "E1",
+        "E4",
+        "E5",
+        "E6"
+      ]
+    },
+    {
+      "id": "R-gate",
+      "task_shape": "GATE: final pass, verification, judging or tie-break on finished work",
+      "persona": "blue-verify",
+      "chain": [
+        {
+          "model": "claude-opus-5-5",
+          "effort": "xhigh"
+        },
+        {
+          "model": "claude-sonnet-5-5",
+          "effort": "xhigh"
+        }
+      ],
+      "never": [
+        "claude-haiku-5-5: its vendor documents reporting a change as done without running a check, and it over-refused most in the vendor's audit"
+      ],
+      "evidence": [
+        "E24",
+        "E18",
+        "E25",
+        "E14"
+      ]
+    },
+    {
+      "id": "R-research",
+      "task_shape": "RESEARCH: multi-source synthesis and web research that needs judgment",
+      "persona": "researcher",
+      "chain": [
+        {
+          "model": "claude-opus-5-5",
+          "effort": "high"
+        },
+        {
+          "model": "claude-sonnet-5-5",
+          "effort": "xhigh"
+        }
+      ],
+      "never": [
+        "claude-haiku-5-5: factual recall far below the larger models",
+        "claude-fable-5-1: about twice the cost for a slightly lower web-research score, so use it only when asked for by name"
+      ],
+      "evidence": [
+        "E16",
+        "E17",
+        "E15"
+      ]
+    },
+    {
+      "id": "R-ops",
+      "task_shape": "OPS: anything run on a machine, such as shell work, runbooks, container and service changes, and diagnostics",
+      "persona": "ops-runner",
+      "chain": [
+        {
+          "model": "claude-opus-5-5",
+          "effort": "high"
+        },
+        {
+          "model": "claude-sonnet-5-5",
+          "effort": "xhigh"
+        }
+      ],
+      "never": [
+        "claude-haiku-5-5: far below the larger models on terminal-task benchmarks",
+        "any model at max effort: no better than xhigh on terminal tasks for a higher bill"
+      ],
+      "evidence": [
+        "E1",
+        "E2",
+        "E28"
+      ]
+    },
+    {
+      "id": "R-deliverable",
+      "task_shape": "DELIVERABLE: a final document, deck or spreadsheet for a person or a third party (internal drafts: researcher)",
+      "persona": "flagship",
+      "chain": [
+        {
+          "model": "claude-opus-5-5",
+          "effort": "xhigh"
+        },
+        {
+          "model": "claude-sonnet-5-5",
+          "effort": "xhigh"
+        }
+      ],
+      "never": [
+        "claude-haiku-5-5: fine for an internal first draft, but it trails the larger models on every deliverable benchmark, so it never writes the final version"
+      ],
+      "evidence": [
+        "E21",
+        "E22",
+        "E23"
+      ]
+    },
+    {
+      "id": "R-security",
+      "task_shape": "SECURITY: review code, configuration or an environment for vulnerabilities",
+      "persona": "security-auditor",
+      "chain": [
+        {
+          "model": "claude-opus-5-5",
+          "effort": "high"
+        },
+        {
+          "model": "claude-sonnet-5-5",
+          "effort": "xhigh"
+        }
+      ],
+      "never": [
+        "claude-haiku-5-5: its cyber safeguards trigger on security work and it has no fallback, so the task stalls or is refused"
+      ],
+      "evidence": [
+        "E14",
+        "E24",
+        "E27"
+      ]
+    },
+    {
+      "id": "R-regulated",
+      "task_shape": "REGULATED: legal, tax, medical or compliance work; cite primary sources, then pass the result to blue-verify",
+      "persona": "flagship",
+      "chain": [
+        {
+          "model": "claude-opus-5-5",
+          "effort": "xhigh"
+        },
+        {
+          "model": "claude-sonnet-5-5",
+          "effort": "xhigh"
+        }
+      ],
+      "never": [
+        "claude-haiku-5-5: last on every legal, tax and medical benchmark it is listed on",
+        "claude-fable-5-1: leads the max-only legal and tax benchmarks at several times the cost, so offer it and never route to it by default"
+      ],
+      "evidence": [
+        "E19",
+        "E20",
+        "E16"
+      ]
+    },
+    {
+      "id": "R-red",
+      "task_shape": "RED: adversarial review or pre-mortem on a different model from the builder; attacks, never gates",
+      "persona": "red-team",
+      "chain": [
+        {
+          "model": "claude-sonnet-5-5",
+          "effort": "xhigh"
+        },
+        {
+          "model": "claude-opus-5-5",
+          "effort": "high"
+        }
+      ],
+      "never": [],
+      "evidence": [
+        "E24",
+        "E25"
+      ]
+    },
+    {
+      "id": "R-green",
+      "task_shape": "GREEN: an independent alternative design or rebuild from a different model than the builder",
+      "persona": "green-team",
+      "chain": [
+        {
+          "model": "claude-sonnet-5-5",
+          "effort": "xhigh"
+        },
+        {
+          "model": "claude-opus-5-5",
+          "effort": "high"
+        }
+      ],
+      "never": [],
+      "evidence": [
+        "E26",
+        "E25",
+        "E22"
+      ]
+    }
+  ]
+}

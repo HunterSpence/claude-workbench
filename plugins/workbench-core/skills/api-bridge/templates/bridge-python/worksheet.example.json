@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "service": "example",
+  "tools": [
+    {
+      "name": "items_get",
+      "title": "Get an item",
+      "description": "Return one item and its history. Use an id from items_list.",
+      "mode": "read",
+      "operations": ["GET /items/{item_id}", "GET /items/{item_id}/history"],
+      "params": [{"name": "item_id", "in": "path", "type": "string", "required": true, "description": "Item identifier"}],
+      "text_fields": ["note"],
+      "max_bytes": 20000
+    },
+    {
+      "name": "items_list",
+      "title": "List items",
+      "description": "List items, one page per call.",
+      "mode": "read",
+      "operations": ["GET /items"],
+      "params": [
+        {"name": "limit", "in": "query", "type": "integer", "required": false, "default": 20, "description": "Page size"},
+        {"name": "cursor", "in": "query", "type": "string", "required": false, "default": "", "description": "next_cursor of the previous page"}
+      ],
+      "text_fields": ["name", "note"],
+      "max_bytes": 20000
+    }
+  ]
+}

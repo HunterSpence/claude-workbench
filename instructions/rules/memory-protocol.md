@@ -25,21 +25,24 @@ Auto memory is off in both settings profiles, so there is one memory system: the
 - **A save is due after:** a file edited outside the KB, a root cause found, a decision a future
   session needs, a tracked number changed, a new credential reference, a non-obvious routing call.
   A session-start "PRECOMPACT SAVE PENDING" notice means `/workbench-kb:save` before anything else.
+- **KB state is machine-local:** the save lock, snapshots and metrics live in
+  `<claude config dir>/workbench/kb-state/<key>/`, never in the KB folder.
 - **The KB holds only data it is approved for:** never a credential value or another tenant's
-  data. Keep `{{KB_ROOT}}` in a work-approved location; as a git repo, out of OneDrive-synced
-  folders, pushed (if ever) only to an approved work remote. The kit never pushes it.
+  data. Keep `{{KB_ROOT}}` in a work-approved place: work OneDrive is fine (version history is the
+  backup), but never a git repo inside any OneDrive folder. Push only to approved remotes.
 
 ## Read path: search before concluding silence
 - Before acting on a domain, read its `HOT.md` and `_shared/HOT.md`; go deeper with
   `{{PYTHON}} "{{WORKBENCH_HOME}}/kit/plugins/workbench-kb/scripts/kb_search.py" "<terms>"`.
 - **Before concluding something isn't known, search the KB.** A miss is not evidence of absence:
-  search is keyword-based, so retry once with the note's own words (tool, ID, file name).
+  search is keyword-based, so retry once with the note's own words (tool, ID, file name), then
+  `find search --root kb` (meaning search over the KB).
 
 ## Size
 - Always-loaded files are re-read on every call. A new rule costs a demotion elsewhere, not creep.
 - **Over budget: demote, never compress in place.** Move the least-used section verbatim into a KB
   note, read it back, and leave a one-line pointer. Read before you overwrite; append for logs.
-- Monthly, and whenever a size warning appears: the save skill's health check and `kb_eval.py`,
+- Monthly, and on a size warning: the save skill's health check and `kb_eval.py`,
   then `brain-audit`.
 
 ## Compaction

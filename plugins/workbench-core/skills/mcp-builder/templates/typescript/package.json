@@ -1,0 +1,27 @@
+{
+  "name": "{{name}}",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "tsc -p .",
+    "test": "node --test \"dist/test/*.test.js\"",
+    "start": "node dist/src/server.js"
+  },
+  "dependencies": {
+    // @@ if http
+    "@modelcontextprotocol/node": "2.1.1",
+    // @@ end
+    // @@ if auth=oauth
+    "jose": "6.2.12",
+    // @@ end
+    "@modelcontextprotocol/server": "2.3.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.3.1",
+    "@types/node": "24.19.1",
+    "typescript": "7.0.2"
+  }
+}

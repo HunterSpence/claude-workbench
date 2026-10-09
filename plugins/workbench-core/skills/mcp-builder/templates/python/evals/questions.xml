@@ -1,0 +1,11 @@
+<evaluation>
+  <!-- Target: 10 independent, read-only, multi-call, verifiable questions with a stable answer, written about the real system. Two examples: -->
+  <qa_pair>
+    <question>List the records and report the title of the one whose id sorts last. Give the title text only.</question>
+    <answer>Second record</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How many records does records_list return on its first page when limit is 1?</question>
+    <answer>1</answer>
+  </qa_pair>
+</evaluation>

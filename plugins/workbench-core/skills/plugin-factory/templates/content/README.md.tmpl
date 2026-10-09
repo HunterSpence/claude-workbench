@@ -1,0 +1,39 @@
+# __TITLE__
+
+__DESCRIPTION__
+
+This plugin was scaffolded as a __KIND__ plugin. It holds one skill (`skills/__SKILL__/SKILL.md`) and its tests.
+Replace the placeholder text, keep the tests green, and run the checks before every release.
+
+## Where it works
+
+| Surface | What loads |
+|---|---|
+| Claude Code (terminal, IDE) | everything in this plugin |
+| Claude Desktop, Code tab and Cowork | skills, agents, hooks, remote and local MCP servers |
+| claude.ai chat (web, mobile) | skills, and remote MCP servers as connectors; hooks and local servers are ignored |
+| Claude for Office add-ins | skills enabled in your Claude settings |
+| Agent SDK | the plugin folder, loaded by path |
+
+Surfaces this plugin was built for: __SURFACES__. A top-level `bin/` folder would make claude.ai refuse the whole
+plugin, so executables live in `scripts/` instead.
+
+## What runs on your machine
+__RUNS_LOCALLY__
+
+## Add it and develop it
+
+```bash
+claude plugin marketplace add <path or git URL of this repository>
+claude plugin install __NAME__@<marketplace name>
+claude --plugin-dir plugins/__NAME__        # load it for one session while you work
+```
+
+Run the rules check and the tests from the repository root:
+
+```bash
+python tools/check_plugin.py plugins/__NAME__
+python -m unittest discover -s plugins/__NAME__/tests -v
+```
+
+See `SECURITY.md` for how to report a problem and `CHANGELOG.md` for what changed.

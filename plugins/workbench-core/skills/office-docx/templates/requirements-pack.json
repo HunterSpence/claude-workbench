@@ -1,0 +1,114 @@
+{
+  "header": "Requirements pack (draft)",
+  "footer": "Prepared with AI assistance; reviewed by <name>",
+  "page_numbers": true,
+  "blocks": [
+    {
+      "title": "Requirements pack"
+    },
+    {
+      "subtitle": "<project name>, version <n>"
+    },
+    {
+      "heading": "Purpose and scope",
+      "level": 1
+    },
+    {
+      "paragraph": "<One paragraph: the problem, who it is for, and what success looks like.>"
+    },
+    {
+      "bullets": [
+        "In scope: <item>",
+        "Out of scope: <item>"
+      ]
+    },
+    {
+      "heading": "Stakeholders",
+      "level": 1
+    },
+    {
+      "table": {
+        "columns": [
+          "Name",
+          "Role",
+          "Interest",
+          "Sign-off needed"
+        ],
+        "rows": [
+          [
+            "<name>",
+            "<role>",
+            "<what they care about>",
+            "<yes or no>"
+          ]
+        ],
+        "style": "Table Grid"
+      }
+    },
+    {
+      "heading": "Requirements",
+      "level": 1
+    },
+    {
+      "table": {
+        "columns": [
+          "ID",
+          "Requirement",
+          "Priority",
+          "Source",
+          "Status"
+        ],
+        "rows": [
+          [
+            "REQ-01",
+            "<requirement text>",
+            "<must, should or could>",
+            "<section or person>",
+            "<draft>"
+          ]
+        ],
+        "style": "Table Grid"
+      }
+    },
+    {
+      "heading": "Assumptions and constraints",
+      "level": 1
+    },
+    {
+      "bullets": [
+        "ASSUMPTION: <statement and who confirms it>",
+        "Constraint: <statement>"
+      ]
+    },
+    {
+      "heading": "Open questions",
+      "level": 1
+    },
+    {
+      "table": {
+        "columns": [
+          "ID",
+          "Question",
+          "Owner",
+          "Needed by"
+        ],
+        "rows": [
+          [
+            "Q-01",
+            "<question>",
+            "<name>",
+            "<date>"
+          ]
+        ],
+        "style": "Table Grid"
+      }
+    },
+    {
+      "heading": "Provenance",
+      "level": 1
+    },
+    {
+      "paragraph": "Drafted with AI assistance (<tool and model>) from <source documents>. Reviewed and approved by <name> on <date>. Figures and quotations were checked against the sources listed above."
+    }
+  ]
+}

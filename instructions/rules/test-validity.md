@@ -21,20 +21,26 @@ This file is read on demand; it is not imported into every session.
 6. **Prove the arm was applied.** Read component identity from the live objects, check that call
    counters are non-zero, and check that the settings dump matches the live objects. Arms get
    silently dropped by hook timeouts, plugin fallbacks and wrong defaults.
-7. **No silent skips or defaults.** Fail the run on undeclared skips. Pass every case explicitly;
+   For a live check, prove the path: require the log line of the call you meant to test (a tool call,
+   then a later normal end of turn in the same session) and log the stop reason and block types of every call;
+   a field printed on every reply proves nothing.
+7. **Prove each test fails for its own reason.** A test for a function that does not exist yet fails on the base
+   commit with an import error, which proves nothing. Prove fail-first by mutation instead: in a copy of the new code,
+   break each fix in turn and confirm that a named test fails, each for the reason it was written for.
+8. **No silent skips or defaults.** Fail the run on undeclared skips. Pass every case explicitly;
    a CLI default can leave a case out of the suite.
-8. **Read exit codes directly.** Never through `| tail`, `| head` or `| grep`, which replace the exit
+9. **Read exit codes directly.** Never through `| tail`, `| head` or `| grep`, which replace the exit
    code with their own.
-9. **Test at the boundary where the bug lives.** A same-process test cannot reproduce a
+10. **Test at the boundary where the bug lives.** A same-process test cannot reproduce a
    cross-process bug such as lock contention between many processes.
-10. **Quiet machine for timing.** A latency run on a loaded machine is invalid: rerun it, never count it.
+11. **Quiet machine for timing.** A latency run on a loaded machine is invalid: rerun it, never count it.
 
 ## After the run
-11. **Calibrated statistics.** Percentile bootstraps under-cover at small or sparse n. Use a
+12. **Calibrated statistics.** Percentile bootstraps under-cover at small or sparse n. Use a
     calibrated interval and a sign-flip or split-half null on real differences. A byte-identical
     rerun proves determinism, not power.
-12. **Separate confounded arms.** Ablate: when two changes ship together, measure each alone.
-13. **Check for benchmark artefacts.** Use a fresh holdout disjoint by id and by text, per-type
+13. **Separate confounded arms.** Ablate: when two changes ship together, measure each alone.
+14. **Check for benchmark artefacts.** Use a fresh holdout disjoint by id and by text, per-type
     splits, and a non-templated set (a gain can be template fitting).
-14. **Negative flips.** Count the cases the change broke, not only the average gain.
-15. **Re-measure on current code.** A documented limitation may already be fixed.
+15. **Negative flips.** Count the cases the change broke, not only the average gain.
+16. **Re-measure on current code.** A documented limitation may already be fixed.

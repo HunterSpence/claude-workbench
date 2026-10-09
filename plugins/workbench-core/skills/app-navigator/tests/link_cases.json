@@ -1,0 +1,22 @@
+[
+  ["/reports", true],
+  ["/", true],
+  ["/settings/members?tab=plan#limits", true],
+  ["/reports/%2F%2Fexample.org", true],
+  ["//example.org", false],
+  ["/\\example.org", false],
+  ["/\\/example.org", false],
+  ["https://example.org/reports", false],
+  ["javascript:alert(1)", false],
+  ["mailto:someone@example.org", false],
+  ["data:text/html,hello", false],
+  ["/reports:export", false],
+  ["reports", false],
+  ["", false],
+  ["/\t/example.org", false],
+  ["/\n/example.org", false],
+  ["/ /example.org", false],
+  ["/reports\u0001", false],
+  ["/reports\u007f", false],
+  ["/a b", false]
+]

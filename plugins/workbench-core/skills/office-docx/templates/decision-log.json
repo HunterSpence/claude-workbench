@@ -1,0 +1,48 @@
+{
+  "header": "Decision log",
+  "footer": "Prepared with AI assistance; reviewed by <name>",
+  "page_numbers": true,
+  "blocks": [
+    {
+      "title": "Decision log"
+    },
+    {
+      "subtitle": "<project name>"
+    },
+    {
+      "paragraph": "One row per decision. A decision is something the group settled, with an owner; a suggestion nobody confirmed stays in the notes."
+    },
+    {
+      "table": {
+        "columns": [
+          "ID",
+          "Decision",
+          "Context",
+          "Options considered",
+          "Decided by",
+          "Date",
+          "Status"
+        ],
+        "rows": [
+          [
+            "D-01",
+            "<what was decided>",
+            "<why it came up>",
+            "<options>",
+            "<name>",
+            "<date>",
+            "<active, replaced or reversed>"
+          ]
+        ],
+        "style": "Table Grid"
+      }
+    },
+    {
+      "heading": "Provenance",
+      "level": 1
+    },
+    {
+      "paragraph": "Drafted with AI assistance (<tool and model>) from <source documents>. Reviewed and approved by <name> on <date>. Figures and quotations were checked against the sources listed above."
+    }
+  ]
+}

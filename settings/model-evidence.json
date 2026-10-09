@@ -1,0 +1,523 @@
+{
+  "version": 1,
+  "note": "Internal-run rows (O ids) are direction only and never rank a routing pick; picks rest on published rows, and an O row that a routing row cites records cost or configuration.",
+  "prices": {
+    "claude-opus-5-5": {
+      "input": 4.0,
+      "output": 20.0,
+      "cache_write": 5.0,
+      "cache_read": 0.2,
+      "long_context": null,
+      "evidence": "E32",
+      "as_of": "2026-10"
+    },
+    "claude-sonnet-5-5": {
+      "input": 2.0,
+      "output": 10.0,
+      "cache_write": 2.5,
+      "cache_read": 0.1,
+      "long_context": null,
+      "evidence": "E32",
+      "as_of": "2026-10"
+    },
+    "claude-haiku-5-5": {
+      "input": 0.1,
+      "output": 0.5,
+      "cache_write": 0.125,
+      "cache_read": 0.01,
+      "long_context": {
+        "over_tokens": 100000,
+        "input": 0.5,
+        "output": 2.5,
+        "cache_write": 0.625,
+        "cache_read": 0.05
+      },
+      "evidence": "E32",
+      "as_of": "2026-10"
+    },
+    "claude-fable-5-1": {
+      "input": 10.0,
+      "output": 50.0,
+      "cache_write": 12.5,
+      "cache_read": 0.25,
+      "long_context": null,
+      "evidence": "E32",
+      "as_of": "2026-10"
+    }
+  },
+  "rows": [
+    {
+      "id": "E1",
+      "source": "Artificial Analysis: Terminal-Bench 4.0 on the per-effort model pages (artificialanalysis.ai/models/claude-opus-5-5-high and sibling pages)",
+      "date": "2026-10-08",
+      "kind": "independent",
+      "tier": "R0",
+      "claim": "On a terminal-task benchmark the mid-tier at xhigh and the top tier at high are within a point of each other at similar cost, the top tier scores no higher at max than at xhigh, and the small model's best setting stays below the mid-tier's high setting.",
+      "value": "Terminal-Bench 4.0: Sonnet 5.5 high 43.9% ($2.19 per task), xhigh 57.1% ($6.08), max 63.6% ($12.65); Opus 5.5 medium 52.5% ($4.04), high 56.6% ($5.12), xhigh 59.6% ($8.78), max 59.6% ($13.11); Haiku 5.5 xhigh 29.3% ($0.46), max 32.8% ($0.65)",
+      "direction": "same",
+      "n": null
+    },
+    {
+      "id": "E2",
+      "source": "Anthropic: Terminal-Bench 4.0 launch charts, Claude Code harness (anthropic.com/claude-haiku-5-5, anthropic.com/claude-opus-5-5)",
+      "date": "2026-10-08",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "On the vendor's own harness the top tier at high scores a few points above the mid-tier at xhigh for slightly less per attempt, the mid-tier at max posts the highest score but at more than twice its xhigh cost, and the top tier's max scores below its xhigh.",
+      "value": "Terminal-Bench 4.0 (Claude Code): Opus 5.5 high 64.2% ($3.88 per attempt), xhigh 66.4% ($7.35), max 64.8% ($11.24); Sonnet 5.5 high 43.0% ($1.46), xhigh 61.5% ($4.34), max 70.6% ($10.44); Haiku 5.5 max 39.2% ($2.64)",
+      "direction": "worse",
+      "n": null
+    },
+    {
+      "id": "E3",
+      "source": "Cursor: CursorBench 4.0 leaderboard (cursor.com/cursorbench)",
+      "date": "2026-10-08",
+      "kind": "independent",
+      "tier": "R0",
+      "claim": "On an editor-agent coding benchmark the top tier at high matches its own xhigh and sits under two points below its max at under a third of the cost; the mid-tier at xhigh reaches most of that score for less; the small model's best setting only matches the mid-tier at high.",
+      "value": "CursorBench 4.0: Opus 5.5 high 56.0% ($3.97 per task), xhigh 56.0% ($6.98), max 57.8% ($13.43); Sonnet 5.5 high 47.8% ($1.20), xhigh 53.1% ($2.81), max 55.5% ($7.05); Haiku 5.5 max 48.4% ($1.12)",
+      "direction": "worse",
+      "n": null
+    },
+    {
+      "id": "E4",
+      "source": "Anthropic: FrontierCode 1.1 launch charts (anthropic.com/claude-opus-5-5, anthropic.com/claude-sonnet-5-5)",
+      "date": "2026-10-08",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "On a code-editing benchmark that penalises out-of-scope edits more effort does not buy more: the top tier scores highest at medium and lower at xhigh than at high, and the mid-tier peaks at xhigh then drops at max at about thirteen times the cost.",
+      "value": "FrontierCode 1.1: Opus 5.5 medium 54.6% ($0.80 per attempt), high 54.0% ($1.09), xhigh 51.4% ($2.25), max 54.4% ($6.19); Sonnet 5.5 high 49.4% ($0.42), xhigh 52.1% ($1.59), max 46.2% ($20.78); Sonnet costs on this page use the earlier, higher cache-read price",
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "E5",
+      "source": "Anthropic: model system cards, SWE-bench Pro and SWE-bench Multilingual at max effort (anthropic.com/claude-opus-5-5-system-card and sibling cards)",
+      "date": "2026-10-08",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "On hard repository-level fixes at max effort the top tier leads the mid-tier, the mid-tier leads the small model by a wide margin, and the priciest tier scores level with the mid-tier.",
+      "value": "SWE-bench Pro: Opus 5.5 89.9, Sonnet 5.5 81.3, Fable 5.1 81.2, Haiku 5.5 64.8; SWE-bench Multilingual: Opus 5.5 93.9, Sonnet 5.5 90.3, Fable 5.1 89.1, Haiku 5.5 83.7 (single reported effort: max)",
+      "direction": "worse",
+      "n": null
+    },
+    {
+      "id": "E6",
+      "source": "Artificial Analysis: Terminal-Bench-Science on the per-effort model pages (artificialanalysis.ai/models/claude-opus-5-5-xhigh and sibling pages)",
+      "date": "2026-10-08",
+      "kind": "independent",
+      "tier": "R0",
+      "claim": "On long scientific terminal tasks the top tier gains a large amount from high to xhigh and loses a little at max, the mid-tier gains under a point from xhigh to max, and the small model is far behind at every effort.",
+      "value": "Terminal-Bench-Science: Opus 5.5 low 24.3, medium 43.3, high 49.0, xhigh 61.9, max 59.0; Sonnet 5.5 high 34.3, xhigh 52.4, max 53.3; Haiku 5.5 high 10.0, xhigh 18.1, max 20.0",
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "E7",
+      "source": "Artificial Analysis: AutomationBench-AA on the per-effort model pages (artificialanalysis.ai/models/claude-sonnet-5-5-xhigh and sibling pages)",
+      "date": "2026-10-08",
+      "kind": "independent",
+      "tier": "R0",
+      "claim": "On a multi-step tool-automation benchmark the mid-tier at xhigh matches the top tier at xhigh for about half the cost and gains about six points over its own high; the small model's best setting scores below the mid-tier's low setting.",
+      "value": "AutomationBench-AA: Sonnet 5.5 low 49.4% ($0.241 per task), high 59.4% ($0.313), xhigh 65.5% ($0.422), max 71.8% ($1.03); Opus 5.5 high 63.2% ($0.699), xhigh 65.0% ($0.878), max 69.5% ($1.43); Haiku 5.5 xhigh 36.0% ($0.028), max 35.4% ($0.042)",
+      "direction": "same",
+      "n": null
+    },
+    {
+      "id": "E8",
+      "source": "Anthropic: OSWorld 2.1 offline subset, Haiku 5.5 launch charts (anthropic.com/claude-haiku-5-5)",
+      "date": "2026-10-08",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "On computer-use loops the mid-tier at xhigh is within three points of its max at under half the cost; the small model's xhigh matches the mid-tier's medium at under a third of the cost, but its max stays below the mid-tier's xhigh.",
+      "value": "OSWorld 2.1 offline subset, partial credit: Sonnet 5.5 medium 66.0% ($0.93 per attempt), high 73.2% ($1.38), xhigh 81.1% ($2.22), max 83.9% ($5.73); Haiku 5.5 xhigh 67.6% ($0.28), max 72.4% ($0.61)",
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "E9",
+      "source": "Anthropic: model system cards, AutomationBench (Zapier) at max effort (anthropic.com/claude-sonnet-5-5-system-card and sibling cards)",
+      "date": "2026-10-08",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "On a second automation benchmark at max effort the mid-tier scores above the top tier and the priciest tier scores lowest of the three; the small model is not reported.",
+      "value": "AutomationBench (Zapier): Sonnet 5.5 44.7%, Opus 5.5 40.0% (42.5% after a re-run of refused items with fallbacks), Fable 5.1 31.4%",
+      "direction": "better",
+      "n": null
+    },
+    {
+      "id": "E10",
+      "source": "Artificial Analysis: AA-LCR v1.1 long-context reasoning on the per-effort model pages (artificialanalysis.ai/models/claude-haiku-5-5-high and sibling pages)",
+      "date": "2026-10-08",
+      "kind": "independent",
+      "tier": "R0",
+      "claim": "On answering questions over long documents the small model ties the mid-tier at medium effort and again at max for a small fraction of the cost; the cost shown matches the vendor's base price tier, so the real saving is smaller on long prompts.",
+      "value": "AA-LCR v1.1: Haiku 5.5 medium 77.3% ($0.015 per task), xhigh 78.3%, max 82.7% ($0.019); Sonnet 5.5 medium 76.3% ($0.292), high 78.0% ($0.294), max 82.7% ($0.339); Opus 5.5 medium 84.3% ($0.590), max 84.7% ($0.677)",
+      "direction": "same",
+      "n": null
+    },
+    {
+      "id": "E11",
+      "source": "Anthropic: Haiku 5.5 launch post and API pricing page (anthropic.com/claude-haiku-5-5, platform.claude.com/docs/en/about-claude/pricing)",
+      "date": "2026-10-08",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "The small model is the only current model with a long-prompt price tier: prompts over the threshold cost five times the base input and output rates, so its saving over the mid-tier shrinks on long agent prompts.",
+      "value": "Haiku 5.5 per million tokens: input $0.10 (prompts up to 100K tokens) or $0.50 (over 100K); output $0.50 or $2.50; cache read $0.01 or $0.05. Sonnet 5.5: input $2.00, output $10.00, cache read $0.10",
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "E12",
+      "source": "Anthropic: Haiku 5.5 launch post, positioning and limits (anthropic.com/claude-haiku-5-5)",
+      "date": "2026-10-08",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "The vendor positions the small model for narrowly scoped, high-volume work such as summaries, compaction, classification and subagent tasks, and says the two larger models remain the better choice for complex agentic coding.",
+      "value": null,
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "E13",
+      "source": "Anthropic: API docs, effort and the prompting guide for Haiku 5.5 (platform.claude.com/docs/en/build-with-claude/effort)",
+      "date": "2026-10-08",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "Vendor effort guidance for the small model: start at medium; use high for knowledge work, longer agent tasks and strict instruction following; at low effort in long agent prompts it is more likely to skip a search, stop early or skip a check; at xhigh in multi-turn chat it can end a turn with no visible text; use xhigh or max only where your own evaluation shows a gain. In Anthropic's testing, telling the model to answer directly did not stop it thinking; lower the effort instead.",
+      "value": null,
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "E14",
+      "source": "Anthropic: Haiku 5.5 system card and prompting guide, safeguards and behavioural audit (anthropic.com/claude-haiku-5-5-system-card)",
+      "date": "2026-10-08",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "The small model's cyber safeguards trigger on significantly less activity than other recent releases and it has no server-side fallback after a refusal; in the vendor's behavioural audit it over-refused more than any other model tested and sometimes used a leaked answer without telling the user.",
+      "value": null,
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "E15",
+      "source": "Artificial Analysis: AA-Omniscience on the per-effort model pages (artificialanalysis.ai/models/claude-opus-5-5-high and sibling pages)",
+      "date": "2026-10-08",
+      "kind": "independent",
+      "tier": "R0",
+      "claim": "On closed-book factual recall accuracy rises with model tier and barely moves with effort: the small model answers about a third of questions correctly against about two thirds for the top tier, and its low hallucination rate counts only the questions it fails to answer correctly, so it does not make the small model a fact source.",
+      "value": "AA-Omniscience accuracy: Haiku 5.5 33.2% (low) to 36.4% (max); Sonnet 5.5 46.3% to 54.0%; Opus 5.5 63.5% to 66.2%; Fable 5.1 60.2% to 67.2%. Omniscience index at xhigh: Opus 5.5 42.6, Sonnet 5.5 23.5, Haiku 5.5 6.0",
+      "direction": "worse",
+      "n": null
+    },
+    {
+      "id": "E16",
+      "source": "Anthropic: WANDR web-research launch chart (anthropic.com/claude-opus-5-5)",
+      "date": "2026-10-08",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "On agentic web research the top tier at high delivers most of its max score at under half the cost, xhigh adds about four points for roughly seventy percent more than high, and the priciest tier at high scores slightly lower at about twice the cost.",
+      "value": "WANDR: Opus 5.5 medium 62.8% ($11.20 per attempt), high 67.3% ($16.88), xhigh 71.3% ($29.06), max 72.3% ($37.92); Fable 5.1 high 66.7% ($33.62), max 68.7% ($49.02); Sonnet 5.5 and Haiku 5.5 are charted only as images in their system cards",
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "E17",
+      "source": "Anthropic: model system cards, Humanity's Last Exam with tools at max effort (anthropic.com/claude-opus-5-5-system-card and sibling cards)",
+      "date": "2026-10-08",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "With search and code tools at max effort the top tier leads, the mid-tier and the priciest tier follow within a few points, and the small model trails the mid-tier by about seven points.",
+      "value": "HLE with tools: Opus 5.5 67.7%, Fable 5.1 65.0%, Sonnet 5.5 64.5%, Haiku 5.5 57.4%",
+      "direction": "worse",
+      "n": null
+    },
+    {
+      "id": "E18",
+      "source": "Artificial Analysis: Humanity's Last Exam without tools on the per-effort model pages (artificialanalysis.ai/models/claude-opus-5-5-high and sibling pages)",
+      "date": "2026-10-08",
+      "kind": "independent",
+      "tier": "R0",
+      "claim": "On expert-level questions without tools the top tier at low effort beats the small model at max for less money, and the top tier at high leads the mid-tier at xhigh by more than five points.",
+      "value": "HLE without tools: Opus 5.5 low 48.3% ($0.029 per task), medium 54.7% ($0.062), high 55.6% ($0.104), xhigh 57.5% ($0.240), max 61.4% ($0.718); Sonnet 5.5 high 45.8% ($0.047), xhigh 50.0% ($0.118), max 55.0% ($0.544); Haiku 5.5 max 44.4% ($0.044)",
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "E19",
+      "source": "Vals AI: Legal Research Bench, Tax Agent Bench and Harvey Legal Agent Benchmark at max effort (vals.ai/models/anthropic_claude-opus-5-5 and sibling pages)",
+      "date": "2026-10-08",
+      "kind": "independent",
+      "tier": "R0",
+      "claim": "On legal and tax benchmarks, all reported at max effort only, the priciest tier leads, the small model is last on every one, and the top and mid tiers trade places by task.",
+      "value": "Legal Research Bench: Fable 5.1 55.3, Opus 5.5 50.5, Sonnet 5.5 48.1, Haiku 5.5 43.3; Tax Agent Bench: Fable 5.1 77.6, Sonnet 5.5 73.4, Opus 5.5 70.5, Haiku 5.5 62.2; Harvey Legal Agent Benchmark all-pass: Fable 5.1 6.7, Opus 5.5 3.8, Sonnet 5.5 2.9, Haiku 5.5 1.2",
+      "direction": "worse",
+      "n": null
+    },
+    {
+      "id": "E20",
+      "source": "Anthropic: model system cards, PhysicianBench by effort (anthropic.com/claude-haiku-5-5-system-card and sibling cards)",
+      "date": "2026-10-08",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "On a clinical-task benchmark the pass rate climbs steeply with effort for every model that reports several levels, the top tier scores highest at max, and the small model stays far behind the mid-tier at max.",
+      "value": "PhysicianBench pass rate: Opus 5.5 max 68.4%; Sonnet 5.5 low 27.2%, medium 30.0%, max 63.2%; Haiku 5.5 low 17.8%, medium 25.2%, high 31.6%, xhigh 35.8%, max 43.0%; Fable 5.1 max 61.0%",
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "E21",
+      "source": "Artificial Analysis: GDPval-AA v2.1 on the per-effort model pages (artificialanalysis.ai/models/claude-opus-5-5-xhigh and sibling pages)",
+      "date": "2026-10-08",
+      "kind": "independent",
+      "tier": "R0",
+      "claim": "On pairwise-judged professional deliverables the top tier leads the mid-tier at xhigh by over a hundred rating points, the top tier's xhigh is within about thirty points of its max at under half the cost, and the small model's max trails the mid-tier's xhigh by over a hundred points. The vendor's system card reports Artificial Analysis's own run of this benchmark, so the vendor's figures for it are the same measurement, not a replication.",
+      "value": "GDPval-AA v2.1: Opus 5.5 medium 1586 ($0.856 per task), high 1707 ($1.54), xhigh 1837 ($4.21), max 1866 ($8.92); Sonnet 5.5 high 1551 ($0.689), xhigh 1731 ($1.95), max 1839 ($6.84); Haiku 5.5 high 1420 ($0.044), xhigh 1511 ($0.092), max 1620 ($0.222)",
+      "direction": "worse",
+      "n": null
+    },
+    {
+      "id": "E22",
+      "source": "Artificial Analysis: AA-Briefcase v1.1 on the per-effort model pages (artificialanalysis.ai/models/claude-sonnet-5-5-xhigh and sibling pages)",
+      "date": "2026-10-08",
+      "kind": "independent",
+      "tier": "R0",
+      "claim": "On long agentic document work the mid-tier at xhigh is level with the top tier at xhigh for a little over half the cost, the mid-tier at max posts the highest score of all, and the small model's max trails the mid-tier's high.",
+      "value": "AA-Briefcase v1.1: Sonnet 5.5 high 1639 ($3.27 per task), xhigh 1751 ($6.98), max 1823 ($20.47); Opus 5.5 high 1689 ($6.27), xhigh 1768 ($12.27), max 1807 ($21.05); Haiku 5.5 high 1443 ($0.223), max 1578 ($0.675)",
+      "direction": "same",
+      "n": null
+    },
+    {
+      "id": "E23",
+      "source": "Anthropic: model system cards, OfficeQA and OfficeQA Pro at max effort (anthropic.com/claude-opus-5-5-system-card and sibling cards)",
+      "date": "2026-10-08",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "On office-document question answering the tiers are ordered by price with small gaps between the top and mid tiers, and the small model trails the mid-tier by between three and six points.",
+      "value": "OfficeQA: Fable 5.1 80.2, Opus 5.5 78.9, Sonnet 5.5 76.9, Haiku 5.5 73.5; OfficeQA Pro: Fable 5.1 69.0, Opus 5.5 67.7, Sonnet 5.5 65.6, Haiku 5.5 60.3",
+      "direction": "worse",
+      "n": null
+    },
+    {
+      "id": "E24",
+      "source": "CodeRabbit: code-review benchmark posts for Opus 5.5 and Sonnet 5.5 (coderabbit.ai/blog)",
+      "date": "2026-10-08",
+      "kind": "independent",
+      "tier": "R0",
+      "claim": "On a set of hard review bugs the top-tier model caught the most, but its precision dropped at maximum effort; the mid-tier with thinking on caught fewer; on a larger open-source set more effort did not improve recall.",
+      "value": "Signal set of 13 hard bugs: Opus 5.5 max caught 10 (precision 52.0%), standard 8 (66.7%); Sonnet 5.5 thinking on 6 (41.2%), thinking off 5; open-source set of 80 bugs: Opus standard recall 63.8% vs max 62.5%",
+      "direction": "worse",
+      "n": null
+    },
+    {
+      "id": "E25",
+      "source": "Artificial Analysis: Intelligence Index v4.3.2 on the per-effort model pages (artificialanalysis.ai/models/claude-opus-5-5-high and sibling pages)",
+      "date": "2026-10-08",
+      "kind": "independent",
+      "tier": "R0",
+      "claim": "On the composite index every model rises with effort with diminishing returns; the top tier at medium is level with the mid-tier at xhigh, the mid-tier at xhigh sits about four points under the top tier at xhigh, and the small model at max scores a little above the mid-tier at medium. The index measures general capability and is not a routing key.",
+      "value": "Intelligence Index v4.3.2: Opus 5.5 low 42.3, medium 51.2, high 53.6, xhigh 56.0, max 57.6; Sonnet 5.5 low 35.9, medium 40.8, high 46.8, xhigh 51.9, max 56.0; Haiku 5.5 low 29.4, medium 34.5, high 37.8, xhigh 41.2, max 43.4; Fable 5.1 max 53.4",
+      "direction": "worse",
+      "n": null
+    },
+    {
+      "id": "E26",
+      "source": "Vals AI: Vibe Code Bench v1.1 and Vals Index at max effort (vals.ai/models/anthropic_claude-sonnet-5-5 and sibling pages)",
+      "date": "2026-10-08",
+      "kind": "independent",
+      "tier": "R0",
+      "claim": "At max effort the mid-tier ties the top tier on a finance, legal and coding index and leads a vibe-coding build benchmark where the small model also scores close; the small model is clearly behind on the index.",
+      "value": "Vibe Code Bench v1.1: Sonnet 5.5 92.4, Haiku 5.5 90.4, Opus 5.5 90.3, Fable 5.1 90.3; Vals Index: Sonnet 5.5 67.0, Opus 5.5 67.0, Fable 5.1 65.8, Haiku 5.5 54.3",
+      "direction": "same",
+      "n": null
+    },
+    {
+      "id": "E27",
+      "source": "Vals AI: CyberBench v1.1 at max effort (vals.ai/models/anthropic_claude-sonnet-5-5 and sibling pages)",
+      "date": "2026-10-08",
+      "kind": "independent",
+      "tier": "R0",
+      "claim": "A max-only offensive-security benchmark ranks the mid-tier above the top tier and does not list the small model; it measures attack skill rather than review quality and has no per-effort data, so it does not change the review pick.",
+      "value": "CyberBench v1.1: Fable 5.1 70.4, Sonnet 5.5 59.6, Opus 5.5 55.4; Haiku 5.5 not listed",
+      "direction": "better",
+      "n": null
+    },
+    {
+      "id": "E28",
+      "source": "Vals AI: SRE Bench at max effort (vals.ai/models/anthropic_claude-opus-5-5 and sibling pages)",
+      "date": "2026-10-08",
+      "kind": "independent",
+      "tier": "R0",
+      "claim": "On a site-reliability benchmark reported at max effort only, the top tier leads the mid-tier by a few points and the priciest tier is last; the small model is not listed.",
+      "value": "SRE Bench: Opus 5.5 33.6, Sonnet 5.5 30.1, Fable 5.1 22.9; Haiku 5.5 not listed",
+      "direction": "worse",
+      "n": null
+    },
+    {
+      "id": "E29",
+      "source": "Anthropic: Haiku 5.5 system card, ProgramBench long-context coding results (anthropic.com/claude-haiku-5-5-system-card)",
+      "date": "2026-10-08",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "On the vendor's long-context agentic coding benchmark, where the agent rebuilds a program from its compiled binary and documentation with inputs up to about a million tokens, the small model scores slightly above the mid-tier and well below the top tier; the card runs the small model at max effort and does not state the others' effort.",
+      "value": "ProgramBench (166 tasks after the card dropped 34 flaky ones; inputs up to the 1M-token window): Opus 5.5 91.2%, Haiku 5.5 82.0%, Sonnet 5.5 79.7%; the card's standard configuration runs Haiku 5.5 at max effort and does not state the effort of the other two on this benchmark",
+      "direction": "better",
+      "n": null
+    },
+    {
+      "id": "E30",
+      "source": "Cursor: Claude Haiku 5.5 model page, CursorBench with thinking on and off (cursor.com/docs/models/claude-haiku-5-5)",
+      "date": "2026-10-08",
+      "kind": "independent",
+      "tier": "R0",
+      "claim": "On an editor-agent coding benchmark the small model with thinking off scores well below its thinking-on result at the same effort levels.",
+      "value": "CursorBench: thinking off 22.1% to 26.2%, thinking on 30.9% to 42.3% at the same effort levels (the page does not list the levels); thinking on reaches 48.4% at max",
+      "direction": "worse",
+      "n": null
+    },
+    {
+      "id": "E31",
+      "source": "Anthropic: models overview page, comparison table (platform.claude.com/docs/en/about-claude/models/overview)",
+      "date": "2026-10-08",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "The vendor lists the same context window and output limit for all four current models; the top tier and the small model default to medium effort and the other two to high; the small model is listed as the fastest and Fable as the slowest.",
+      "value": "All four: context window 1M tokens, max output 128K tokens (synchronous Messages API). Default effort: Claude Fable 5.1 high, Claude Opus 5.5 medium, Claude Sonnet 5.5 high, Claude Haiku 5.5 medium. Comparative latency: Fable 5.1 Slower, Opus 5.5 Moderate, Sonnet 5.5 Fast, Haiku 5.5 Fastest. Thinking: adaptive, always on for Fable 5.1 and Opus 5.5. Ids: claude-fable-5-1, claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5 (fixed ids, no date suffix).",
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "E32",
+      "source": "Anthropic: API pricing page, model pricing table (platform.claude.com/docs/en/about-claude/pricing)",
+      "date": "2026-10-08",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "The vendor's price list gives each model one rate across its whole window except the small model, which has a higher tier for prompts over the threshold; a cache read costs a tenth of the base input price, except a twentieth on the top tier and the mid-tier and a fortieth on Fable.",
+      "value": "USD per million tokens: base input, 5-minute cache write, 1-hour cache write, cache read, output. Fable 5.1: 10, 12.50, 20, 0.25, 50. Opus 5.5: 4, 5, 8, 0.20, 20. Sonnet 5.5: 2, 2.50, 4, 0.10, 10. Haiku 5.5 for prompts up to 100,000 tokens: 0.10, 0.125, 0.20, 0.01, 0.50; for prompts over 100,000 tokens: 0.50, 0.625, 1, 0.05, 2.50. Multipliers: 5-minute write 1.25x, 1-hour write 2x, cache read 0.1x (0.05x Opus 5.5 and Sonnet 5.5, 0.025x Fable 5.1). Batch API: 50% off input and output.",
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "E33",
+      "source": "Anthropic: effort page, recommended levels per model, and the thinking troubleshooting page, rejected settings (platform.claude.com/docs/en/build-with-claude/effort and platform.claude.com/docs/en/build-with-claude/thinking-troubleshooting)",
+      "date": "2026-10-08",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "The vendor's per-model effort advice: start the small model at medium, the mid-tier at high or at medium for agentic coding, and Fable at high; the top tier defaults to medium and needs its own sweep; use xhigh or max only where your own evals show a gain; it also lists which models reject a disabled-thinking setting.",
+      "value": "Haiku 5.5: start medium for most work including agentic coding; low for chat, short tool tasks and simple high-volume requests (in long agent prompts it is more likely to skip a search, stop early or skip a check); high for knowledge work, longer agent tasks and strict instruction following; xhigh or max only with an eval gain, compared against Sonnet 5.5. Sonnet 5.5: high is the default; for agentic coding and multistep tool use start medium for well-specified tasks and high for harder or longer ones; medium or low for chat and latency-sensitive work. Opus 5.5: medium is the default (one level below the previous Opus); run an effort sweep on your own evals. Fable 5.1: start high; step up to xhigh or max for the most capability-sensitive work, down to medium or low for routine work once evals show quality holds. Levels: low is the most efficient; medium balances speed, cost and performance; high is for complex reasoning and hard coding; xhigh is for long-running agentic and coding work; max has no limit on token spend. Rejected thinking settings: Fable 5.1 and Opus 5.5 reject thinking set to disabled (thinking is always on); Sonnet 5.5 rejects disabled at every effort level and takes between_tools instead, at effort high or below; Haiku 5.5 accepts disabled only at effort high or below.",
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "E34",
+      "source": "Anthropic: choosing a model page, selection matrix (platform.claude.com/docs/en/about-claude/models/choosing-a-model)",
+      "date": "2026-10-08",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "The vendor's model picker says most workloads start with the top tier, the lowest latency and price is the small model, and Fable is for demanding long-horizon work or when top-tier evals at the highest efforts still fall short; it adds that tuning effort is often a better lever than switching models.",
+      "value": "Matrix: highest available capability - Claude Fable 5.1; complex agentic coding and enterprise work - Claude Opus 5.5; speed and capability for everyday coding, agent and enterprise workloads - Claude Sonnet 5.5; the lowest latency and price - Claude Haiku 5.5 (real-time applications, high-volume processing, cost-sensitive deployments needing strong reasoning, sub-agent tasks). Rule: most workloads start with Claude Opus 5.5.",
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "E35",
+      "source": "Anthropic: Haiku 5.5 launch post, effort charts for the small model (anthropic.com/claude-haiku-5-5)",
+      "date": "2026-10-08",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "On the vendor's launch charts the small model improves at every effort step on all four benchmarks shown; the last step to max costs more than twice as much as xhigh on three of them, and on the knowledge exam it adds under two points for more than three times the cost.",
+      "value": "Haiku 5.5, score and cost per attempt in USD at low, medium, high, xhigh, max. OSWorld 2.1 offline subset: 42.0% ($0.0695), 53.3% ($0.1257), 61.3% ($0.1827), 67.6% ($0.2792), 72.4% ($0.6111). GDPval-AA v2.1 (Elo): 1125 ($0.01167), 1277 ($0.03042), 1420 ($0.08938), 1513 ($0.26725), 1620 ($0.86593). Humanity's Last Exam, no tools: 30.9% ($0.00334), 35.5% ($0.00693), 39.7% ($0.02043), 44.1% ($0.06452), 45.9% ($0.21367). Terminal-Bench 4.0: 12.7% ($0.424), 20.3% ($0.6798), 24.8% ($1.0372), 31.5% ($1.7545), 39.2% ($2.6433).",
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "O1",
+      "source": "claude-workbench authors: persona configuration check",
+      "date": "2026-10",
+      "kind": "internal-run",
+      "tier": "R0",
+      "claim": "Headless runs of every persona confirmed that each ran on its pinned model, that the small-model alias resolved to the current small model, and that a reader persona set to high effort used its high thinking band instead of falling through to a higher level. Easy probes did not separate the larger models' effort settings, so their persona efforts stay as configured.",
+      "value": null,
+      "direction": "same",
+      "n": null
+    },
+    {
+      "id": "O2",
+      "source": "claude-workbench authors: cost breakdown of real subagent sessions",
+      "date": "2026-10",
+      "kind": "internal-run",
+      "tier": "R0",
+      "claim": "Re-pricing real subagent sessions at published list prices showed that cache writes and cache reads made up most of each persona's cost and that most agent turns carried prompts above the long-prompt threshold, so model price times context size, not effort, was the main cost driver.",
+      "value": null,
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "O3",
+      "source": "claude-workbench authors: small-model reader cost on agent work",
+      "date": "2026-10",
+      "kind": "internal-run",
+      "tier": "R0",
+      "claim": "Re-pricing the same measured agent tokens at published list prices, with the long-prompt tier applied per turn, put the small model well below the mid-tier's cost on long agent work and lower still on short workflow tasks.",
+      "value": null,
+      "direction": "better",
+      "n": null
+    },
+    {
+      "id": "O4",
+      "source": "claude-workbench authors: effort step on a collecting worker",
+      "date": "2026-10",
+      "kind": "internal-run",
+      "tier": "R0",
+      "claim": "Raising a mid-tier collecting worker from high to xhigh effort on a repository search loop raised the cost of the run, in line with the published price slope for the same step.",
+      "value": null,
+      "direction": "worse",
+      "n": null
+    },
+    {
+      "id": "O5",
+      "source": "claude-workbench authors: small-model effort probe",
+      "date": "2026-10",
+      "kind": "internal-run",
+      "tier": "R0",
+      "claim": "In one internal probe on the small model, raising effort from low to high improved adherence to a length instruction and turning thinking off lowered it; a closing line restating the rules did not help; output tokens and the share of replies with thinking rose with effort.",
+      "value": null,
+      "direction": "better",
+      "n": null
+    },
+    {
+      "id": "O7",
+      "source": "claude-workbench authors: blind replay of past subagent prompts",
+      "date": "2026-10",
+      "kind": "internal-run",
+      "tier": "R0",
+      "claim": "Two blind labelers sorting past subagent prompts by task type agreed on most of them; the main disagreement was collecting work done for a decision, and the most common misroute to the top-tier builder was an already-planned code slice.",
+      "value": null,
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "O8",
+      "source": "claude-workbench authors: reader against mid-tier on classification",
+      "date": "2026-10",
+      "kind": "internal-run",
+      "tier": "R0",
+      "claim": "On a classification pass over past prompts the reader persona agreed with a top-tier labeler as often as the mid-tier in one repeat and less often in the other, inside its own repeat-to-repeat variation, at a lower cost; in one repeat it over-applied a judgment label.",
+      "value": null,
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "O9",
+      "source": "claude-workbench authors: output tokens by effort on small tasks",
+      "date": "2026-09",
+      "kind": "internal-run",
+      "tier": "R0",
+      "claim": "On small agentic and logic tasks every effort level passed on each model tested, so those tasks priced effort and could not rank it: output tokens, thinking included, rose at nearly every step, the priciest tier's step from high to xhigh cost far more than the top tier's, and a subagent ran at its own model's saved effort level rather than the main session's.",
+      "value": null,
+      "direction": null,
+      "n": null
+    }
+  ]
+}

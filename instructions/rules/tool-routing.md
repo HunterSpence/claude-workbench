@@ -6,41 +6,42 @@ missing capability: say so and let the user fix it; never silently route around 
 
 ## By task
 - **Web research:** native WebSearch and WebFetch; long-form or comparison research goes to the
-  `researcher` agent or `/workbench-core:deep-research`. A 403 is not "unreadable": say which fetcher
-  failed. A bot wall or captcha is a stop: hand it to the user. WebSearch is one per-session
-  budget shared with every subagent: plan research fan-outs around it.
-- **Work documents:** let OneDrive sync the library, then search a scoped, locally kept folder with
-  the `doc-index` skill and cite the originals.
-- **Office output:** `office-pptx` and `office-xlsx` build files; `office-render` renders them so
-  you check the result first. For editing inside Excel, PowerPoint, Word or Outlook: the official
-  Claude for Microsoft 365 add-ins, if your tenant's admin allows them.
-- **GitHub:** the `gh` CLI against your enterprise host (`--hostname`, or `GH_HOST`; see
-  `rules/corporate-environment.md`). The `github` skill covers the details.
-- **Docs for a framework or SDK:** the vendor's site through WebFetch, or a docs MCP only if your
-  organisation approved it. Claude and Anthropic models, pricing and limits: the bundled
-  `claude-api` skill, never memory.
-- **Code graph:** `rules/code-graph.md`.
-- **Databases:** read-only queries unless the user asks otherwise; production writes are a Red Line.
+  `researcher` agent or `deep-research`. A 403 is not "unreadable": say which fetcher failed. A bot
+  wall or captcha is a stop: hand it to the user. WebSearch is one per-session budget shared with
+  every subagent: plan research fan-outs around it.
+- **Work documents:** `find` searches one local index over synced work libraries, captured pages
+  and the kit's how-tos; cite the originals.
+- **Which knowledge tool** (guide 54): `find` for documents, `kb_search` for curated notes, `ctx` for past
+  sessions, the code graph for symbols, WebSearch for the outside.
+- **Office output:** `office-pptx`, `office-xlsx` and `office-docx` build files; `office-render`
+  renders them so you check the result first, and scrubs a copy before an Office file leaves the
+  organisation. Editing inside Office: the Claude for Microsoft 365 add-ins, if your admin allows them.
+- **GitHub:** the `gh` CLI against your enterprise host (`--hostname`, or `GH_HOST`); the `github`
+  skill covers the details.
+- **Framework or SDK docs:** the vendor's site through WebFetch, or a docs MCP your organisation
+  approved. Claude models, pricing, limits and evals: the bundled `claude-api` skill, never memory.
+- **Code graph:** `rules/code-graph.md`. **Browser:** `rules/browser.md`.
+- **Databases:** read-only unless the user asks otherwise; production writes are a Red Line.
 - **Servers:** ssh as the least-privileged user that can do the job; an admin or root login is
-  break-glass, so say why first. Never ask the user to ssh for you.
-- **Reports** (deep research, comparisons, analyses meant for someone else): an Artifact link when
-  your organisation's Claude offers Artifacts, for your own organisation's data only, never another
-  tenant's; the user decides who sees it. Otherwise a Markdown file in the workspace, with its path.
-- **Browser:** `rules/browser.md`.
-- **Review:** the bundled `/code-review` for correctness, `/security-review` for the branch's
-  security diff, `/simplify` for cleanup.
+  break-glass, so say why first.
+- **Reports** meant for someone else: an Artifact link when your organisation's Claude offers
+  Artifacts (your own organisation's data only; the user decides who sees it), else a Markdown
+  file in the workspace, with its path.
+- **Review:** the bundled `/code-review`, `/security-review` for the branch's security diff,
+  `/simplify` for cleanup.
+- **How-to guides:** search them with `find` (its root `howto`); read on demand, never always-loaded.
 
-## Skills (use them when the task fits, unasked; invoke as `/workbench-core:<name>`, the KB's as `/workbench-kb:save`)
+## Skills (use them when the task fits, unasked; invoke as `/workbench-core:<name>`)
 `cascade` (fix, build, refactor, migrate) · `ratchet` (fix and re-audit until clean) · `handoff` ·
-`onboard` (fill in USER.md; suggest it when USER.md still holds placeholders) · `spawn` (write a
-delegation prompt) · `investigate` · `cleanup` · `brain-audit` (setup and KB
-health) · `deep-research` · `github` · `skill-scan` · `doc-index` · `office-pptx` · `office-xlsx` ·
-`office-docx` · `office-render` · `ui-build` · `draft-reply` · `batch-review` ·
-`repo-fix` (review and fix a repository) · `linux-service-triage` · `ctx-agent-history-search` (what
-earlier sessions decided) · `mcp-heal` ·
-`save` (KB). If one isn't installed, say so and do the task without it.
-- `vdi-drive`, `pc-checkup` and `cleanup` are user-invoked only: suggest
-  `/workbench-core:<name>`, never start them.
+`onboard` (fill in USER.md; suggest it while USER.md holds placeholders) · `spawn` · `investigate` ·
+`brain-audit` · `deep-research` · `github` · `repo-review` (read-only review of a foreign repo) ·
+`repo-fix` · `skill-scan` · `find` · `office-*` · `ui-build` · `draft-reply` · `batch-review` ·
+`linux-service-triage` · `ctx-agent-history-search` (what earlier sessions decided) · `mcp-heal` ·
+`plugin-factory` · `plugin-review` · `web-packager` · `mcp-builder` · `api-bridge` (REST to MCP) · `app-navigator` ·
+`/workbench-kb:save` · `humanizer` (prose a person will read) · `grilling` (stress-test a plan) · `playwright-cli`.
+Not installed? Say so and do the task without it.
+- User-invoked only (suggest, never start): `setup`, `vdi-drive`, `pc-checkup`, `cleanup`,
+  `/workbench-capture:capture` and `/workbench-capture:ingest`.
 - **Before installing any plugin or skill:** check your organisation allows it, and run
   `skill-scan` on its source first.
 
@@ -53,6 +54,6 @@ earlier sessions decided) · `mcp-heal` ·
 
 ## What a subagent inherits
 Custom and built-in subagents load your CLAUDE.md, its imports and the project CLAUDE.md, **except
-the built-in `Explore` and `Plan` agents, which load none of it**: no Red Lines, no tenant rules, no rules.
+the built-in `Explore` and `Plan` agents, which load none of it**: no Red Lines, no tenant rules.
 Paste the constraints a task needs into their prompt, and prefer `general-purpose` for anything
 touching infrastructure, credentials, another tenant's data or money.

@@ -1,6 +1,6 @@
 ---
 name: pc-checkup
-description: Read-only health check of this Windows PC - blue screens, crashes and freezes, hardware and disk errors, disk and battery wear, broken drivers, memory pressure, startup load - then a ranked list of problems and who should fix each. Run only when the user asks for it ("/workbench-core:pc-checkup", "check this computer", "why is my laptop crashing").
+description: Read-only health check of this Windows PC - blue screens, crashes and freezes, hardware and disk errors, disk and battery wear, broken drivers, memory pressure, startup load - then a ranked list of problems and who should fix each. Run only when the user asks for it ("/workbench-core:pc-checkup", or when the laptop crashes, freezes or slows down).
 disable-model-invocation: true
 ---
 
@@ -49,7 +49,7 @@ need admin rights say so. Use the event provider, ID and counts as evidence.
 ## 3. Report
 One ranked table, worst first: `# | problem | evidence (count, newest date) | how serious | fix | who`.
 `who` is one of **user can do it** · **IT helpdesk** · **needs hardware service** · **leave it**.
-End with the two or three things to do today. Save it next to the raw report as
+End with the two or three most important fixes. Save it next to the raw report as
 `findings-<date>.md`. The report holds device details: share it with IT only.
 
 ## 4. Fixes the user may approve (one at a time, each after an explicit yes)

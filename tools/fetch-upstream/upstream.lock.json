@@ -1,5 +1,5 @@
 {
- "_readme": "Pinned upstream skills for tools/fetch-upstream. Each file is downloaded from base+src, checked against sha256, and written to <skills dir>/dest. Re-pin deliberately; never point a ref at a moving branch.",
+ "_readme": "Pinned upstream skills and data for tools/fetch-upstream. Each file is downloaded from base+src, checked against sha256, and written to <skills dir>/dest. Re-pin deliberately; never point a ref at a moving branch.",
  "sources": [
   {
    "id": "humanizer",
@@ -24,74 +24,56 @@
    ]
   },
   {
-   "id": "playwright-cli",
-   "license": "Apache-2.0",
-   "kind": "npm",
-   "upstream": "@playwright/cli (npm; source microsoft/playwright-cli)",
-   "ref": "0.1.22",
-   "commit": null,
-   "base": "https://cdn.jsdelivr.net/npm/@playwright/cli@0.1.22/",
-   "note": "Skill for the playwright-cli browser tool. Install the CLI itself separately at the same version: npm install -g @playwright/cli@0.1.22",
+   "id": "web-interface-guidelines",
+   "license": "MIT",
+   "kind": "github",
+   "upstream": "vercel-labs/web-interface-guidelines",
+   "ref": "main @ 2026-10-05",
+   "commit": "434b7f91364665f2f733b310ec54809bf8f37937",
+   "base": "https://raw.githubusercontent.com/vercel-labs/web-interface-guidelines/434b7f91364665f2f733b310ec54809bf8f37937/",
+   "note": "The UI review rules list (one Markdown file, no skill text) that the ui-build skill reads locally, so nothing is fetched from a moving branch at review time.",
    "files": [
     [
-     "skills/playwright-cli/SKILL.md",
-     "playwright-cli/SKILL.md",
-     "9bba755285a4c9ad72a4a41b9c7baef6fb516d329c0b44ed0573715f4479b906"
+     "command.md",
+     "web-interface-guidelines/command.md",
+     "d246b026f4f29b5823a9cc857f9edf3d2507002e055e32040cadeaf3b38e0234"
     ],
     [
      "LICENSE",
-     "playwright-cli/LICENSE",
-     "9a7110fc2d2f964038e5dc49128f908f29f47a574c961cba16085914e879cbda"
+     "web-interface-guidelines/LICENSE",
+     "6cd1609c9c12233507cdd2ce0d32e9a721e3c27494951be06b90090deeeb7af2"
+    ]
+   ]
+  },
+  {
+   "id": "diagram-render",
+   "license": "MIT",
+   "kind": "github",
+   "upstream": "garrytan/gstack (lib/diagram-render only)",
+   "ref": "commit 2a113ae",
+   "commit": "2a113ae7e623f590095bcaaa0cc581c9a10a6632",
+   "base": "https://raw.githubusercontent.com/garrytan/gstack/2a113ae7e623f590095bcaaa0cc581c9a10a6632/",
+   "note": "The offline Mermaid and Excalidraw renderer the diagram skill drives: one HTML file, no network at render time. It embeds fonts under the SIL Open Font License 1.1 (see its THIRD-PARTY-LICENSES.md). No gstack skill text, preamble or helper script is fetched.",
+   "files": [
+    [
+     "lib/diagram-render/dist/diagram-render.html",
+     "diagram-render/diagram-render.html",
+     "46ed274ca8b6bc763308c87fea05fa9ad940d7f6bcfbd1bc0abbf56c6c0c705d"
     ],
     [
-     "skills/playwright-cli/references/element-attributes.md",
-     "playwright-cli/references/element-attributes.md",
-     "bf19aa4671e0a50a0fefa9c790f39124e803060eefe395042b723c29fcb7faa2"
+     "lib/diagram-render/dist/BUILD_INFO.json",
+     "diagram-render/BUILD_INFO.json",
+     "7dd616f389db8640b3c06c327bbeff3923e1474b14155741c6d7f481328315e3"
     ],
     [
-     "skills/playwright-cli/references/playwright-tests.md",
-     "playwright-cli/references/playwright-tests.md",
-     "c5b0719fef2cfdff50bd744051b2f9afc119775db4b48e9b2882c1cf3886797c"
+     "lib/diagram-render/THIRD-PARTY-LICENSES.md",
+     "diagram-render/THIRD-PARTY-LICENSES.md",
+     "ad2d0997c63293b7f0820106bad8d4555d5c8a7fefda50f9b9ceb2dcf7a88391"
     ],
     [
-     "skills/playwright-cli/references/pr-attachments.md",
-     "playwright-cli/references/pr-attachments.md",
-     "24b118e74598be72e73e24fe223d295b9099c85b1860a7c8f6e5690c9038fa2a"
-    ],
-    [
-     "skills/playwright-cli/references/request-mocking.md",
-     "playwright-cli/references/request-mocking.md",
-     "54e801c9663fc2b6d68ceb058cb1c360724c2499f42acc7852a68e83e5b5f37c"
-    ],
-    [
-     "skills/playwright-cli/references/running-code.md",
-     "playwright-cli/references/running-code.md",
-     "3029569ed6ddaeffc0b87badde967efdc2973b1677f078830098146eb3b78ebe"
-    ],
-    [
-     "skills/playwright-cli/references/session-management.md",
-     "playwright-cli/references/session-management.md",
-     "a4f16271f95d3eec7bc56e659d8adbb8f6ad7d603a6fa15efdcdd071a50c6ce3"
-    ],
-    [
-     "skills/playwright-cli/references/storage-state.md",
-     "playwright-cli/references/storage-state.md",
-     "9ac47f9ae4a1aedcd2077f8ac9ab1ba6bee1962cb83ff51adcd36fb6d83b5ec6"
-    ],
-    [
-     "skills/playwright-cli/references/test-generation.md",
-     "playwright-cli/references/test-generation.md",
-     "27ecb11ef647999bd7486695bb1aacc3682097e6bb5742804cb6c8769c2b5364"
-    ],
-    [
-     "skills/playwright-cli/references/tracing.md",
-     "playwright-cli/references/tracing.md",
-     "ef73e71bee792e341df9cd4f60529c929ade48b538ac76e033f4f20843e8dbda"
-    ],
-    [
-     "skills/playwright-cli/references/video-recording.md",
-     "playwright-cli/references/video-recording.md",
-     "1c800b897824cb54394c34265d8ebffdbb530adfc8d612c5d798b667a1799f48"
+     "LICENSE",
+     "diagram-render/LICENSE",
+     "e56fbb5b3d95756f3fa1cfefa24732ec79f18ece1ad08a4e79e00df57e8b198c"
     ]
    ]
   }

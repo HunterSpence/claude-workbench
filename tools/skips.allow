@@ -1,0 +1,24 @@
+# Skips that are legitimate on some machine. Format, one per line: <module>::<Class.test>  # <reason>
+# The module is the test file name without .py; * and ? match. Read by tools/run_suites.py --require-all: any other
+# skip fails the run, and a line that matches no test is reported as stale. Dependency skips are NOT listed here.
+test_probe::LiveTests.test_full_probe_stays_under_90_seconds  # WB_LIVE=1 only: the full live probe
+test_report::DevbenchTests.test_capped_run_reports_peak_under_the_cap  # WB_LIVE=1 only: the capped bench with real defaults
+test_find::Live.test_download_embed_and_paraphrase_hit  # WB_LIVE=1 only: network and the embedding-model download
+test_find::Captured.test_long_path_captured_file  # Windows-only feature (long-path prefix); skips on other platforms
+test_live_controls::Live.*  # WB_LIVE=1 on Windows only: re-reads the ledger of a live run
+test_setup::Flows.*  # Windows-only: fake .cmd programs; skips on other platforms
+test_install::SetupChain.*  # Windows-only: fake .cmd programs; skips on other platforms
+test_guards::Generic.test_msys_paths  # Windows-only path form
+test_review::LocalModeTest.test_copy_skips_symlinks_and_git_metadata_and_reports_them  # skips only where the OS refuses symlinks for this user
+test_review::LocalModeTest.test_local_run_records_skipped_links_in_the_findings_header  # skips only where the OS refuses symlinks for this user
+test_review::PruneTest.test_a_symlink_named_like_a_secret_is_removed_and_its_target_left_alone  # skips only where the OS refuses symlinks for this user
+test_review::PruneTest.test_prune_does_not_descend_into_directory_links  # skips only where the OS refuses symlinks for this user
+test_review::LocalModeTest.test_copy_skips_junctions_and_reports_them  # junctions exist only on Windows
+test_review::PruneTest.test_prune_and_strip_leave_a_junction_target_alone  # junctions exist only on Windows
+test_render::RenderTest.test_office_com_pptx_docx_xlsx  # needs OFFICE_COM_TESTS=1 on Windows with Office installed
+test_render::RenderTest.test_missing_engine_fails_loudly  # skips on a machine where LibreOffice is installed
+test_xlsx_kit::XlsxKitTest.test_excel_recalc_finds_real_errors  # needs OFFICE_COM_TESTS=1 on Windows with Excel installed
+test_run_suites::Prepare.test_the_real_packages_node_modules_are_gitignored  # needs a git checkout of the kit; an unpacked release has none
+test_setup::DayOne.test_the_run_records_the_checks_then_starts_the_full_refresh  # Windows-only: fake .cmd programs; skips on other platforms
+test_setup::DayOne.test_a_named_fail_fails_the_run_and_a_warning_with_an_ask_is_an_it_item  # Windows-only: fake .cmd programs; skips on other platforms
+test_knowledge_verify::Steps.test_browser_cli_opens_and_closes_headless_edge_and_a_policy_block_is_a_warn_with_the_ask  # Windows-only: fake .cmd programs; skips on other platforms

@@ -13,7 +13,10 @@
       "effortLevel": "xhigh"
     },
     "claude-sonnet-5-5": {
-      "effortLevel": "high"
+      "effortLevel": "xhigh"
+    },
+    "claude-haiku-5-5": {
+      "effortLevel": "medium"
     },
     "claude-fable-5-1": {
       "effortLevel": "xhigh"
@@ -30,7 +33,11 @@
     "CLAUDE_CODE_FORK_SUBAGENT": "0",
     "DISABLE_FEEDBACK_COMMAND": "1",
     "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1",
-    "DISABLE_ERROR_REPORTING": "1"
+    "DISABLE_ERROR_REPORTING": "1",
+    "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "8",
+    "HF_HUB_DISABLE_TELEMETRY": "1",
+    "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+    "NPM_CONFIG_UPDATE_NOTIFIER": "false"
   },
   "permissions": {
     "defaultMode": "default",
@@ -78,6 +85,38 @@
       "Bash(podman image push *)",
       "Bash(yarn publish *)",
       "Bash(az storage blob upload-batch *)",
+      "Bash(gh pr create *)",
+      "Bash(gh pr close *)",
+      "Bash(gh pr edit *)",
+      "Bash(gh pr ready *)",
+      "Bash(gh pr reopen *)",
+      "Bash(gh issue create *)",
+      "Bash(gh issue close *)",
+      "Bash(gh issue edit *)",
+      "Bash(gh issue reopen *)",
+      "Bash(gh issue delete *)",
+      "Bash(gh issue transfer *)",
+      "Bash(gh repo create *)",
+      "Bash(gh repo edit *)",
+      "Bash(gh repo delete *)",
+      "Bash(gh repo fork *)",
+      "Bash(gh repo rename *)",
+      "Bash(gh repo archive *)",
+      "Bash(gh label create *)",
+      "Bash(gh label edit *)",
+      "Bash(gh label delete *)",
+      "Bash(gh workflow run *)",
+      "Bash(gh workflow enable *)",
+      "Bash(gh workflow disable *)",
+      "Bash(gh run cancel *)",
+      "Bash(gh run rerun *)",
+      "Bash(gh run delete *)",
+      "Bash(gh secret set *)",
+      "Bash(gh secret delete *)",
+      "Bash(gh variable set *)",
+      "Bash(gh variable delete *)",
+      "Bash(gh release edit *)",
+      "Bash(gh release delete *)",
       "PowerShell(gh gist create *)",
       "PowerShell(gh release create *)",
       "PowerShell(gh release upload *)",
@@ -112,6 +151,38 @@
       "PowerShell(podman image push *)",
       "PowerShell(yarn publish *)",
       "PowerShell(az storage blob upload-batch *)",
+      "PowerShell(gh pr create *)",
+      "PowerShell(gh pr close *)",
+      "PowerShell(gh pr edit *)",
+      "PowerShell(gh pr ready *)",
+      "PowerShell(gh pr reopen *)",
+      "PowerShell(gh issue create *)",
+      "PowerShell(gh issue close *)",
+      "PowerShell(gh issue edit *)",
+      "PowerShell(gh issue reopen *)",
+      "PowerShell(gh issue delete *)",
+      "PowerShell(gh issue transfer *)",
+      "PowerShell(gh repo create *)",
+      "PowerShell(gh repo edit *)",
+      "PowerShell(gh repo delete *)",
+      "PowerShell(gh repo fork *)",
+      "PowerShell(gh repo rename *)",
+      "PowerShell(gh repo archive *)",
+      "PowerShell(gh label create *)",
+      "PowerShell(gh label edit *)",
+      "PowerShell(gh label delete *)",
+      "PowerShell(gh workflow run *)",
+      "PowerShell(gh workflow enable *)",
+      "PowerShell(gh workflow disable *)",
+      "PowerShell(gh run cancel *)",
+      "PowerShell(gh run rerun *)",
+      "PowerShell(gh run delete *)",
+      "PowerShell(gh secret set *)",
+      "PowerShell(gh secret delete *)",
+      "PowerShell(gh variable set *)",
+      "PowerShell(gh variable delete *)",
+      "PowerShell(gh release edit *)",
+      "PowerShell(gh release delete *)",
       "PowerShell(Publish-Module *)",
       "PowerShell(Publish-Script *)",
       "PowerShell(Publish-PSResource *)"
@@ -147,5 +218,6 @@
   "statusLine": {
     "type": "command",
     "command": "{{PYTHON}} \"{{WORKBENCH_HOME}}/statusline.py\""
-  }
+  },
+  "crossSessionInbound": "hold"
 }

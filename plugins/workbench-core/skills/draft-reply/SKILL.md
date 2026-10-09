@@ -1,6 +1,7 @@
 ---
 name: draft-reply
 description: Draft a reply to an email or chat thread - answer first, then the asks with owners and dates, in the user's voice - as plain text and HTML, optionally as a .eml draft file or (opt-in) an Outlook draft. Never sends. Use for "draft a reply", "help me respond to this", "write back to", "answer this email", "reply to this thread", or a pasted thread, .eml or .msg file.
+when_to_use: ALWAYS load before drafting any email, chat reply or message for the user.
 ---
 
 # draft-reply
@@ -27,8 +28,8 @@ do, any dates, and anything you cannot answer without the user (numbers, commitm
 people). Ask the user for those; never invent a figure, date or commitment.
 
 ## 2. Write it in the user's voice
-- **Answer first**, in the first one or two sentences. Then supporting detail (as `points` with bold
-  lead-ins if there are several), then **asks: who, what, by when**.
+- **Answer first**, in the first one or two sentences. Then supporting detail (as `points` if there are
+  several), then **asks: who, what, by when**.
 - Match the user's tone from `USER.md` and from their own earlier messages in the thread: length,
   greeting, sign-off, formality. Use their sign-off name from `USER.md`; otherwise leave the
   `<Your name>` placeholder.
@@ -41,9 +42,8 @@ Write the reply as JSON (format in the docstring of `scripts/draft_reply.py`), t
 ```bash
 "${user_config.python}" "${CLAUDE_SKILL_DIR}/scripts/draft_reply.py" render reply.json --out <dir> --thread thread.eml [--eml]
 ```
-It writes `reply.txt` and `reply.html` (`<div dir="ltr">`, real paragraphs, bullets with bold
-lead-ins, the signature, and the quoted thread under an "On <date>, <name> wrote:" line whose date
-keeps the sender's time zone; all text is HTML-escaped). `--eml` adds `reply.eml`: a multipart plain-plus-HTML draft with `In-Reply-To` and
+It writes `reply.txt` and `reply.html` (paragraphs, any `points` and `asks` as lists, the signature, and the quoted
+thread under an "On <date>, <name> wrote:" line whose date keeps the sender's time zone; all text is HTML-escaped). `--eml` adds `reply.eml`: a multipart plain-plus-HTML draft with `In-Reply-To` and
 `References` set so it threads, and `X-Unsent: 1` so the mail client opens it as an editable draft.
 Default recipients: the thread's `Reply-To` if it sets one, else the sender. `--reply-all --me <your
 address>` only when asked; it follows `Mail-Followup-To` when the thread sets it, else the sender

@@ -5,11 +5,14 @@
   python fetch_upstream.py --apply                 download, verify every SHA-256, then install
   python fetch_upstream.py --apply --only humanizer,impeccable
   python fetch_upstream.py --apply --force         replace existing folders (old ones are moved to a backup dir)
-  python fetch_upstream.py --optional [--apply]    also the optional design set (gstack design-review/qa/diagram,
-                                                   impeccable, web-design-guidelines): NOT recommended on a managed
-                                                   laptop, read THIRD-PARTY.md first
+  python fetch_upstream.py --optional [--apply]    also the optional set: gstack design-review/qa/diagram and impeccable
+                                                   (NOT recommended on a managed laptop, read THIRD-PARTY.md first), and
+                                                   the pinned playwright-cli skill (the fallback when npm is blocked)
+  python fetch_upstream.py --pm [--apply]          the product-management pack instead of the default set: eight
+                                                   Apache-2.0 skills (SKILL.md + LICENSE each, no connector files),
+                                                   from upstream.pm.lock.json
 
-Reads upstream.lock.json next to this file: every file has a fixed URL (a commit or a published
+Reads upstream.lock.json next to this file (upstream.pm.lock.json with --pm): every file has a fixed URL (a commit or a published
 package version) and a SHA-256. A source is installed only if ALL its files verify; nothing is
 written for a source with any mismatch. Each installed folder gets an UPSTREAM.txt naming the
 source, version and licence, next to the upstream LICENSE file.
@@ -115,11 +118,14 @@ def main(argv=None):
     ap.add_argument("--only", help="comma-separated source ids")
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--skills-dir", default=os.path.join(config_dir(), "skills"))
-    ap.add_argument("--lock", default=os.path.join(HERE, "upstream.lock.json"))
+    ap.add_argument("--lock", default=None)
+    ap.add_argument("--pm", action="store_true", help="install the product-management pack (upstream.pm.lock.json) instead of the default set")
     ap.add_argument("--optional", action="store_true",
                     help="add upstream.optional.lock.json (runtime downloads and local usage logs; see THIRD-PARTY.md)")
     a = ap.parse_args(argv)
-    with open(a.lock, encoding="utf-8") as f:
+    if a.pm and (a.lock or a.optional):
+        ap.error("--pm cannot be combined with --lock or --optional")
+    with open(a.lock or os.path.join(HERE, "upstream.pm.lock.json" if a.pm else "upstream.lock.json"), encoding="utf-8") as f:
         lock = json.load(f)
     if a.optional:
         with open(os.path.join(HERE, "upstream.optional.lock.json"), encoding="utf-8") as f:

@@ -1,0 +1,31 @@
+# Organisation overlay for __MARKET__
+
+Use this folder when the plugins in this repository must reach people inside an organisation. Nothing here changes
+anyone's settings by itself: it is a checklist and two files to hand to the people who own those settings.
+
+## Two ways to deliver the plugins
+
+1. **Organisation sync (claude.ai admin console).** An owner opens Organization settings, Plugins and skills, and
+   syncs from a private or internal repository. The sync reads the default branch only, ignores tags, and needs the
+   Claude app installed on that repository. Members need no repository access. The synced marketplace must not
+   contain a top-level `bin/` folder in any plugin.
+2. **Managed settings.** The administrator who owns managed settings adds the marketplace and the plugins from
+   `managed-settings.snippet.json`. Every machine then clones with its own git credentials and without prompts, so
+   each person needs a credential helper that already holds a login for the repository host.
+
+Both can point at the same repository. When the same marketplace name arrives both ways, the managed copy wins.
+
+## Steps for an internal mirror
+
+1. Create a private or internal repository on the host your organisation uses and push this marketplace to it.
+2. Keep third-party plugin entries pinned by commit (`sha`), never by branch.
+3. Replace the placeholder host and path in `managed-settings.snippet.json` with the mirror's address.
+4. Hand `managed-settings.snippet.json` to the administrator, or ask an owner to sync the repository.
+5. After the first rollout, open `/plugin` on one machine and check that the marketplace and plugin are listed.
+
+The key names in the snippet follow the public plugin documentation; check them against the current pages before a
+rollout, because they change faster than this template.
+
+## If a governance plugin is already in place
+
+Read `coexistence.md` first: it lists which of this plugin's parts stop working under each managed lock-down key.

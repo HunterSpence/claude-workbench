@@ -7,6 +7,8 @@ description: "Action card for any Agent() call: pick the agent, then write a pro
 
 **0.** Think-then-build (fix, build, refactor, migrate)? Load the `cascade` skill first; it runs the phases.
 
+A debugging or repo-fixing worker: put the bug-card search (`kb_search.py "<symptom words>" --domain _shared --limit 5`) in its CONTEXT line.
+
 **1-3. Pick the agent.** Use the personas installed with this kit (`flagship`, `implementer`,
 `researcher`, `ops-runner`, `security-auditor`, `red-team`, `green-team`, `blue-verify`) or the
 built-in `general-purpose`. Each persona pins its own model and effort; pick the persona, never a

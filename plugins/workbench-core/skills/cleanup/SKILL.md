@@ -29,9 +29,17 @@ description: Archive confirmed dead or legacy code. Re-verifies each candidate i
 
 ## Step 1: candidates
 - **Named targets** (the user or an audit listed files): never skip verification.
-- **Discovery** (no targets): use what the stack offers (`knip` for JS/TS, `vulture` for Python,
-  `deadcode` for Go, the code graph's dead-code query if one is installed), plus files unchanged for
-  a long time (`git log -1 --format=%cs -- <file>`).
+- **Discovery** (no targets): start with the kit's scanner, which only reads:
+  ```bash
+  "${user_config.python}" "${CLAUDE_SKILL_DIR}/scripts/scan_legacy.py" --root "$PWD" --json
+  ```
+  It prints `{"candidates": [{"path", "reason", "last_commit_days"}]}` and never moves, edits or deletes anything. It lists
+  Markdown files whose front matter says `status: deprecated` (or obsolete, superseded, archived, dead, legacy, retired), and
+  scripts in `scripts/`, `tools/` and `bin/` whose file name appears in no other file and that have not changed for 30 days.
+  `--stale-days N`, `--script-dirs a,b` and `--keep GLOB` (a known entry point, repeatable) tune it. A script on the list is a
+  **review** item, never confirmed: a scheduler, a launcher or CI can start it without any text naming it, so rule 6 still
+  applies to every one. Then add what the stack offers (`knip` for JS/TS, `vulture` for Python, `deadcode` for Go, the code
+  graph's dead-code query if one is installed), plus files unchanged for a long time (`git log -1 --format=%cs -- <file>`).
 - For each candidate: (a) zero-reference grep across every live surface (source, configs, CI,
   scripts, launchers, instruction files, skills and hooks), excluding the target's own subtree,
   `_archive/**` and historical docs (a doc mentioning a path is not a runtime dependency: note it,
@@ -41,7 +49,7 @@ description: Archive confirmed dead or legacy code. Re-verifies each candidate i
 
 ## Step 2: present and HARD CONFIRM
 Show a table: path, why it is considered dead (tool finding, zero refs, age), last modified. Ask
-which to archive. Proceed only on an explicit answer naming the set ("all of them", "just these 3").
+which to archive. Proceed only on an explicit answer naming the set ("all of them", or the files it lists).
 
 ## Step 3: archive on a branch
 ```bash

@@ -1,0 +1,8 @@
+---
+type: regex
+target: last_message
+flags: i
+match: contains
+weight: 0.5
+---
+given[\s\S]*when[\s\S]*then

@@ -7,10 +7,18 @@ Path resolution (every hook uses these, so a value is decided in one place):
   kb_root()         WORKBENCH_KB_ROOT (the user settings env the installer writes), else config.json "kb_root",
                     else ~/claude-kb
   log_dir()         WORKBENCH_LOG_DIR, else <workbench_home>/logs
+  kb_state_dir(kb)  where a KB's locks, precompact flags and snapshots live: <workbench_home>/kb-state/<key>, never
+                    inside the (possibly synced) KB. <key> = 8 hex digits of the KB root path. A copy of
+                    workbench-kb's kb_audit.state_dir (plugins never import each other); a test asserts they agree.
+  legacy_kb_state_dir(kb)  <kb>/.state, where an earlier kit kept all of it (readable for one release)
   config_redirected()  True when CLAUDE_CONFIG_DIR now names a different folder from the one the installer recorded
                     in installed-config.json next to this file (a changed env var must not point the guards at a
-                    different, absent allowlist: the corporate pack then fails closed)
+                    different, absent allowlist: the corporate pack then fails closed). A config dir registered in the
+                    main install's profiles.json (per-client profiles) is not "redirected".
+  heartbeat(fired, stamp)  the guard heartbeat <workbench home>/state/guard-heartbeat.json (best-effort, atomic, never
+                    raises); stamp names a timestamp key to set (last_start, last_precompact)
 """
+import hashlib
 import json
 import os
 import sys
@@ -50,9 +58,53 @@ def _same(a, b):
     return k(a) == k(b)
 
 
+def registered_profiles(rec):
+    """Config dirs listed in <recorded claude home>/workbench/profiles.json (written only by the profile launcher)."""
+    try:
+        with open(rec / "workbench" / "profiles.json", encoding="utf-8-sig") as f:
+            rows = json.load(f).get("profiles") or []
+        return [r["config_dir"] for r in rows if isinstance(r, dict) and isinstance(r.get("config_dir"), str)]
+    except (OSError, ValueError, AttributeError):
+        return []
+
+
 def config_redirected():
     rec = installed_claude_home()
-    return bool(rec) and not _same(rec, claude_home())
+    return bool(rec) and not any(_same(d, claude_home()) for d in [rec, *registered_profiles(rec)])
+
+
+def heartbeat(fired, stamp=None):
+    """Guard heartbeat. fired=True (the PreToolUse guard ran): last_fired now, sessions_since_fire 0, fired_total + 1.
+    fired=False (a session started): sessions_since_fire + 1. fired=None: counters untouched. stamp="last_start" or
+    "last_precompact" also sets that key to now (proof that SessionStart or PreCompact ran). Keys it does not know are
+    kept. Returns the new dict, or None when the state folder cannot be written.
+    ponytail: read-modify-write without a lock; two hooks at once can lose a count."""
+    try:
+        from datetime import datetime, timezone
+        p = workbench_home() / "state" / "guard-heartbeat.json"
+        try:
+            with open(p, encoding="utf-8-sig") as f:
+                d = json.load(f)
+        except (OSError, ValueError):
+            d = {}
+        d = d if isinstance(d, dict) else {}
+        n = lambda k: d[k] if isinstance(d.get(k), int) and d[k] >= 0 else 0  # noqa: E731
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+        d = {**d, "version": 1, "last_fired": d.get("last_fired") if isinstance(d.get("last_fired"), str) else None,
+             "sessions_since_fire": n("sessions_since_fire"), "fired_total": n("fired_total")}
+        if fired:
+            d.update(last_fired=now, sessions_since_fire=0, fired_total=d["fired_total"] + 1)
+        elif fired is False:
+            d["sessions_since_fire"] += 1
+        if stamp:
+            d[stamp] = now
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(d), encoding="utf-8")
+        os.replace(tmp, p)
+        return d
+    except Exception:
+        return None
 
 
 def config():
@@ -67,6 +119,15 @@ def config():
 def kb_root():
     v = os.environ.get("WORKBENCH_KB_ROOT") or config().get("kb_root")
     return Path(os.path.expanduser(v)) if v else Path.home() / "claude-kb"
+
+
+def kb_state_dir(kb=None):
+    kb = Path(kb) if kb else kb_root()
+    return workbench_home() / "kb-state" / hashlib.sha256(kb.resolve().as_posix().lower().encode()).hexdigest()[:8]
+
+
+def legacy_kb_state_dir(kb=None):
+    return (Path(kb) if kb else kb_root()) / ".state"
 
 
 def log_dir():

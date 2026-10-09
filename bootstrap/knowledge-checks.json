@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "_readme": "Pre-registered expectations for bootstrap/knowledge_verify.py (the Day-1 knowledge checks). Committed before any run and never edited after a result: change a check by adding a new key, not by moving the bar.",
+  "howto": {"questions": "docs/howto/questions.json", "top": 3, "keyword_min": 10},
+  "find_related": {"from": "howto/27-find-a-file-or-an-answer.md", "expect_any": ["howto/README.md"]},
+  "kb_related": {"from": "ops/HOT.md", "depth": 2, "expect_all": ["00-index.md", "_shared/HOT.md"]},
+  "kb_cases": "plugins/workbench-kb/tests/kb_canned.json",
+  "mcp_query": "find an old answer somewhere in my documents",
+  "ingest_fixture": {
+    "vtt": "WEBVTT\n\n00:00:01.000 --> 00:00:04.000\n<v Alex Example>Welcome to the planning check-in.\n\n00:00:04.500 --> 00:00:08.000\n<v Sam Sample>The draft schedule is ready for review.\n\n00:00:08.500 --> 00:00:12.000\n<v Alex Example>Action: Sam shares the draft by Friday.\n",
+    "meta": {"title": "Planning check-in", "start": "2026-01-05T10:00:00Z", "end": "2026-01-05T10:15:00Z",
+             "organizer": "alex@example.com", "attendees": ["alex@example.com", "sam@example.com"]}
+  }
+}

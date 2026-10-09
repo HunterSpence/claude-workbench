@@ -3,7 +3,8 @@
 Assumed: a managed Windows 11 laptop (Entra ID, Intune) with WSL2; Microsoft 365 with SharePoint
 and OneDrive; a TLS-inspecting proxy; GitHub Enterprise; a Claude Team or Enterprise seat that may
 carry managed settings. Setup steps (WSL limits, proxy certificates, GitHub sign-in, day-1 checks):
-`{{WORKBENCH_HOME}}/instructions/rules/corporate-setup.md`, read on demand.
+`{{WORKBENCH_HOME}}/instructions/rules/corporate-setup.md`, read on demand. Per component (command, check,
+denial step, ask-IT text): `{{WORKBENCH_HOME}}/kit/docs/SETUP-RUNBOOK.md`. Claude Code's red errors: guide 43.
 
 ## Tenants and accounts (Standing Order 4)
 - Your organisation's data stays in the tools it approved for that data: its Claude seat, repos,
@@ -15,6 +16,8 @@ carry managed settings. Setup steps (WSL limits, proxy certificates, GitHub sign
   and no work data in personal places. Unsure where something belongs? Ask before you move it.
 
 ## The machine
+- **Hard stop rule:** when a hook, permission prompt, gateway, proxy or policy DENIES something, stop
+  that step and show the denial verbatim. Never retry it another way: another tool, shell or route.
 - Managed settings win (Red Line). `/status` names the managed source on `Setting sources`; if it
   overrides a kit setting, ask your admin, never work around it.
 - **Never run Claude Code elevated.** It needs no admin rights, and an elevated session gives every
@@ -29,8 +32,8 @@ carry managed settings. Setup steps (WSL limits, proxy certificates, GitHub sign
 
 ## OneDrive and SharePoint
 - An online-only file downloads when opened. **Never bulk-read, glob or index a synced library of
-  online-only files:** it triggers a mass download and can trip data-loss controls. Index a scoped
-  folder kept on the device, with the `doc-index` skill.
+  online-only files:** it triggers a mass download and can trip data-loss controls. Search with
+  the `find` skill, which never downloads an online-only file.
 - Never bulk move, rename or delete in a synced folder: it syncs to everyone.
 - A document under a sensitivity label keeps that label's rules wherever its content goes.
 
@@ -39,8 +42,7 @@ carry managed settings. Setup steps (WSL limits, proxy certificates, GitHub sign
   Confirm who owns a repo and how it is classified before pointing Claude at it.
 - Open an unfamiliar clone with `claude --setting-sources user`, so its settings files and
   `.mcp.json` don't load until you have read `.claude/`, `CLAUDE.md` and `.mcp.json`.
-- GitHub Enterprise: `gh` infers the host inside a clone; elsewhere use `--hostname <host>` or
-  `GH_HOST`. Sign in only through the organisation's SSO.
+- Sign in to GitHub only through the organisation's SSO.
 
 ## Findings
 Security findings (a leaked secret, a vulnerability, a suspicious file or prompt) go to the

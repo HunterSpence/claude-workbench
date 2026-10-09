@@ -1,5 +1,159 @@
 # Changelog
 
+## 0.3.0
+
+### Upgrade notes (from 0.2.0)
+- **Skill renamed:** `doc-index` is now `find` (`/workbench-core:find`). The first open of the shared index registers
+  every 0.2.0 index whose folder still exists and re-indexes it on the next refresh; the old files stay where they
+  were, and `find`'s status prints the command that removes them. `WB_FIND_LAZY=0` turns off the lazy refresh.
+- **Variable renamed:** `GITHUB_MCP_PAT` is now `WB_GITHUB_MCP_PAT`. New variables: `WB_GOOGLE_OAUTH_CLIENT_ID`,
+  `WB_MS365_CLIENT_ID`, `WB_MS365_TENANT_ID`, `WB_REVIEW_TOKEN`, `WB_REVIEW_ALLOWLIST`, `WB_CLAUDE_BIN`, `WB_GH_MCP_BIN`.
+- **Capture is its own opt-in plugin,** `workbench-capture`, installed only with `--with capture`, so IT can allow or
+  deny it separately.
+- **The nightly index refresh is opt-in on the corporate profile** (`--with nightly`) and on by default on the
+  permissive profile (`--no-nightly` turns it off). `find` refreshes lazily either way.
+- **Effort defaults:** Sonnet 5.5 is now `xhigh` (was `high`), matching the routing table, and Haiku 5.5 gets `medium`, the
+  vendor's recommended starting level for most work; it applies where no persona pins a level (`scout` pins `high`).
+  An upgrade changes only values you left as the kit wrote them; unpinned Sonnet work costs somewhat more at `xhigh`.
+- An upgrade keeps your knowledge-base folder. A fresh install puts data under `<DATA>` (the work OneDrive's
+  `Workbench` folder when exactly one verified work OneDrive exists, else `Workbench` in your profile).
+- **Knowledge-base state moved** out of the KB folder to `<CH>/workbench/kb-state/<key>/` (save lock, precompact flags,
+  snapshots, metrics, journal windows), so a synced KB folder never holds a lock. The first `save_driver.py --pre` copies
+  an earlier `.state/` across under both locks and leaves it readable for one release.
+
+### Install and setup
+- `install.py --apply --setup auto` runs the capability report, then provisions the machine in the background:
+  user-scope packages from winget, WSL (one UAC prompt and a reboot), a version check per package, the onboarding
+  interview, the knowledge layer, the capture runtime when asked for, model routing for the models your organisation
+  allows, and a before/after report diff. `--setup plan` stops after the plan. Opt-ins: `--with tokensave, pm-pack,
+  upstream-skills, capture, nightly, claude-winget, claude-autoupdate`; `--data-root` sets the data folder.
+- Read-only capability report (`bootstrap/report.py`): hardware, the security settings that affect the kit, every
+  feature rated READY / INSTALLABLE / NEEDS-IT / BLOCKED-BY-POLICY / UNKNOWN with a ready ask-IT text, and a
+  developer-speed test with a verdict, cause and fix. It also reads PowerShell's language mode and any
+  group-policy script restriction, so a constrained session is reported before Claude runs a command. Meeting and mail capture rows are marked experimental.
+- `setup.py` gains `status --wait`, `doctor` (with a redacted `--bundle`), `backup`, `restore` (settings only with
+  `--restore-settings`), `undo-config` and `resume`. Per-client profiles: `bootstrap/profile.py`.
+- The Day-1 paste prompt in `IMPORT.md` drives the whole chain through `docs/SETUP-RUNBOOK.md` (per component: the
+  command, the check and where it shows, the denial step and the IT ask), with a hard stop on any denial, and ends with a
+  results table, the report diff and a "what we can and cannot do here" summary. Two more IT asks: a virtual desktop, and
+  headless Edge for the command-line browser.
+- `setup.py update [--check] [--json]`, also run as a phase after verify: only the tools this kit installed move to the
+  tested pins in `bootstrap/packages.json`; success is the version the tool reports afterwards, never the exit code; a tool
+  in use is deferred with its one command; a policy refusal becomes an IT ask, never a retry; anything IT installed is
+  reported only. `--no-update` skips it, `--with update-latest` targets the newest release. Claude Code updates through
+  `claude update` (its winget package lags its releases). Guide 44.
+- Day-1 knowledge checks: `setup.py run` gains the phase `knowledge-verify` (D1-D23 in `bootstrap/knowledge_verify.py`,
+  expectations pre-registered in `bootstrap/knowledge-checks.json`), so the knowledge base, journal, index, retrieval,
+  link graph, keyword search, hooks and kit tools are proven working on the first run. `setup.py doctor --deep [--json]`
+  re-runs them without changing the live profile; it exits 2 when any row FAILs and 0 on warnings.
+- The Playwright CLI (`@playwright/cli`, npm, user prefix, `--ignore-scripts`) on the installed Edge, headless by default;
+  with `--with ctx`, ctx (local agent-history search; release asset checked by SHA-256; analytics, daemon and self-upgrade
+  off). The
+  knowledge base becomes the find root `kb`, the office renderer's requirements join the knowledge venv, and the find MCP
+  server is registered (undo-config removes it). The nightly task also keeps a weekly backup (`backup --if-older-days 7`)
+  and refreshes ctx; backups include the journal. Doctor rows `updates` and `claude startup warnings` (the output of
+  `claude doctor` matched against the bug detectors). Guide 45.
+- The meeting-transcript IT ask adds the Copilot meeting-insights permission (`OnlineMeetingAiInsight.Read.All`, a Copilot
+  licence per user) and a one-line tenant check.
+
+### Knowledge
+- `find`: one index over work libraries, captured pages and the how-to library; file catalog, keyword and
+  meaning-based search, related files and the newest version; a coverage report lists what was not searched; purge
+  zeroes deleted text.
+- `workbench-capture` 0.3.0 (opt-in): `capture` reads intranet pages through a dedicated signed-in Edge profile and
+  listed OneDrive files, paced and scoped, and stops on any sign-in, consent or policy page; `ingest` (experimental)
+  turns downloaded meeting transcripts and cached mail into one knowledge file each, with a quarantined AI digest and
+  a daily rollup. Teams and Outlook on the web sources and Recap download automation are deferred
+  (`docs/known-limits.md`).
+- 55 how-to guides in `docs/howto/`, indexed by `find` as the root `howto`; guide 54 says which knowledge tool answers
+  which question, guide 55 covers Claude Code on a virtual desktop.
+- Six new bug cards for model changes and API calls (rejected parameters, blank or cut-off replies, tool loops with
+  thinking on, tables keyed by model id, searches over stale clones, code defaults that the deployment overrides), with
+  detectors and troubleshooting rows. Digest lessons on migrations across many repositories, mocking at the lowest level,
+  bulk edits, rollback and knowledge-base evaluations.
+- 28 more bug cards (67-94) for Claude Code's own red error messages (overloaded and limit errors, sign-in and gateway
+  refusals, proxies, context and request size, model ids, MCP connections, managed settings, hooks, the shell, the
+  installer, transcript writes), with detectors that run before the older ones and a troubleshooting section. Guide 43.
+- `kb_search` returns one hit per note (a ranking of whole notes fused with the paragraph ranking), tags superseded text,
+  resolves a bare link name when one note has it, and falls back to plain matching without FTS5. `kb_health` gains
+  `--json`, orphan and retrieval checks and `--eval`; `kb_eval` reports hit@1, hit@5, MRR, p50/p95 latency and
+  abstention against pre-registered floors. The template ships `00-index.md`, and every `HOT.md` links back to it.
+  `kb_demote` takes the same two locks as a save. `find` searches the knowledge base too and gains `related`.
+- `--inbox-add` warns on a backtick, the journal window falls back to a per-process file when the usual one is held open,
+  and `--post` advises when more than ten items wait on you.
+- A fact registry: `<KB>/_shared/facts.json` pins a fact to one owner note; `kb_health.py facts` fails when a stale or
+  competing version appears elsewhere in the KB or the always-loaded files, or the owner stops stating it. `--post`
+  stamps `updated:` only on the notes it was named whose bytes changed since `--pre` (never an over-cap HOT.md), runs
+  the instruction-surface audit (and weekly the legacy scan) as advisories that can never fail a save, and no longer
+  loses a metrics row after a torn last line.
+- office-render `hidden_text.py scan FILE... [--json]`: text a reader cannot see but a model reading the file would (flat
+  glyph boxes, invisible text over different visible text, off-page or tiny text, hidden Word runs, invisible and bidi
+  characters, mixed-script words, forged chat turns, metadata prose), parsed under size, page, memory and time caps,
+  report-only, no copyleft code. The ingest quarantine step uses it. Guide 52.
+
+### Skills, plugins and MCP
+- New core skills: `setup` (user-invoked), `find`, `repo-review` (allowlisted, read-only review of a foreign
+  repository or folder), `plugin-factory`, `plugin-review` (68 rules in nine groups, batch scorecards),
+  `web-packager`, `mcp-builder` (Python and TypeScript scaffolds with lint and tests) and `api-bridge` (a curated REST
+  or OpenAPI surface as an MCP server). `app-navigator`: an in-app assistant that answers only from the app's help pages
+  and links the right page (route inventory, Python and TypeScript backends, a widget that allows only in-app links, an eval
+  runner). Guides: `docs/plugins-playbook.md` and `docs/engineering/`.
+- `workbench-biz` 0.3.0, installed by default: eight portable business skills for Claude web, desktop and CLI
+  (`docs/business-catalog.md`). office-render gains `scrub.py` and `--lint`; office-xlsx builds workbooks from a spec
+  and starter workbooks; office-docx takes outlines.
+- MCP catalog (every entry off): GitHub hosted, by token, GitHub Enterprise Cloud and local; `find`; Microsoft Learn;
+  Azure and Azure DevOps; Atlassian; BigQuery and the gcloud preview; a read-only Microsoft Graph server. A rejected
+  list with reasons is in `mcp/README.md`. GitHub Actions templates in `templates/github-actions/`.
+- New persona `scout`: a small-model reader for text it is handed.
+- repo-fix and investigate search the bug cards first.
+- New skills `diagram` (offline diagrams for documents, decks and pull requests) and `brand-spec` (lock a brand spec, then
+  build and review a UI against it); nine skills gain a `when_to_use` line. Guides 46 to 48 (diagram, brand spec, build an
+  eval).
+- brain-audit `audit.py --surface [--json]`: instruction-surface size, over-long or path-scoped rules, repeated lines, dead
+  references and hidden skills. cleanup `scan_legacy.py`: report-only, dead documents and unreferenced scripts. handoff:
+  client or tenant files stay in a folder that is never pushed, and "pushed" needs `git log origin/<branch> -1 -- <file>`.
+  secretscan: more vendor-neutral credential shapes and a command line (exit 0 clean, 1 findings, 2 not scanned). Guide 53.
+- Tools: `tools/model-sweep` (gate a retiring model id across repositories), `tools/token-split` (spend by token class from
+  local transcripts), `tools/mcp-nowin` (start stdio MCP servers without console windows on Windows),
+  `tools/guard-replay`, `tools/skill-probe` and `tools/rules-quiz` (offline checks that rules hold and skills fire). Every
+  new tool answers `--self-test`. Guides 49 to 51.
+- The `@playwright/mcp` entry ships off: the Playwright CLI is the preferred browser path.
+
+### Guards, hooks and settings
+- Corporate guard ids `prod-build`, `protected-db-write` and `security-tooling-change`; `publish-confirm` also asks
+  about `gh api` writes. Allowlist keys `production_hosts` and `protected_db_tables`. One list of GitHub write verbs
+  (`plugins/workbench-core/scripts/guards/gh_write_verbs.json`), with matching ask rules in both profiles.
+- Both profiles: `crossSessionInbound: "hold"`, a subagent concurrency cap (8 corporate, 12 permissive) and the
+  telemetry variables `HF_HUB_DISABLE_TELEMETRY`, `PIP_DISABLE_PIP_VERSION_CHECK`, `NPM_CONFIG_UPDATE_NOTIFIER`
+  (`DO_NOT_TRACK` only for the tools setup runs: in Claude Code it would also turn off feature flags). The permissive Haiku alias is `claude-haiku-5-5`.
+- Statusline shows cache state beside context use. SessionStart reports pending setup, the first five routing rows,
+  a managed-policy change since setup and guards that have stopped firing. A failed tool call gets one bug-card hint.
+- Corporate guard id `browser-cli`: `playwright-cli` asks before uploads, code run in the page, navigation outside
+  localhost and the approved hosts, `attach`, `state-load`, `webmcp-call`, any call with `--profile`, `--persistent`,
+  `--extension` or a `--cdp` target that is not localhost, and the commands that print, change or save cookies and
+  storage. `route` passes.
+- StopFailure relay: when a turn ends on an API error, `bug_hint.py` queues the matching bug card and injects it once on the
+  next prompt of that session. Setup adds the two hooks to the user settings only at Claude Code 2.1.78 or later and
+  never into the plugin's hooks file; skipped under managed `allowManagedHooksOnly`.
+- SessionStart shows a failing or 30-day-old knowledge-verify result.
+
+### Routing, instructions and docs
+- Model routing by task type (`docs/model-routing.md`, rendered from `settings/model-routing.json`): 12 rows, quality
+  evidence from published benchmarks only. `model-policy.md` points to it; on "model not allowed" step down the chain.
+  Internal runs appear as direction-only rows that never rank a pick.
+- Both profiles set Sonnet 5.5 to `xhigh` (matching the routing table) and Haiku 5.5 to `medium` (for unpinned use);
+  the permissive profile also sets the default subagent model. The capability report recommends a minimum Claude Code version for Haiku 5.5.
+- `docs/token-diet.md` compares model prices per token class (cache reads differ) and explains why lowering effort, not
+  turning thinking off, is the lever. `docs/known-limits.md` lists what scripts calling the API must change for Haiku 5.5.
+- Authoring: a hook cannot overrule a permission rule (`docs/plugins-playbook.md`), `@` imports are written without quotes,
+  and the test-validity checklist adds fail-first by mutation and live checks that prove their path. A guide and an IT ask
+  for seat usage limits and usage credits.
+- The always-loaded instructions stay under the size budget, now checked by a test on the real tree.
+- Approver and coworker bundle: `docs/security-overview.md`, `docs/known-limits.md`, `docs/troubleshooting.md`,
+  `docs/rules-card.md`, `docs/runbooks.md`.
+- Tools: `tools/run_suites.py` (one-command regression run), `tools/skips.allow` (the honest skip list) and
+  `tools/skill-bench/` (cost and configuration bench for skills; it never ranks quality).
+
 ## 0.2.0
 - Instructions: on-demand `work-workflows.md` (fixing and reviewing repos, writing code, building
   UIs, spreadsheets and decks, drafting replies: skills, steps, and what "done" means),
@@ -14,8 +168,7 @@
 - Rules: a marker legend for KB notes; more save triggers; monthly KB health check; workflow
   `agent()` model pairs; `batch-review` for non-interactive review; WebSearch is one shared budget;
   root logins are break-glass; scan a plugin or skill before installing it; bulk transfers are
-  rate-capped; the Store Python stub; parallel browser sessions; qualifying conditions and value
-  extraction; structured multi-file deliverables; one-line status alerts.
+  rate-capped; the Store Python stub; parallel browser sessions.
 - Agents: every persona points to the judgment procedures; `blue-verify` uses `batch-review` for
   review volume.
 - Settings: `permissive` drops the built-in git instructions (`includeGitInstructions: false`);

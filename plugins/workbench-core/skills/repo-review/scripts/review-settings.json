@@ -1,0 +1,24 @@
+{
+  "claudeMdExcludes": [
+    "**/wb-review/**/CLAUDE.md",
+    "**/wb-review/**/CLAUDE.local.md",
+    "**/wb-review/**/AGENTS.md",
+    "**/wb-review/**/.claude/rules/**"
+  ],
+  "permissions": {
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/*.pem)",
+      "Read(**/*.pfx)",
+      "Read(**/*.p12)",
+      "Read(**/*.key)",
+      "Read(**/id_rsa*)",
+      "Read(**/id_ed25519*)",
+      "Read(**/.npmrc)",
+      "Read(**/.netrc)"
+    ]
+  },
+  "disableAllHooks": true,
+  "enableAllProjectMcpServers": false
+}

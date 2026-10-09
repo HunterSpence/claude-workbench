@@ -1,0 +1,5 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Telemetry page</title></head>
+<body><h1>Telemetry page</h1><p>This page sends a POST after it loads.</p>
+<script>addEventListener('load', function () { setTimeout(function () { fetch('/api/track', { method: 'POST', body: 'x' }).catch(function () {}); }, 50); });</script>
+</body></html>

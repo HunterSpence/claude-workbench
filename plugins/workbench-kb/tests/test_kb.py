@@ -1,14 +1,18 @@
 """Tests for the workbench-kb tools, run against a throwaway copy of kb-template. Run:
     python -m unittest discover -s plugins/workbench-kb/tests
 Each test drives the scripts as subprocesses, the way the save skill does."""
+import functools
+import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 PLUGIN = HERE.parent
@@ -17,6 +21,19 @@ REPO = PLUGIN.parent.parent
 L, R = "[" * 2, "]" * 2          # KB link brackets, built so this file holds no literal link
 CORE_SCRIPTS = REPO / "plugins" / "workbench-core" / "scripts"
 HAS_GIT = shutil.which("git") is not None
+REQUIRE = os.environ.get("WB_REQUIRE_ALL") == "1"
+
+
+def needs_git(fn):
+    """Skip without git, but fail instead under WB_REQUIRE_ALL=1 (a skipped test proves nothing)."""
+    @functools.wraps(fn)
+    def run(self, *a, **k):
+        if not HAS_GIT:
+            if REQUIRE:
+                self.fail("git is not installed")
+            self.skipTest("git not installed")
+        return fn(self, *a, **k)
+    return run
 KEY = "AKIA" + "Z" * 16          # built at runtime: this file holds no credential shape
 
 
@@ -49,6 +66,23 @@ class KB(unittest.TestCase):
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(text, encoding="utf-8")
         return p
+
+    def hold(self, lock):
+        """A child process holding `lock` until its stdin closes; returns it once the lock is taken."""
+        code = ("import sys\nsys.path.insert(0, sys.argv[1])\nimport savelock\n"
+                "with savelock.filelock(sys.argv[2], timeout=20):\n    print('locked', flush=True)\n    sys.stdin.readline()\n")
+        p = subprocess.Popen([sys.executable, "-c", code, str(SCRIPTS), str(lock)], stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, text=True)
+        self.assertEqual(p.stdout.readline().strip(), "locked")
+        self.addCleanup(self.release, p)
+        return p
+
+    @staticmethod
+    def release(p):
+        if p.poll() is None:
+            p.stdin.close()
+            p.wait(timeout=30)
+        p.stdout.close()
 
     # ── the driver ──
     def test_pre_on_fresh_kb(self):
@@ -92,7 +126,7 @@ class KB(unittest.TestCase):
         self.assertEqual((rc, out["status"], out["merge"]), (0, "written", "direct"))
         self.assertEqual((self.root / "active-context.md").read_text(encoding="utf-8"), "# Active context\n- new\n")
 
-    @unittest.skipUnless(HAS_GIT, "git not installed")
+    @needs_git
     def test_ac_write_merges_another_sessions_lines(self):
         ac = self.root / "active-context.md"
         ac.write_text("# AC\n- one\n- two\n- three\n", encoding="utf-8")
@@ -143,7 +177,7 @@ class KB(unittest.TestCase):
         self.assertIsNotNone(pre["last_save_minutes_ago"])
         self.assertLess(pre["last_save_minutes_ago"], 30, "a save just happened: the skip gate can use this")
 
-    @unittest.skipUnless(HAS_GIT, "git not installed")
+    @needs_git
     def test_git_commit_local_and_push_only_on_request(self):
         g = lambda *a, cwd=self.root: subprocess.run(["git", "-C", str(cwd), *a], capture_output=True, text=True)  # noqa: E731
         g("init", "-q")
@@ -212,12 +246,74 @@ class KB(unittest.TestCase):
         rc, out, _ = self.run_py("kb_search.py", "certificates", "--domain", "ops", "--json")
         self.assertEqual(json.loads(out)["hits"], [])
         rc, out, _ = self.run_py("kb_search.py", "--related", "infra/proxy-certs.md", "--json")
-        self.assertIn({"path": "infra/HOT.md", "via": "links to"}, json.loads(out))
+        self.assertIn({"path": "infra/HOT.md", "via": "links to", "depth": 1}, json.loads(out))
         self.note("ops/later.md", "---\ntitle: later\n---\nzebracrossing appears only here\n")
         rc, out, _ = self.run_py("kb_search.py", "zebracrossing", "--json")
         res = json.loads(out)
         self.assertTrue(res["rebuilt"])
         self.assertEqual(res["hits"][0]["path"], "ops/later.md")
+
+    def chain(self):
+        """a links to b, b links to c, c links to nothing; returns the three KB-relative paths."""
+        self.note("ops/a.md", f"---\ntitle: a\n---\n# A\nsee {L}ops/b{R}\n")
+        self.note("ops/b.md", f"---\ntitle: b\n---\n# B\nsee {L}ops/c{R}\n")
+        self.note("ops/c.md", "---\ntitle: c\n---\n# C\nend of the chain\n")
+        return "ops/a.md", "ops/b.md", "ops/c.md"
+
+    def test_related_walks_two_hops(self):
+        a, b, c = self.chain()
+        rc, out, err = self.run_py("kb_search.py", "--related", a, "--json")
+        self.assertEqual([(r["path"], r["depth"]) for r in json.loads(out)], [(b, 1)])
+        rc, out, err = self.run_py("kb_search.py", "--related", a, "--depth", "2", "--json")
+        self.assertEqual([(r["path"], r["via"], r["depth"]) for r in json.loads(out)], [(b, "links to", 1), (c, "links to", 2)])
+        rc, out, err = self.run_py("kb_search.py", "--related", c, "--depth", "2", "--json")          # backlinks walk too
+        self.assertEqual([(r["path"], r["via"]) for r in json.loads(out)], [(b, "linked from"), (a, "linked from")])
+        self.assertNotIn("index stale", err)
+
+    def test_related_drops_dead_links_and_says_the_index_is_stale(self):
+        a, b, c = self.chain()
+        self.run_py("kb_search.py", "--related", a, "--depth", "2", "--json")                      # builds the index
+        self.note(b, "---\ntitle: b\n---\n# B\nthe link to c was deleted\n")                     # b no longer links to c
+        rc, out, err = self.run_py("kb_search.py", "--related", a, "--depth", "2", "--no-rebuild", "--json")
+        self.assertEqual([r["path"] for r in json.loads(out)], [b])
+        self.assertIn("index stale", err)
+        (self.root / c).unlink()                                                                    # and now the note itself is gone
+        self.note(b, f"---\ntitle: b\n---\n# B\nsee {L}ops/c{R}\n")
+        rc, out, err = self.run_py("kb_search.py", "--related", a, "--depth", "2", "--no-rebuild")
+        self.assertIn("index stale", out)
+        self.assertNotIn(c, out)
+        rc, out, err = self.run_py("kb_search.py", "--related", a, "--depth", "2", "--json")        # a normal run rebuilds first
+        self.assertEqual([r["path"] for r in json.loads(out)], [b])
+        self.assertNotIn("index stale", err)
+
+    def test_scope_all_finds_a_journal_line(self):
+        rc, out = self.driver("--inbox-add", "decided the quokkaledger moves to a quarterly cadence")
+        self.assertEqual(rc, 0)
+        rc, out, _ = self.run_py("kb_search.py", "quokkaledger", "--json")
+        self.assertEqual(json.loads(out)["hits"], [])
+        rc, out, _ = self.run_py("kb_search.py", "quokkaledger", "--scope", "all", "--json")
+        hits = json.loads(out)["hits"]
+        self.assertEqual([(h["path"], h["line"]) for h in hits], [("inbox.jsonl", 1)])
+        self.assertIn("quokkaledger", hits[0]["snippet"])
+
+    def test_lock_files_live_under_the_workbench_state_folder(self):
+        sys.path.insert(0, str(SCRIPTS))
+        import savelock
+        a, b = self.root / "inbox.jsonl", self.root / "ops" / "metrics.jsonl"
+        before = sorted(p.name for p in self.root.rglob("*"))
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(self.tmp / "claude")}):
+            la, lb = savelock.lock_for(a), savelock.lock_for(b)
+            self.assertEqual(savelock.lock_for(a), la)
+            self.assertEqual(savelock.lock_for(self.root / "ops" / ".." / "inbox.jsonl"), la)         # the resolved path is hashed
+        self.assertNotEqual(la, lb)
+        locks = self.tmp / "claude" / "workbench" / "state" / "locks"
+        self.assertTrue(la.parent == lb.parent == locks and locks.is_dir())
+        self.assertRegex(la.name, r"^[0-9a-f]{16}\.lock$")
+        self.assertEqual(sorted(p.name for p in self.root.rglob("*")), before, "nothing is created next to the data")
+        rc, out = self.driver("--inbox-add", "one journal line")                                     # the real writer uses it too
+        self.assertEqual(rc, 0)
+        self.assertFalse(list(self.root.rglob("*.lock")) and [p for p in self.root.rglob("*.lock") if p.name != "save.lock"])
+        self.assertTrue(any(re.fullmatch(r"[0-9a-f]{16}\.lock", p.name) for p in locks.iterdir()))
 
     def test_health(self):
         rc, out, err = self.run_py("kb_health.py")
@@ -241,6 +337,44 @@ class KB(unittest.TestCase):
         rc, out, _ = self.run_py("kb_demote.py", "--domain", "ops", "--match", " ")
         self.assertIn("error", json.loads(out))
 
+    def demote_fixture(self):
+        hot = self.root / "ops/HOT.md"
+        hot.write_text(hot.read_text(encoding="utf-8") + "- old fact about the build flag, error E123\n", encoding="utf-8")
+        return hot, hot.read_bytes()
+
+    def demote(self, env=None):
+        rc, out, err = self.run_py("kb_demote.py", "--domain", "ops", "--match", "build flag", env=env)
+        return rc, json.loads(out), err
+
+    def test_demote_waits_for_a_session_still_on_the_earlier_kits_lock(self):
+        """An earlier kit kept save.lock inside the KB (<KB>/.state/locks/); save_driver still takes it while it exists,
+        and so must kb_demote: a save and a demote of the same HOT.md may not interleave."""
+        hot, before = self.demote_fixture()
+        p = self.hold(self.root / ".state" / "locks" / "save.lock")
+        rc, res, _ = self.demote(env={"SAVE_LOCK_TIMEOUT": "1"})
+        self.assertEqual(rc, 1)
+        self.assertIn("save lock", res["error"])
+        self.assertEqual(hot.read_bytes(), before, "nothing moved while the lock was held")
+        self.assertFalse((self.root / "ops/history.md").exists())
+        self.release(p)
+        rc, res, err = self.demote()
+        self.assertEqual((rc, res.get("verified")), (0, True), err)
+
+    def test_demote_waits_for_the_local_lock_too(self):
+        hot, before = self.demote_fixture()
+        key = hashlib.sha256(self.root.resolve().as_posix().lower().encode()).hexdigest()[:8]   # kb_audit.kb_key
+        p = self.hold(self.tmp / "claude" / "workbench" / "kb-state" / key / "save.lock")
+        rc, res, _ = self.demote(env={"SAVE_LOCK_TIMEOUT": "1"})
+        self.assertEqual((rc, hot.read_bytes() == before), (1, True))
+        self.assertIn("save lock", res["error"])
+        self.release(p)
+        self.assertEqual(self.demote()[0], 0)
+
+    def test_demote_without_an_earlier_kits_lock_file_creates_none_in_the_kb(self):
+        self.demote_fixture()
+        self.assertEqual(self.demote()[0], 0)
+        self.assertFalse((self.root / ".state").exists(), "the lock is local; nothing is written under the KB for it")
+
 
 class Shared(unittest.TestCase):
     def test_secretscan_copies_are_identical(self):
@@ -251,9 +385,14 @@ class Shared(unittest.TestCase):
         sys.path.insert(0, str(SCRIPTS))
         import secretscan
         pos = [KEY, "gh" + "p_" + "A" * 36, "-----BEGIN " + "RSA PRIVATE KEY-----", "API_TOKEN=" + "abc123" * 4,
-               "postgres://app:" + "s3cretpw9" + "@db.example.com/x", "xox" + "b-" + "1" * 24]
-        neg = ["API_TOKEN=<YOUR_TOKEN>", "password: ${DB_PASSWORD}", "sk-agent-notes-for-the-team-2026",
-               "token = process.env.API_TOKEN", "AKIA is the prefix of AWS key ids"]
+               "postgres://app:" + "s3cretpw9" + "@db.example.com/x", "xox" + "b-" + "1" * 24,
+               "API_TOKEN=" + "vault" + "9f8a7b6c5d4e3f2a1b", "Authorization: Bearer " + "see-" + "A1b2C3d4" * 4,   # no prefix exempts a value
+               "API_TOKEN=" + "env-9f8a7b6c5d4e3f2a1b", "sk-" + "or-v1-" + "9f" * 32, '{"key": "sk-' + "or-v1-" + "9f" * 32 + '"}',
+               "Bearer " + "sess-live-" + "a9b8c7d6e5f4a3b2c1d0e9f8", "https://mcp.example.com/sse?api_key=" + "a1b2c3d4" * 4,
+               "DB_PASSWORD=" + "Hq7rT2.Kx9mP4vZ8wQ1"]
+        neg = ["API_TOKEN=<YOUR_TOKEN>", "password: ${DB_PASSWORD}", "sk-team-notes-for-the-wiki-2026",
+               "token = process.env.API_TOKEN", "AKIA is the prefix of AWS key ids", "API_TOKEN=env:API_TOKEN_2",
+               "token = self.cfg.token_v2"]
         for s in pos:
             self.assertTrue(secretscan.scan_text(s), f"missed: {s[:12]}...")
         for s in neg:

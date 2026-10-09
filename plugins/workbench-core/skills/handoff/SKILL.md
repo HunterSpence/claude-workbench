@@ -1,6 +1,7 @@
 ---
 name: handoff
-description: Turn a mission into a self-contained handoff document a fresh Claude session can execute, or a short resume card. Use for "/workbench-core:handoff", "write a handoff", "hand this off", "resume card", when a usage-limit warning appears, when a mission outgrows the session, or when a plan in progress must survive a restart.
+description: Turn a mission into a self-contained handoff document a fresh Claude session can execute, or a short resume note. Use for "/workbench-core:handoff", "write a handoff", "resume note", when a usage-limit warning appears, when a mission outgrows the session, or when a plan in progress must survive a restart.
+when_to_use: ALWAYS load when a session nears its limit or work must continue elsewhere.
 ---
 
 # /workbench-core:handoff
@@ -13,9 +14,10 @@ does not apply keeps its header and says "None for this mission"; never drop one
   ask before committing it if the repo is shared).
 - No repo, or the mission touches confidential material: a local folder the user names, outside
   any synced or pushed directory. Say "local only, not committed".
+- Work for a client or a tenant: the file goes in that client's or tenant's own folder, one that has no remote and is never
+  pushed or synced, never in a shared repository. The paste prompt names that folder, so a fresh session opens in it.
 - Never write a credential value, token or personal data into the file. Refer to secrets by name
-  ("the API key in the team vault"). Scan the finished file for anything that looks like a secret
-  before you report it.
+  ("the API key in the team vault"). The scan in the final steps is mandatory, not optional.
 
 ## Step 1: gather mission facts (infer; mark "ASSUMED: ..." instead of blocking)
 1. Mission title  2. Slug (lowercase-hyphenated)  3. Deadline or "none"  4. Read-first files, dependencies first
@@ -71,16 +73,26 @@ Example: "handoff for moving the metrics service to the new cluster" gives slug
 backup, stand up, cut over, decommission, each with a VERIFY ("container healthy, curl 200 from the
 new host"), D1 keep the old service 7 days (DEFAULT yes), Do-NOT: force-push, skipping the backup tag.
 
-## Resume-card mode
-Trigger: a usage-limit warning, or a request for a "resume card". Write ONLY PASTE PROMPT +
+## Resume-note mode
+Trigger: a usage-limit warning, or a request for a "resume note". Write ONLY PASTE PROMPT +
 STATE AT HANDOFF + START HERE (at most 2 KB), same Step 0 routing, same final steps.
 
-## Final steps (every time)
-1. Verify the file exists and re-read the PASTE PROMPT once: it must make sense to a session that
+## Final steps (every time, in this order)
+1. Journal first. If the workbench knowledge base is installed, journal one line with the `save` skill:
+   "<TITLE>: HANDOFF READY at <absolute path>". A journal line is append-only, so it costs nothing and survives a session
+   that ends right here.
+2. Scan the finished file with the kit's credential scanner and fix every finding before you go on:
+   `"${user_config.python}" "${CLAUDE_PLUGIN_ROOT}/scripts/secretscan.py" <file>`. Exit 0 and `CLEAN` is the only pass;
+   exit 1 lists `file:line` with a masked match (never the value): replace the value with the credential's name and
+   scan again; exit 2 means a file was not scanned, which is not a pass.
+3. Save once. If the knowledge base is installed and the session is ending, run the `save` skill one time for the whole
+   session, after the file is final, not once per edit of the handoff.
+4. Verify the file exists and re-read the PASTE PROMPT once: it must make sense to a session that
    has seen nothing else.
-2. If the workbench knowledge base is installed, journal one line with the `save` skill:
-   "<TITLE>: HANDOFF READY at <absolute path>".
-3. Committed to a repo: show `git log -1 --format=%h -- <file>` before saying "committed". Local
-   only: say "local only, not committed".
-4. Transfer ownership: the authoring session stops editing the mission. Report the path, where it
-   lives (committed or local), the phase count, and the PASTE PROMPT block.
+5. Say where it lives, and only what you checked:
+   - Committed: show `git log -1 --format=%h -- <file>` before saying "committed".
+   - Pushed: show `git log origin/<branch> -1 -- <file>` and see a commit before saying "pushed". A local commit proves
+     nothing about the remote.
+   - Local only, including every client or tenant folder: say "local only, not committed".
+6. Transfer ownership: the authoring session stops editing the mission. Report the path, where it
+   lives (committed, pushed or local), the phase count, and the PASTE PROMPT block.

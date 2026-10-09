@@ -14,3 +14,6 @@ Keep this file under its byte cap (`kb_audit.py --caps-json`). Over the cap, dem
 ## Decision heuristics
 
 ## Error blacklist (symptom -> root cause -> fix)
+
+## Relations
+- part_of [[00-index]]

@@ -1,0 +1,519 @@
+{
+ "version": 1,
+ "rows": [
+  {
+   "id": "wsl2",
+   "group": "platform",
+   "feature": "WSL2 (Linux environment)",
+   "rule": "wsl2",
+   "evidence": [
+    "/sections/virtualization/data/wsl",
+    "/sections/virtualization/data/virt_ok",
+    "/sections/policies/data/wsl",
+    "/sections/identity/data/admin_capable"
+   ],
+   "ask_it": "Please enable WSL2 for my account: allow the WSL policy (AllowWSL), enable virtualization in the firmware if it is off, and install the WSL component or approve it through the managed elevation tool.",
+   "unlocks": [
+    "sandbox"
+   ]
+  },
+  {
+   "id": "powershell",
+   "group": "platform",
+   "feature": "PowerShell for Claude Code (language mode and script policy)",
+   "rule": "powershell",
+   "evidence": [
+    "/sections/app_control/data/powershell/language_mode",
+    "/sections/app_control/data/powershell/execution_policy",
+    "/sections/app_control/data/powershell/gpo_machine",
+    "/sections/app_control/data/powershell/gpo_user"
+   ],
+   "ask_it": "Please confirm whether PowerShell on my laptop runs in Full Language mode for my user, and whether group policy enforces a script execution policy (Restricted or AllSigned). The Claude Code kit runs PowerShell commands and a few local scripts.",
+   "unlocks": []
+  },
+  {
+   "id": "find-keyword",
+   "group": "knowledge",
+   "feature": "Document search: keyword mode",
+   "rule": "find_keyword",
+   "evidence": [
+    "/sections/knowledge/data/find"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "knowledge-verified",
+   "group": "knowledge",
+   "feature": "Day-1 check of the knowledge chain",
+   "rule": "knowledge_verified",
+   "evidence": [
+    "/sections/knowledge/data/verify"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "find-mcp",
+   "group": "mcp",
+   "feature": "Local find MCP server",
+   "rule": "find_mcp",
+   "evidence": [
+    "/sections/policies/data/managed_claude",
+    "/sections/knowledge/data/find"
+   ],
+   "ask_it": "Please allow the local stdio MCP server `find` (a local search index; no network egress) in the managed MCP allow list.",
+   "unlocks": []
+  },
+  {
+   "id": "find-hybrid",
+   "group": "knowledge",
+   "feature": "Document search: hybrid mode (keywords and meaning)",
+   "rule": "find_hybrid",
+   "evidence": [
+    "/sections/knowledge/data/find",
+    "/sections/network/data/endpoints"
+   ],
+   "ask_it": "Please allow downloads from huggingface.co (a one-time embedding model), or provide an approved internal mirror of the model files.",
+   "unlocks": []
+  },
+  {
+   "id": "knowledge-refresh-task",
+   "group": "knowledge",
+   "feature": "Scheduled knowledge refresh",
+   "rule": "refresh_task",
+   "evidence": [
+    "/sections/knowledge/data/refresh_task",
+    "/sections/knowledge/data/schedule_service"
+   ],
+   "ask_it": "Please make sure the Windows Task Scheduler service is running so a per-user refresh task can be created.",
+   "unlocks": []
+  },
+  {
+   "id": "capture-intranet",
+   "group": "capture",
+   "feature": "Capture: intranet pages",
+   "rule": "capture_browser",
+   "evidence": [
+    "/sections/capture/data/automation_allowed",
+    "/sections/capture/data/edge_path",
+    "/sections/capture/data/policy_keys"
+   ],
+   "ask_it": "Please allow browser remote debugging for a dedicated, separate automation profile (Edge policy RemoteDebuggingAllowed), or name another approved browser-automation route.",
+   "unlocks": []
+  },
+  {
+   "id": "capture-shared-files",
+   "group": "capture",
+   "feature": "Capture: shared files",
+   "rule": "capture_shared",
+   "evidence": [
+    "/sections/knowledge/data/libraries",
+    "/sections/capture/data/automation_allowed"
+   ],
+   "ask_it": "Please allow browser remote debugging for a dedicated, separate automation profile (Edge policy RemoteDebuggingAllowed), or name another approved browser-automation route.",
+   "unlocks": []
+  },
+  {
+   "id": "capture-teams",
+   "group": "capture",
+   "feature": "Capture: Teams messages (deferred in this release)",
+   "rule": "capture_deferred",
+   "evidence": [
+    "/sections/capture/data/automation_allowed",
+    "/sections/capture/data/teams_client"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "capture-outlook",
+   "group": "capture",
+   "feature": "Capture: Outlook on the web (deferred in this release)",
+   "rule": "capture_deferred",
+   "evidence": [
+    "/sections/capture/data/automation_allowed",
+    "/sections/capture/data/outlook_client"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "capture-mail-full",
+   "group": "capture",
+   "feature": "Capture: full mail ingest (experimental)",
+   "rule": "capture_mail_full",
+   "evidence": [
+    "/sections/capture/data/outlook_client",
+    "/sections/capture/data/outlook_cache_window",
+    "/sections/capture/data/outlook_object_model_policy"
+   ],
+   "ask_it": "Please grant read-only access to my own mailbox for a local, on-device search index (for example a read-only mail API scope or an approved export), because the new Outlook client keeps no local cache.",
+   "unlocks": []
+  },
+  {
+   "id": "capture-meeting-transcripts",
+   "group": "capture",
+   "feature": "Capture: meeting transcripts (experimental)",
+   "rule": "capture_meeting_transcripts",
+   "evidence": [
+    "/sections/capture/data/teams_client",
+    "/sections/policies/data/managed_claude"
+   ],
+   "ask_it": "Please (1) enable Graph API access to meeting transcripts for my account (Teams meeting configuration setting EnableGraphTranscriptAccess), (2) approve a read-only connector or tenant app with Calendars.Read, OnlineMeetings.Read and OnlineMeetingTranscript.Read.All for my own meetings, (3) confirm whether attendees may download transcripts from the meeting Recap, and (4) if I hold a Microsoft 365 Copilot licence, also the delegated permission OnlineMeetingAiInsight.Read.All for meeting AI insights (admin consent). Purpose: a local, on-device meeting-notes index. To see the tenant setting: Get-CsTeamsMeetingConfiguration | Select EnableGraphTranscriptAccess, EnableAttributedTranscripts",
+   "unlocks": []
+  },
+  {
+   "id": "ai-digests",
+   "group": "capture",
+   "feature": "AI digests of mail and meetings (experimental)",
+   "rule": "ai_digests",
+   "evidence": [
+    "/sections/claude/data/logged_in",
+    "/sections/models/data"
+   ],
+   "ask_it": "Please confirm that summarising my own mail and meeting transcripts through our approved Claude Code login is permitted, including speech from external participants.",
+   "unlocks": []
+  },
+  {
+   "id": "storage-work-cloud",
+   "group": "storage",
+   "feature": "Work-cloud storage for knowledge Markdown",
+   "rule": "storage_work_cloud",
+   "evidence": [
+    "/sections/knowledge/data/work_cloud"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "github-com",
+   "group": "github",
+   "feature": "GitHub: github.com",
+   "rule": "github_com",
+   "evidence": [
+    "/sections/github/data/hosts",
+    "/sections/tools/data/git"
+   ],
+   "ask_it": "Please allow outbound access to github.com (or name the approved mirror) for git and the GitHub CLI.",
+   "unlocks": []
+  },
+  {
+   "id": "github-ghe-com",
+   "group": "github",
+   "feature": "GitHub: ghe.com tenant",
+   "rule": "github_ghe",
+   "evidence": [
+    "/sections/github/data/hosts"
+   ],
+   "ask_it": "Please allow outbound access to the organisation's ghe.com host for git and the GitHub CLI.",
+   "unlocks": []
+  },
+  {
+   "id": "github-ghes",
+   "group": "github",
+   "feature": "GitHub: Enterprise Server",
+   "rule": "github_ghes",
+   "evidence": [
+    "/sections/github/data/hosts"
+   ],
+   "ask_it": "Please allow outbound access to the organisation's GitHub Enterprise Server host for git and the GitHub CLI.",
+   "unlocks": []
+  },
+  {
+   "id": "plugin-core",
+   "group": "plugins",
+   "feature": "Plugin: core",
+   "rule": "plugin_core",
+   "evidence": [
+    "/sections/claude/data/plugins_installed",
+    "/sections/policies/data/managed_claude"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "plugin-kb",
+   "group": "plugins",
+   "feature": "Plugin: knowledge base",
+   "rule": "plugin_kb",
+   "evidence": [
+    "/sections/claude/data/plugins_installed",
+    "/sections/policies/data/managed_claude"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "plugin-biz",
+   "group": "plugins",
+   "feature": "Plugin: business skills",
+   "rule": "plugin_biz",
+   "evidence": [
+    "/sections/claude/data/plugins_installed",
+    "/sections/policies/data/managed_claude"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "plugin-capture",
+   "group": "plugins",
+   "feature": "Plugin: capture",
+   "rule": "plugin_capture",
+   "evidence": [
+    "/sections/claude/data/plugins_installed",
+    "/sections/policies/data/managed_claude"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "hooks-guards",
+   "group": "safety",
+   "feature": "Hooks and guards",
+   "rule": "hooks_guards",
+   "evidence": [
+    "/sections/policies/data/managed_claude",
+    "/sections/claude/data/plugins_installed"
+   ],
+   "ask_it": "Please allow user hooks for the Claude Code kit: lift the managed hooks-only setting (allowManagedHooksOnly) or add the kit's hooks to the managed hook set.",
+   "unlocks": []
+  },
+  {
+   "id": "sandbox",
+   "group": "safety",
+   "feature": "Sandboxed command execution",
+   "rule": "sandbox",
+   "evidence": [
+    "/sections/os/data/platform",
+    "/sections/virtualization/data/wsl",
+    "/sections/tools/data/bwrap"
+   ],
+   "ask_it": "Please enable WSL2 for my account so commands can run in a Linux sandbox (see the WSL2 request).",
+   "unlocks": []
+  },
+  {
+   "id": "browser-automation",
+   "group": "tools",
+   "feature": "Browser automation",
+   "rule": "browser_automation",
+   "evidence": [
+    "/sections/capture/data/automation_allowed",
+    "/sections/capture/data/edge_path",
+    "/sections/tools/data/node"
+   ],
+   "ask_it": "Please allow browser remote debugging for a dedicated, separate automation profile (Edge policy RemoteDebuggingAllowed), or name another approved browser-automation route.",
+   "unlocks": []
+  },
+  {
+   "id": "scheduled-tasks",
+   "group": "platform",
+   "feature": "Scheduled tasks",
+   "rule": "scheduled_tasks",
+   "evidence": [
+    "/sections/knowledge/data/schedule_service"
+   ],
+   "ask_it": "Please make sure the Windows Task Scheduler service is running so per-user tasks can be created.",
+   "unlocks": []
+  },
+  {
+   "id": "skill-setup",
+   "group": "skills",
+   "feature": "Skill: setup",
+   "rule": "skill_core",
+   "evidence": [
+    "/sections/claude/data/plugins_installed"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "skill-find",
+   "group": "skills",
+   "feature": "Skill: find",
+   "rule": "skill_core",
+   "evidence": [
+    "/sections/claude/data/plugins_installed"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "skill-repo-review",
+   "group": "skills",
+   "feature": "Skill: repo-review",
+   "rule": "skill_core",
+   "evidence": [
+    "/sections/claude/data/plugins_installed"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "skill-plugin-factory",
+   "group": "skills",
+   "feature": "Skill: plugin-factory",
+   "rule": "skill_core",
+   "evidence": [
+    "/sections/claude/data/plugins_installed"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "skill-plugin-review",
+   "group": "skills",
+   "feature": "Skill: plugin-review",
+   "rule": "skill_core",
+   "evidence": [
+    "/sections/claude/data/plugins_installed"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "skill-web-packager",
+   "group": "skills",
+   "feature": "Skill: web-packager",
+   "rule": "skill_core",
+   "evidence": [
+    "/sections/claude/data/plugins_installed"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "skill-mcp-builder",
+   "group": "skills",
+   "feature": "Skill: mcp-builder",
+   "rule": "skill_core",
+   "evidence": [
+    "/sections/claude/data/plugins_installed"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "skill-api-bridge",
+   "group": "skills",
+   "feature": "Skill: api-bridge",
+   "rule": "skill_core",
+   "evidence": [
+    "/sections/claude/data/plugins_installed"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "skill-capture",
+   "group": "skills",
+   "feature": "Skill: capture",
+   "rule": "skill_capture",
+   "evidence": [
+    "/sections/claude/data/plugins_installed"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "skill-requirements-to-stories",
+   "group": "skills",
+   "feature": "Skill: requirements-to-stories",
+   "rule": "skill_biz",
+   "evidence": [
+    "/sections/claude/data/plugins_installed"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "skill-meeting-to-actions",
+   "group": "skills",
+   "feature": "Skill: meeting-to-actions",
+   "rule": "skill_biz",
+   "evidence": [
+    "/sections/claude/data/plugins_installed"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "skill-status-report",
+   "group": "skills",
+   "feature": "Skill: status-report",
+   "rule": "skill_biz",
+   "evidence": [
+    "/sections/claude/data/plugins_installed"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "skill-test-cases-from-requirements",
+   "group": "skills",
+   "feature": "Skill: test-cases-from-requirements",
+   "rule": "skill_biz",
+   "evidence": [
+    "/sections/claude/data/plugins_installed"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "skill-excel-analyst",
+   "group": "skills",
+   "feature": "Skill: excel-analyst",
+   "rule": "skill_biz",
+   "evidence": [
+    "/sections/claude/data/plugins_installed"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "skill-rfp-sow-drafter",
+   "group": "skills",
+   "feature": "Skill: rfp-sow-drafter",
+   "rule": "skill_biz",
+   "evidence": [
+    "/sections/claude/data/plugins_installed"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "skill-branded-deck",
+   "group": "skills",
+   "feature": "Skill: branded-deck",
+   "rule": "skill_biz",
+   "evidence": [
+    "/sections/claude/data/plugins_installed"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "skill-policy-qa",
+   "group": "skills",
+   "feature": "Skill: policy-qa",
+   "rule": "skill_biz",
+   "evidence": [
+    "/sections/claude/data/plugins_installed"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  },
+  {
+   "id": "skill-ingest",
+   "group": "capture",
+   "feature": "Skill: ingest, meetings and mail (experimental)",
+   "rule": "skill_capture",
+   "evidence": [
+    "/sections/claude/data/plugins_installed"
+   ],
+   "ask_it": null,
+   "unlocks": []
+  }
+ ]
+}

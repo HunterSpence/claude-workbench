@@ -13,6 +13,11 @@ For a known one-file bug in the repo you are already in, just fix it. This skill
 repository: unfamiliar code, several problems, or a review the user wants done properly. Multi-file
 fixes inside it follow the `cascade` skill.
 
+## 0. Search the known failures first
+Starting from a symptom (an error line, a failing build or test)? Run the KB search from `rules/memory-protocol.md` as
+`kb_search.py "<symptom words>" --domain _shared --limit 5`. A matching bug card gives the root cause, the fix and the
+test that proves it; confirm it applies here before you use it, and say which card you used.
+
 ## 1. Clone into a scratch folder
 ```bash
 gh repo clone <org>/<repo> "<scratch>/<repo>" -- --filter=blob:none   # or: git clone <url> "<scratch>/<repo>"

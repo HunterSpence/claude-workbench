@@ -8,12 +8,18 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
+REQUIRE = os.environ.get("WB_REQUIRE_ALL") == "1"   # acceptance runs: a missing dependency fails, never skips
 SCRIPTS = Path(__file__).resolve().parents[1]
 PLUGIN = SCRIPTS.parent
 REPO = PLUGIN.parents[1]
+sys.path.insert(0, str(SCRIPTS))
+import _wb  # noqa: E402
+import auto_invoke  # noqa: E402
 KEY = "AKIA" + "X" * 16          # built at runtime: this file holds no credential shape
 
 
@@ -27,9 +33,26 @@ class Hooks(unittest.TestCase):
         self.env = {**os.environ, "CLAUDE_CONFIG_DIR": str(self.tmp / "claude"), "WORKBENCH_KB_ROOT": str(self.kb),
                     "GUARDS_LOG_DIR": str(self.tmp / "logs"), "PYTHONIOENCODING": "utf-8"}
         self.env.pop("WORKBENCH_LOG_INSTRUCTIONS", None)
+        # hermetic: no managed policy from this machine, and a stand-in for the capability report (never the real one)
+        self.managed = self.tmp / "managed"
+        self.managed.mkdir()
+        self.marker = self.tmp / "report-called.json"
+        (self.tmp / "stub_report.py").write_text(
+            "import json, os, sys\ntmp = os.environ['WB_STUB_OUT'] + '.tmp'\n"
+            "open(tmp, 'w').write(json.dumps(sys.argv[1:]))\nos.replace(tmp, os.environ['WB_STUB_OUT'])\n")
+        self.env.update(WORKBENCH_POLICY_DIRS=str(self.managed), WORKBENCH_REPORT_CLI=str(self.tmp / "stub_report.py"),
+                        WB_STUB_OUT=str(self.marker))
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def kstate(self, kb=None):
+        """The local KB state folder (flags, snapshots) for this test's KB, as the hooks compute it."""
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(self.tmp / "claude")}):
+            return _wb.kb_state_dir(kb or self.kb)
+
+    def tree(self, folder):
+        return sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*"))
 
     def hook(self, script, event, raw=None, env=None):
         r = subprocess.run([sys.executable, "-S", str(SCRIPTS / script)], capture_output=True, text=True,
@@ -49,10 +72,27 @@ class Hooks(unittest.TestCase):
         self.assertIn("PINS (user settings; managed policy may override", ctx)
         self.assertIn("main=opus/high", ctx)
         self.assertIn("every push to a remote host is refused until the user adds hosts", ctx)
-        (self.kb / ".state").mkdir(exist_ok=True)
-        (self.kb / ".state" / "precompact-s1.flag").write_text("x")
+        self.kstate().mkdir(parents=True, exist_ok=True)
+        (self.kstate() / "precompact-s1.flag").write_text("x")
         ctx = self.hook("session_start.py", {"session_id": "s1"})["hookSpecificOutput"]["additionalContext"]
         self.assertIn("PRECOMPACT SAVE PENDING", ctx)
+
+    def test_session_start_still_reads_an_earlier_kits_flags_in_the_kb(self):
+        old = self.kb / ".state"
+        old.mkdir()
+        (old / "precompact-s1.flag").write_text("x")
+        (old / "precompact-s9.flag").write_text("x")
+        stale = old / "precompact-s8.flag"
+        stale.write_text("x")
+        os.utime(stale, (time.time() - 9 * 86400,) * 2)
+        ctx = self.hook("session_start.py", {"session_id": "s1"})["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("PRECOMPACT SAVE PENDING", ctx)
+        self.assertIn("1 other session(s) owe a save", ctx, "the fresh legacy flag counts, the 9-day-old one does not")
+        (self.kstate()).mkdir(parents=True)
+        (self.kstate() / "precompact-s1.flag").write_text("x")                  # the copy of the same flag: still one
+        (self.kstate() / "precompact-s9.flag").write_text("x")
+        ctx = self.hook("session_start.py", {"session_id": "s1"})["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("1 other session(s) owe a save", ctx)
 
     def test_session_start_pins_health_and_due_items(self):
         import datetime
@@ -103,9 +143,40 @@ class Hooks(unittest.TestCase):
 
     def test_precompact(self):
         (self.kb / "active-context.md").write_text("# AC\n", encoding="utf-8")
+        before = self.tree(self.kb)
         self.assertIsNone(self.hook("precompact.py", {"session_id": "s2", "trigger": "auto"}))
-        self.assertTrue((self.kb / ".state" / "precompact-s2.flag").exists())
-        self.assertEqual(len(list((self.kb / ".state" / "snapshots").glob("active-context-*.md"))), 1)
+        self.assertTrue((self.kstate() / "precompact-s2.flag").exists())
+        self.assertEqual(len(list((self.kstate() / "snapshots").glob("active-context-*.md"))), 1)
+        self.assertEqual(self.tree(self.kb), before, "the hook writes nothing into the knowledge base")
+        self.assertRegex(json.loads((self.wb / "state" / "guard-heartbeat.json").read_text())["last_precompact"],
+                         r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+
+    def test_precompact_state_follows_the_kb_root(self):
+        other = self.tmp / "kb2"
+        shutil.copytree(REPO / "kb-template", other)
+        (other / "active-context.md").write_text("# AC\n- two\n", encoding="utf-8")
+        self.hook("precompact.py", {"session_id": "s3"}, env={"WORKBENCH_KB_ROOT": str(other)})
+        self.hook("precompact.py", {"session_id": "s3"})
+        self.assertNotEqual(self.kstate(other), self.kstate())
+        self.assertTrue((self.kstate(other) / "precompact-s3.flag").exists() and (self.kstate() / "precompact-s3.flag").exists())
+
+    def test_heartbeat_keeps_unknown_keys_and_stamps_last_start(self):
+        self.state("guard-heartbeat.json", {"version": 1, "last_fired": None, "sessions_since_fire": 0, "fired_total": 0,
+                                            "note_from_setup": "keep me"})
+        beat = self.wb / "state" / "guard-heartbeat.json"
+        read = lambda: json.loads(beat.read_text())  # noqa: E731
+        self.start("startup")
+        d = read()
+        self.assertEqual((d["note_from_setup"], d["sessions_since_fire"]), ("keep me", 1))
+        self.assertRegex(d["last_start"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+        d["last_start"] = "2000-01-01T00:00:00Z"
+        beat.write_text(json.dumps(d))
+        self.start("compact")                                                # a compaction proves the hook ran, adds no session
+        d = read()
+        self.assertNotEqual(d["last_start"], "2000-01-01T00:00:00Z")
+        self.assertEqual((d["sessions_since_fire"], d["note_from_setup"]), (1, "keep me"))
+        self.hook("precompact.py", {"session_id": "s2"})
+        self.assertEqual((read()["sessions_since_fire"], read()["note_from_setup"], "last_precompact" in read()), (1, "keep me", True))
 
     def test_statusline(self):
         r = subprocess.run([sys.executable, str(SCRIPTS / "statusline.py")], capture_output=True, text=True,
@@ -117,6 +188,26 @@ class Hooks(unittest.TestCase):
         r = subprocess.run([sys.executable, str(SCRIPTS / "statusline.py")], capture_output=True, text=True,
                            input="garbage", timeout=60)
         self.assertEqual(r.stdout.strip(), "[Claude]")
+
+    def status(self, j):
+        r = subprocess.run([sys.executable, str(SCRIPTS / "statusline.py")], capture_output=True, text=True,
+                           encoding="utf-8", env=self.env, timeout=60, input=json.dumps(j))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout.strip()
+
+    def test_statusline_cache_context_and_spend(self):
+        full = {"model": {"id": "claude-opus-x", "display_name": "Opus"}, "context_window": {"used_percentage": 42.4},
+                "cost": {"total_cost_usd": 1.234}, "prompt_cache": {"warm": True, "caching_observed": True, "hit_ratio": 0.912}}
+        self.assertEqual(self.status(full), "[Opus] ctx:42% cache:91% warm $1.23")
+        self.assertEqual(self.status({**full, "prompt_cache": {"warm": False, "hit_ratio": 0.4}}),
+                         "[Opus] ctx:42% cache:40% cold $1.23")
+        # missing or odd fields degrade to nothing, never an error
+        for pc in (None, {}, "x", [], {"hit_ratio": "abc", "warm": True}, {"caching_observed": False, "hit_ratio": 0.9},
+                   {"hit_ratio": None, "warm": None}):
+            self.assertEqual(self.status({**full, "prompt_cache": pc}), "[Opus] ctx:42% $1.23", pc)
+        self.assertEqual(self.status({"prompt_cache": {"warm": True}}), "[Claude] cache:warm")
+        self.assertEqual(self.status({"prompt_cache": {"hit_ratio": 0.5}}), "[Claude] cache:50%")
+        self.assertEqual(self.status({"cost": {}, "context_window": {}}), "[Claude]")
 
     def test_read_flood_guard(self):
         big = self.tmp / "big.txt"
@@ -161,6 +252,7 @@ class Hooks(unittest.TestCase):
         self.assertIn("/workbench-kb:save", out["hookSpecificOutput"]["additionalContext"])
         out = self.hook("auto_invoke.py", {"hook_event_name": "UserPromptSubmit", "prompt": "refactor the parser"})
         self.assertIn("/workbench-core:cascade", out["hookSpecificOutput"]["additionalContext"])
+        self.assertNotIn("/workbench-kb:save", out["hookSpecificOutput"]["additionalContext"])   # wrap-up must not match everything
         for p in ("I'm done for today", "that's it for now", "ok, let's wrap up"):
             out = self.hook("auto_invoke.py", {"hook_event_name": "UserPromptSubmit", "prompt": p})
             self.assertIn("/workbench-kb:save", out["hookSpecificOutput"]["additionalContext"], p)
@@ -183,20 +275,34 @@ class Hooks(unittest.TestCase):
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "ask", "the marker alone never passes")
 
     def test_auto_invoke_covers_every_skill(self):
-        sys.path.insert(0, str(PLUGIN / "scripts"))
-        import auto_invoke
-        kit = {d.name for d in (PLUGIN / "skills").iterdir() if (d / "SKILL.md").exists()}
-        kit |= {d.name for d in (PLUGIN.parent / "workbench-kb" / "skills").iterdir() if (d / "SKILL.md").exists()}
-        self.assertEqual(kit - {n for n, _, _ in auto_invoke.SKILLS}, set(), "every kit skill needs a trigger row")
-        for skill in kit:
-            text = (PLUGIN / "skills" / skill / "SKILL.md") if (PLUGIN / "skills" / skill).exists() else None
-            if text and "disable-model-invocation: true" in text.read_text(encoding="utf-8"):
+        plugins = PLUGIN.parent
+        dirs = [d for d in (PLUGIN / "skills", plugins / "workbench-kb" / "skills", plugins / "workbench-capture" / "skills")
+                if d.is_dir()]
+        kit = {d.name: d for root in dirs for d in root.iterdir() if (d / "SKILL.md").exists()}
+        rows = {n for n, _, _ in auto_invoke.SKILLS}
+        self.assertEqual(set(kit) - rows, set(), "every kit skill needs a trigger row")
+        for skill, d in kit.items():
+            if "disable-model-invocation: true" in (d / "SKILL.md").read_text(encoding="utf-8"):
                 self.assertIn(skill, auto_invoke.USER_ONLY, f"{skill} is user-invoked: it may only be mentioned")
+        # the frozen skill names (all merged or not): a row each; the renamed one is gone
+        i8 = {"setup", "find", "repo-review", "plugin-factory", "plugin-review", "web-packager", "mcp-builder", "api-bridge",
+              "capture", "ingest"}
+        self.assertEqual(i8 - rows, set())
+        self.assertNotIn("doc-index", rows)
+        self.assertTrue({"setup", "capture", "ingest"} <= auto_invoke.USER_ONLY)
+        self.assertEqual((auto_invoke.cmd("capture"), auto_invoke.cmd("ingest"), auto_invoke.cmd("setup"), auto_invoke.cmd("save")),
+                         ("/workbench-capture:capture", "/workbench-capture:ingest", "/workbench-core:setup",
+                          "/workbench-kb:save"))
         route = {"fix the bugs in github.com/acme/widgets": "repo-fix",
+                 "review the repo read-only": "repo-review",
                  "redesign the settings page of the internal web app": "ui-build",
                  "draft a reply to this email": "draft-reply", "write a memo about the outage": "office-docx",
                  "make a deck for Friday": "office-pptx", "build a spreadsheet of the costs": "office-xlsx",
-                 "can you drive the citrix remote desktop": "vdi-drive"}
+                 "can you drive the citrix remote desktop": "vdi-drive",
+                 "find the latest version of the pricing doc": "find", "create a new claude plugin": "plugin-factory",
+                 "build an mcp server for our ticketing": "mcp-builder", "wrap the internal api as an mcp tool": "api-bridge",
+                 "run the workbench setup": "setup", "crawl the intranet wiki": "capture",
+                 "ingest my meeting transcripts": "ingest"}
         for prompt, skill in route.items():
             out = self.hook("auto_invoke.py", {"hook_event_name": "UserPromptSubmit", "prompt": prompt})
             ctx = out["hookSpecificOutput"]["additionalContext"]
@@ -242,6 +348,244 @@ class Hooks(unittest.TestCase):
         row = json.loads(log.read_text().splitlines()[-1])
         self.assertEqual((row["bytes"], row["load_reason"]), (4, "session_start"))
 
+    # ── SessionStart: runtime assurance lines ──
+    def state(self, name, obj, age_days=0):
+        f = self.wb / "state" / name
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps(obj), encoding="utf-8")
+        if age_days:
+            t = time.time() - age_days * 86400
+            os.utime(f, (t, t))
+        return f
+
+    def start(self, source="startup"):
+        out = self.hook("session_start.py", {"session_id": "s1", "source": source})
+        return out["hookSpecificOutput"]["additionalContext"]
+
+    def called(self, timeout=20):
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            if self.marker.exists():
+                try:
+                    return json.loads(self.marker.read_text())
+                except (PermissionError, ValueError):   # Windows: the stub's os.replace (or a scanner) still holds it
+                    pass
+            time.sleep(0.05)
+        self.fail("the stand-in report command was never started")
+
+    def test_session_start_quiet_when_nothing_is_wrong(self):
+        ctx = self.start()
+        for text in ("Setup pending", "Model routing", "managed policy changed", "guards have not run", "capability report"):
+            self.assertNotIn(text, ctx)
+        self.assertFalse(self.marker.exists())
+
+    def test_session_start_setup_routing_policy_guards_and_stale_report(self):
+        self.state("setup-state.json", {"version": 1, "phase": "wsl", "running": False, "exit_code": 5,
+                                        "next": "/workbench-core:setup resume", "ask_it": [{"item": "wsl", "text": "x"}],
+                                        "failed": []})
+        self.state("routing.effective.json", {"version": 1, "rows": [
+            {"id": f"R-{i}", "persona": f"persona{i}", "model": "claude-sonnet-5-5" if i == 1 else "claude-opus-5-5",
+             "effort": "xhigh", "fallback_used": i == 1} for i in range(7)]})
+        self.state("policy-snapshot.json", {"version": 1, "classes": {"hooks_locked": False, "marketplaces_closed": False}})
+        (self.managed / "managed-settings.json").write_text(json.dumps({"allowManagedHooksOnly": True,
+                                                                        "strictKnownMarketplaces": []}))
+        self.state("guard-heartbeat.json", {"version": 1, "last_fired": None, "sessions_since_fire": 2, "fired_total": 0})
+        self.state("capability-pre.json", {"version": 1}, age_days=10)
+        (self.kb / "active-context.md").write_text("\n".join(f"- line {i} " + "y" * 80 for i in range(400)), encoding="utf-8")
+        out = self.hook("session_start.py", {"session_id": "s1", "source": "startup"})
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("Setup pending: phase wsl, 1 item(s) for IT. Next: /workbench-core:setup resume", ctx)
+        rows = [ln.strip() for ln in ctx.splitlines() if ln.startswith("  R-")]
+        self.assertEqual(rows, ["R-0 persona0 opus-5-5/xhigh", "R-1 persona1 sonnet-5-5/xhigh*", "R-2 persona2 opus-5-5/xhigh",
+                                "R-3 persona3 opus-5-5/xhigh", "R-4 persona4 opus-5-5/xhigh"])       # five rows, fallback marked
+        self.assertIn("managed policy changed since setup: hooks_locked, marketplaces_closed; run setup.py doctor", ctx)
+        self.assertIn("guards have not run in 3 sessions", ctx)
+        self.assertIn("The capability report is 10 days old: a quick refresh was started in the background.", ctx)
+        self.assertEqual(self.called(), ["run", "--phase", "refresh", "--quick", "--detach"])
+        self.assertLessEqual(len(json.dumps(out, ensure_ascii=False).encode("utf-16-le")) // 2, 10_000)
+        self.assertIn("TRUNCATED", ctx)                       # the notes stay; the active-context tail gives way
+        self.assertEqual(json.loads((self.wb / "state" / "guard-heartbeat.json").read_text())["sessions_since_fire"], 3)
+
+    def test_session_start_counts_sessions_not_clears_and_compactions(self):
+        beat = self.wb / "state" / "guard-heartbeat.json"
+        count = lambda: json.loads(beat.read_text())["sessions_since_fire"]  # noqa: E731
+        self.assertNotIn("guards have not run", self.start("startup") + self.start("resume"))
+        self.assertEqual(count(), 2)
+        self.start("clear")
+        self.start("compact")
+        self.assertEqual(count(), 2)
+        self.assertIn("guards have not run in 3 sessions", self.start("startup"))
+        self.assertIn("guards have not run in 3 sessions", self.start("compact"))   # warns from the saved count, adds nothing
+        self.assertEqual(count(), 3)
+
+    def test_session_start_knowledge_verify_line(self):
+        import datetime as dt
+        iso = lambda days: (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")  # noqa: E731
+        self.assertNotIn("knowledge verify", self.start(), "no result file yet: say nothing")
+        self.state("knowledge-verify.json", {"version": 1, "generated": iso(1), "steps": [],
+                                             "summary": {"pass": 5, "warn": 1, "fail": 2, "failing": ["D3", "D9"]}})
+        ctx = self.start()
+        self.assertIn("knowledge verify: 2 failing (D3, D9); run setup.py doctor --deep", ctx)
+        self.state("knowledge-verify.json", {"version": 1, "generated": iso(1), "steps": [],
+                                             "summary": {"pass": 7, "warn": 0, "fail": 0, "failing": []}})
+        self.assertNotIn("knowledge verify", self.start(), "a fresh all-pass result is quiet")
+        self.state("knowledge-verify.json", {"version": 1, "generated": iso(31), "steps": [],
+                                             "summary": {"pass": 7, "warn": 0, "fail": 0, "failing": []}})
+        self.assertIn("knowledge verify is older than 30 days; run setup.py doctor --deep", self.start())
+        for junk in ({"generated": "not a date"}, {"summary": "x"}, {"summary": {"failing": [1, {"a": 2}]}, "generated": iso(0)}):
+            self.state("knowledge-verify.json", junk)
+            self.assertIn("PINS (user settings", self.start(), "a damaged result never hides the rest of the banner")
+
+    def test_session_start_policy_change_alone_starts_one_refresh_a_day(self):
+        self.state("policy-snapshot.json", {"version": 1, "classes": {}})
+        (self.managed / "managed-settings.json").write_text(json.dumps({"availableModels": ["x"]}))
+        self.state("capability-post.json", {"version": 1})                      # fresh report, but the policy moved
+        ctx = self.start()
+        self.assertIn("managed policy changed since setup: models_restricted", ctx)
+        self.assertIn("out of date after the policy change: a quick refresh was started", ctx)
+        self.called()
+        self.marker.unlink()
+        self.state("capability-refresh.json", {"version": 1})                   # refreshed just now: not again
+        self.assertNotIn("quick refresh", self.start())
+        time.sleep(0.3)
+        self.assertFalse(self.marker.exists())
+
+    def test_session_start_survives_broken_state_files(self):
+        for name in ("setup-state.json", "routing.effective.json", "guard-heartbeat.json", "policy-snapshot.json"):
+            (self.wb / "state").mkdir(parents=True, exist_ok=True)
+            (self.wb / "state" / name).write_text("{not json", encoding="utf-8")
+        (self.managed / "managed-settings.json").write_text("{broken")
+        ctx = self.start()
+        self.assertIn("PINS (user settings", ctx)
+
+    # ── bug_hint (PostToolUseFailure) ──
+    DETECTORS = {"version": 1, "detectors": [
+        {"card": 7, "title": "Proxy certificate not trusted by node", "pattern": "UNABLE_TO_GET_ISSUER_CERT|self[- ]signed certificate",
+         "repro": "Error: self-signed certificate in certificate chain"},
+        {"card": 12, "title": "Path longer than 260 characters", "pattern": r"ENAMETOOLONG|filename or extension is too long",
+         "repro": "The filename or extension is too long."}]}
+
+    def failure(self, error, **kw):
+        return self.hook("bug_hint.py", {"hook_event_name": "PostToolUseFailure", "tool_name": "Bash", "error": error, **kw})
+
+    def test_bug_hint_names_the_right_card(self):
+        (self.kb / "_shared").mkdir(exist_ok=True)
+        (self.kb / "_shared" / "bug-detectors.json").write_text(json.dumps(self.DETECTORS), encoding="utf-8")
+        for d in self.DETECTORS["detectors"]:                                   # each detector fires on its own repro
+            out = self.failure("Exit code 1\n" + d["repro"])["hookSpecificOutput"]
+            self.assertEqual(out["hookEventName"], "PostToolUseFailure")
+            self.assertEqual(out["additionalContext"], f"Known bug, card {d['card']}: {d['title']} (see _shared/bug-cards.md)")
+        self.assertIsNone(self.failure("Exit code 1\nError: Cannot find module 'express'"))      # an unrelated error
+        self.assertIsNone(self.failure("x" * 5000 + " ENAMETOOLONG"))                              # past the first 4 KB
+        self.assertIsNone(self.failure("ENAMETOOLONG", is_interrupt=True))
+        self.assertIsNone(self.hook("bug_hint.py", {"hook_event_name": "PostToolUseFailure"}))   # no error field
+        self.assertIsNone(self.hook("bug_hint.py", None, raw="not json"))
+        first = self.failure("self-signed certificate and ENAMETOOLONG")["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("card 7", first)                                                             # at most one card
+
+    def test_bug_hint_is_short_and_silent_on_bad_files(self):
+        (self.kb / "_shared").mkdir(exist_ok=True)
+        long = {"version": 1, "detectors": [{"card": 1, "title": "t " * 400, "pattern": "boom"}, {"card": "x", "pattern": "("}]}
+        (self.kb / "_shared" / "bug-detectors.json").write_text(json.dumps(long), encoding="utf-8")
+        msg = self.failure("boom")["hookSpecificOutput"]["additionalContext"]
+        self.assertLessEqual(len(msg), 300)
+        self.assertTrue(msg.startswith("Known bug, card 1: ") and msg.endswith("(see _shared/bug-cards.md)"))
+        self.assertIsNone(self.failure("no match here ("))                         # a broken regex row is skipped
+        (self.kb / "_shared" / "bug-detectors.json").write_text("{nope", encoding="utf-8")
+        self.assertIsNone(self.failure("boom"))
+        (self.kb / "_shared" / "bug-detectors.json").unlink()
+        self.assertIsNone(self.failure("boom"))
+
+    def test_bug_hint_falls_back_to_the_kit_copy(self):
+        kit = self.wb / "kit" / "kb-template" / "_shared"
+        kit.mkdir(parents=True)
+        (kit / "bug-detectors.json").write_text(json.dumps(self.DETECTORS), encoding="utf-8")
+        shutil.rmtree(self.kb / "_shared", ignore_errors=True)
+        self.assertIn("card 12", self.failure("ENAMETOOLONG")["hookSpecificOutput"]["additionalContext"])
+
+    # ── policy_snapshot ──
+    def snap(self, *args):
+        r = subprocess.run([sys.executable, "-S", str(SCRIPTS / "policy_snapshot.py"), *args], capture_output=True, text=True,
+                           encoding="utf-8", env=self.env, timeout=60)
+        return r
+
+    def test_policy_snapshot_detects_each_class_change(self):
+        self.assertEqual(self.snap("--bogus").returncode, 2)
+        base = json.loads(self.snap("--json", "--write").stdout)
+        self.assertEqual(base["changed"], [])
+        self.assertFalse(any(base["classes"].values()))
+        self.assertRegex(base["sha256"], r"^[0-9a-f]{64}$")
+        self.assertTrue((self.wb / "state" / "policy-snapshot.json").is_file())
+        fixtures = {"hooks_locked": {"allowManagedHooksOnly": True}, "marketplaces_closed": {"strictKnownMarketplaces": []},
+                    "models_restricted": {"deniedModels": ["claude-x"]}, "mcp_restricted": {"allowedMcpServers": [{"serverName": "a"}]},
+                    "permissions_locked": {"permissions": {"disableBypassPermissionsMode": "disable"}}}
+        for cls, conf in fixtures.items():
+            (self.managed / "managed-settings.json").write_text(json.dumps(conf))
+            got = json.loads(self.snap("--json").stdout)
+            self.assertEqual(got["changed"], [cls], cls)
+            self.assertTrue(got["classes"][cls])
+            self.assertNotEqual(got["sha256"], base["sha256"])
+        (self.managed / "managed-settings.json").unlink()
+        (self.managed / "managed-mcp.json").write_text(json.dumps({"mcpServers": {}}))   # a managed MCP file locks MCP
+        self.assertEqual(json.loads(self.snap("--json").stdout)["changed"], ["mcp_restricted"])
+        (self.managed / "managed-mcp.json").unlink()
+        (self.managed / "managed-settings.d").mkdir()                                       # drop-ins count too
+        (self.managed / "managed-settings.d" / "10-hooks.json").write_text(json.dumps({"disableAllHooks": True}))
+        self.assertEqual(json.loads(self.snap("--json").stdout)["changed"], ["hooks_locked"])
+        (self.managed / "managed-settings.d" / "10-hooks.json").write_text("{broken")       # unreadable = present, hash moves
+        self.assertNotEqual(json.loads(self.snap("--json").stdout)["sha256"], base["sha256"])
+        self.assertIn("managed policy", self.snap().stdout)
+
+    # ── _wb.config_redirected (profiles registry) ──
+    def test_registered_profile_is_not_redirected(self):
+        main, prof, other = (self.tmp / n for n in ("main", "profiles/a/config", "elsewhere"))
+        (main / "workbench").mkdir(parents=True)
+        (main / "workbench" / "profiles.json").write_text(json.dumps({"version": 1, "profiles": [
+            {"name": "a", "config_dir": str(prof), "kb_root": str(self.tmp / "kb-a"), "knowledge_db": "x", "created": "t"}]}))
+        record = self.tmp / "installed-config.json"
+        record.write_text(json.dumps({"claude_home": str(main)}))
+        def redirected(cfg_dir):
+            with mock.patch.object(_wb, "RECORD", record), mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(cfg_dir)}):
+                return _wb.config_redirected()
+        self.assertFalse(redirected(main))
+        self.assertFalse(redirected(prof))                       # registered: not redirected
+        self.assertTrue(redirected(other))                       # unregistered: redirected
+        self.assertTrue(redirected(prof.parent))
+        if os.name == "nt":                                      # case-insensitive on Windows
+            self.assertFalse(redirected(str(prof).upper()))
+        (main / "workbench" / "profiles.json").write_text("{broken")
+        self.assertTrue(redirected(prof))                        # an unreadable registry registers nothing
+        (main / "workbench" / "profiles.json").unlink()
+        self.assertTrue(redirected(prof))
+        with mock.patch.object(_wb, "RECORD", self.tmp / "none.json"), mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(other)}):
+            self.assertFalse(_wb.config_redirected())            # not installed by the installer: nothing to compare
+
+    # ── settings profiles ──
+    def profile(self, name):
+        return json.loads((REPO / "settings" / "profiles" / f"{name}.fragment.json").read_text(encoding="utf-8"))
+
+    def test_every_github_write_verb_is_an_ask_rule_in_both_profiles(self):
+        verbs = json.loads((SCRIPTS / "guards" / "gh_write_verbs.json").read_text(encoding="utf-8"))["verbs"]
+        want = {f"{sh}(gh {n} {v} *)" for n, vs in verbs.items() for v in vs for sh in ("Bash", "PowerShell")}
+        self.assertEqual(len(want), 78)
+        for name in ("corporate", "permissive"):
+            perms = self.profile(name)["permissions"]
+            self.assertEqual(want - set(perms["ask"]), set(), name)
+            self.assertEqual(set(perms["ask"]) & set(perms.get("allow", [])), set(), f"{name}: an ask rule is also allowed")
+            self.assertEqual(len(perms["ask"]), len(set(perms["ask"])), f"{name}: duplicate ask rule")
+
+    def test_profiles_carry_the_16gb_keys_and_telemetry_off(self):
+        for name, subagents in (("corporate", "8"), ("permissive", "12")):
+            d = self.profile(name)
+            self.assertEqual(d["crossSessionInbound"], "hold", name)
+            self.assertEqual(d["env"]["CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"], subagents, name)
+            # DO_NOT_TRACK stays out of the Claude Code env: it also turns off feature-flag fetching; setup passes it to the tools it runs
+            self.assertNotIn("DO_NOT_TRACK", d["env"], name)
+            for k, v in {"HF_HUB_DISABLE_TELEMETRY": "1", "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+                         "NPM_CONFIG_UPDATE_NOTIFIER": "false"}.items():
+                self.assertEqual(d["env"].get(k), v, f"{name}: {k}")
+
+
 class Wiring(unittest.TestCase):
     def hook_files(self):
         return sorted(REPO.glob("plugins/*/hooks/hooks.json"))
@@ -275,6 +619,22 @@ class Wiring(unittest.TestCase):
         for ev, s in (("Stop", "cred_check.py"), ("PreCompact", "precompact.py"), ("ConfigChange", "config_change_log.py"),
                       ("InstructionsLoaded", "instructions_loaded.py"), ("SessionStart", "session_start.py")):
             self.assertIn(s, scripts(ev), ev)
+
+    def test_database_tools_and_the_failure_hook_are_wired(self):
+        h = json.loads((PLUGIN / "hooks" / "hooks.json").read_text())["hooks"]
+        def scripts(event, tool):
+            return {Path(x["args"][-1]).name for g in h.get(event, []) if re.fullmatch(g.get("matcher", ".*"), tool)
+                    for x in g["hooks"]}
+        for tool in ("mcp__postgres-db__execute_sql", "mcp__PoStGrEs__q", "mcp__MySQL__run", "mcp__acme_DataBase__x",
+                     "mcp__mssql__query", "mcp__SQLite__q", "mcp__plugin_x_pg_Sql__exec"):
+            self.assertEqual(scripts("PreToolUse", tool), {"pretooluse.py"}, tool)
+        for tool in ("mcp__github__create_issue", "mcp__context7__query-docs"):
+            self.assertEqual(scripts("PreToolUse", tool), set(), tool)
+        self.assertIn("mcp__.*([Pp][Oo][Ss][Tt][Gg][Rr][Ee][Ss]|[Ss][Qq][Ll]|[Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee]).*",
+                      (PLUGIN / "hooks" / "hooks.json").read_text())
+        for tool in ("Bash", "mcp__x__y"):
+            self.assertEqual(scripts("PostToolUseFailure", tool), {"bug_hint.py"}, tool)
+        self.assertNotIn("bug_hint.py", scripts("PostToolUse", "Bash"))
 
     def test_marketplace_lists_every_plugin(self):
         mk = json.loads((REPO / ".claude-plugin" / "marketplace.json").read_text())

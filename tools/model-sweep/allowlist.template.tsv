@@ -1,0 +1,3 @@
+repo	path_glob	line_regex	reason
+# One row per accepted hit, tab-separated. repo and path_glob are globs (* crosses folders); line_regex is searched in the hit line.
+# Example (delete): example-app	docs/history/*	^History:	dated record of the old id, kept on purpose

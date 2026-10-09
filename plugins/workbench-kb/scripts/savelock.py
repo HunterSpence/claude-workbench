@@ -13,6 +13,7 @@ append_line() single O_APPEND write syscall — concurrent appends interleave by
              whole lines, never mid-line, without needing a lock.
 """
 import contextlib
+import hashlib
 import os
 import time
 from pathlib import Path
@@ -29,9 +30,13 @@ class LockBusy(RuntimeError):
 
 
 def lock_for(path):
-    """Sibling lockfile for a data file. Kept out of the data file's own byte range."""
-    path = Path(path)
-    return path.with_name(path.name + ".lock")
+    """Lockfile for a data file: <workbench home>/state/locks/<sha1 of the resolved path>[:16].lock. It never sits next to the
+    data, so no lock file is written into a synced KB folder. The workbench home follows kb_audit.workbench_home()
+    (CLAUDE_CONFIG_DIR, else ~/.claude, then /workbench); kb_audit imports this module, so the two lines are repeated here."""
+    home = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "workbench"
+    locks = home / "state" / "locks"
+    locks.mkdir(parents=True, exist_ok=True)
+    return locks / (hashlib.sha1(str(Path(path).resolve()).encode("utf-8")).hexdigest()[:16] + ".lock")
 
 
 @contextlib.contextmanager

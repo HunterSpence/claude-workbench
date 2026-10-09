@@ -1,0 +1,39 @@
+"""Structure tests for __NAME__. Run from the repository root: python -m unittest discover -s plugins/__NAME__/tests -v"""
+import json
+import re
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def frontmatter(text):
+    m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
+    return dict(re.findall(r"^([A-Za-z0-9_-]+):\s*(.*)$", m.group(1), re.M)) if m else None
+
+
+class PluginTest(unittest.TestCase):
+    def test_manifest(self):
+        m = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        self.assertEqual(m["name"], "__NAME__")
+        self.assertRegex(m["name"], r"^[a-z0-9]+(-[a-z0-9]+)*$")
+        self.assertTrue(m.get("description"))
+
+    def test_skills_have_valid_frontmatter(self):
+        skills = sorted((ROOT / "skills").glob("*/SKILL.md"))
+        self.assertTrue(skills, "a plugin needs at least one skill")
+        for s in skills:
+            fm = frontmatter(s.read_text(encoding="utf-8").replace("\r\n", "\n"))
+            self.assertIsNotNone(fm, s)
+            self.assertEqual(fm["name"], s.parent.name)
+            self.assertTrue(fm["description"].strip("\"' "), s)
+            self.assertLessEqual(len(fm["description"]), 1024)
+            self.assertNotRegex(fm["description"], r"[<>]")
+
+    def test_no_bin_folder_and_a_readme_with_a_surface_table(self):
+        self.assertFalse((ROOT / "bin").exists(), "bin/ makes claude.ai refuse the plugin; use scripts/")
+        self.assertIn("Surface", (ROOT / "README.md").read_text(encoding="utf-8"))
+
+
+if __name__ == "__main__":
+    unittest.main()

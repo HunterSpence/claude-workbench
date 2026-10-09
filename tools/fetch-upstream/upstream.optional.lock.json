@@ -1,6 +1,78 @@
 {
- "_readme": "NOT RECOMMENDED ON A MANAGED LAPTOP. Same format as upstream.lock.json; fetch only with --optional (or --lock upstream.optional.lock.json for this set alone) after reading THIRD-PARTY.md. gstack skills carry a usage-logging preamble and their full setup installs bun; impeccable downloads an engine binary at runtime; web-design-guidelines fetches live instructions from its repository's main branch and ships no LICENSE file.",
+ "_readme": "NOT RECOMMENDED ON A MANAGED LAPTOP. Same format as upstream.lock.json; fetch only with --optional (or --lock upstream.optional.lock.json for this set alone) after reading THIRD-PARTY.md. gstack skills carry a usage-logging preamble and their full setup installs bun; impeccable downloads an engine binary at runtime. The pinned playwright-cli skill is also listed here as the fallback for a machine where npm is blocked; it has neither risk.",
  "sources": [
+  {
+   "id": "playwright-cli",
+   "license": "Apache-2.0",
+   "kind": "npm",
+   "upstream": "@playwright/cli (npm; source microsoft/playwright-cli)",
+   "ref": "0.1.22",
+   "commit": null,
+   "base": "https://cdn.jsdelivr.net/npm/@playwright/cli@0.1.22/",
+   "note": "Skill for the playwright-cli browser tool: the fallback for a machine where npm is blocked. Install the CLI itself separately at the same version: npm install -g @playwright/cli@0.1.22",
+   "files": [
+    [
+     "skills/playwright-cli/SKILL.md",
+     "playwright-cli/SKILL.md",
+     "9bba755285a4c9ad72a4a41b9c7baef6fb516d329c0b44ed0573715f4479b906"
+    ],
+    [
+     "LICENSE",
+     "playwright-cli/LICENSE",
+     "9a7110fc2d2f964038e5dc49128f908f29f47a574c961cba16085914e879cbda"
+    ],
+    [
+     "skills/playwright-cli/references/element-attributes.md",
+     "playwright-cli/references/element-attributes.md",
+     "bf19aa4671e0a50a0fefa9c790f39124e803060eefe395042b723c29fcb7faa2"
+    ],
+    [
+     "skills/playwright-cli/references/playwright-tests.md",
+     "playwright-cli/references/playwright-tests.md",
+     "c5b0719fef2cfdff50bd744051b2f9afc119775db4b48e9b2882c1cf3886797c"
+    ],
+    [
+     "skills/playwright-cli/references/pr-attachments.md",
+     "playwright-cli/references/pr-attachments.md",
+     "24b118e74598be72e73e24fe223d295b9099c85b1860a7c8f6e5690c9038fa2a"
+    ],
+    [
+     "skills/playwright-cli/references/request-mocking.md",
+     "playwright-cli/references/request-mocking.md",
+     "54e801c9663fc2b6d68ceb058cb1c360724c2499f42acc7852a68e83e5b5f37c"
+    ],
+    [
+     "skills/playwright-cli/references/running-code.md",
+     "playwright-cli/references/running-code.md",
+     "3029569ed6ddaeffc0b87badde967efdc2973b1677f078830098146eb3b78ebe"
+    ],
+    [
+     "skills/playwright-cli/references/session-management.md",
+     "playwright-cli/references/session-management.md",
+     "a4f16271f95d3eec7bc56e659d8adbb8f6ad7d603a6fa15efdcdd071a50c6ce3"
+    ],
+    [
+     "skills/playwright-cli/references/storage-state.md",
+     "playwright-cli/references/storage-state.md",
+     "9ac47f9ae4a1aedcd2077f8ac9ab1ba6bee1962cb83ff51adcd36fb6d83b5ec6"
+    ],
+    [
+     "skills/playwright-cli/references/test-generation.md",
+     "playwright-cli/references/test-generation.md",
+     "27ecb11ef647999bd7486695bb1aacc3682097e6bb5742804cb6c8769c2b5364"
+    ],
+    [
+     "skills/playwright-cli/references/tracing.md",
+     "playwright-cli/references/tracing.md",
+     "ef73e71bee792e341df9cd4f60529c929ade48b538ac76e033f4f20843e8dbda"
+    ],
+    [
+     "skills/playwright-cli/references/video-recording.md",
+     "playwright-cli/references/video-recording.md",
+     "1c800b897824cb54394c34265d8ebffdbb530adfc8d612c5d798b667a1799f48"
+    ]
+   ]
+  },
   {
    "id": "impeccable",
    "license": "Apache-2.0",
@@ -387,23 +459,6 @@
      "NOTICE.md",
      "gstack/NOTICE.md",
      "879fc62ddab70035c6f697e1bc8afaaf0a380e8b3e4ffe256ca403c28d909f7c"
-    ]
-   ]
-  },
-  {
-   "id": "web-design-guidelines",
-   "license": "MIT (stated in the repository README; no LICENSE file)",
-   "kind": "github",
-   "upstream": "vercel-labs/agent-skills",
-   "ref": "main @ 2026-08-28",
-   "commit": "063bee94c3f4df8453406c830b0a7df0f2860278",
-   "base": "https://raw.githubusercontent.com/vercel-labs/agent-skills/063bee94c3f4df8453406c830b0a7df0f2860278/",
-   "note": "UI review against the Web Interface Guidelines. When run, the skill fetches the current guidelines from GitHub (a network read).",
-   "files": [
-    [
-     "skills/web-design-guidelines/SKILL.md",
-     "web-design-guidelines/SKILL.md",
-     "f4647ca866a3accf763777f83e7682954f0187cd6bea7eea0399796652414e8f"
     ]
    ]
   }

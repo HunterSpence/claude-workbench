@@ -1,6 +1,8 @@
 import io, json, os, sys, tempfile, unittest
 from contextlib import redirect_stdout
 
+REQUIRE = os.environ.get("WB_REQUIRE_ALL") == "1"   # house convention: nothing below skips; a missing file fails
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import mcp_healer as mh
@@ -108,6 +110,73 @@ class HealerTest(unittest.TestCase):
         self.assertEqual(rows["missing"]["status"], "DOWN")
         self.assertEqual(rc, 1)
 
+
+    def golden_with(self, **servers):
+        dump({"servers": servers}, self.golden)
+        dump({"mcpServers": {}}, self.cfg)
+
+    def test_headers_helper_and_oauth_pass_through(self):
+        os.environ["HEALER_TEST_ID"] = "client-1"
+        try:
+            self.golden_with(remote={"action": "ensure", "type": "http", "url": "https://mcp.example.com/mcp",
+                                     "headersHelper": "tool-that-prints-headers example.com",
+                                     "oauth": {"clientId": "${HEALER_TEST_ID}", "callbackPort": 8085}, "alwaysLoad": False})
+            rc, out = self.apply()
+        finally:
+            del os.environ["HEALER_TEST_ID"]
+        self.assertEqual(rc, 0, out)
+        got = json.loads(read(self.cfg))["mcpServers"]["remote"]
+        self.assertEqual(got["headersHelper"], "tool-that-prints-headers example.com")
+        self.assertEqual(got["oauth"], {"clientId": "${HEALER_TEST_ID}", "callbackPort": 8085})
+
+    def test_placeholder_in_url_or_helper_is_refused(self):
+        self.golden_with(a={"action": "ensure", "type": "http", "url": "https://copilot-api.{{SUBDOMAIN}}.example.com/mcp"},
+                         b={"action": "ensure", "type": "http", "url": "https://mcp.example.com/mcp",
+                            "headersHelper": "{{PYTHON}} helper.py example.com"})
+        rc, out = self.apply("--dry-run")
+        self.assertIn("SKIPPED a", out)
+        self.assertIn("SKIPPED b", out)
+        self.assertEqual(json.loads(read(self.cfg))["mcpServers"], {})
+
+    def test_unset_environment_reference_is_refused_but_a_default_is_fine(self):
+        self.golden_with(needs={"action": "ensure", "command": "tool", "env": {"A": "${HEALER_UNSET_X}", "B": "${HEALER_UNSET_Y}"}},
+                         dflt={"action": "ensure", "command": "tool", "env": {"C": "${HEALER_UNSET_Z:-}"}})
+        rc, out = self.apply()
+        self.assertIn("SKIPPED needs", out)
+        self.assertIn("HEALER_UNSET_X, HEALER_UNSET_Y", out)
+        self.assertEqual(sorted(json.loads(read(self.cfg))["mcpServers"]), ["dflt"])
+        os.environ["HEALER_UNSET_X"] = os.environ["HEALER_UNSET_Y"] = "set"
+        try:
+            rc, out = self.apply()
+        finally:
+            del os.environ["HEALER_UNSET_X"], os.environ["HEALER_UNSET_Y"]
+        self.assertEqual(sorted(json.loads(read(self.cfg))["mcpServers"]), ["dflt", "needs"])
+
+    def test_check_never_runs_a_headers_helper(self):
+        marker = os.path.join(self.d, "HELPER-RAN")
+        helper = os.path.join(self.d, "helper.py")
+        with open(helper, "w") as f:
+            f.write(f"open({marker!r}, 'w').write('x')\nprint('{{}}')\n")
+        dump({"mcpServers": {"remote": {"type": "http", "url": "https://mcp.example.invalid/mcp",
+                                          "headersHelper": f'"{sys.executable}" "{helper}"'}}}, self.cfg)
+        rc, out = run(["--config", self.cfg, "check", "--json", "--managed-dir", self.empty_managed])
+        self.assertFalse(os.path.exists(marker), "check ran a headersHelper")
+        row = json.loads(out)[0]
+        self.assertEqual((row["server"], row["status"]), ("remote", "SKIP"))
+        self.assertIn("headersHelper", row["detail"])
+        self.assertEqual(rc, 0)
+
+    def test_missing_config_is_reported_not_raised(self):
+        gone = os.path.join(self.d, "never-written.json")
+        for argv in (["check"], ["check", "--json"], ["apply", "--golden", self.golden], ["unpark", "x"]):
+            rc, out = run(["--config", gone, *argv])
+            self.assertIn(rc, (0, 1), argv)
+            self.assertEqual(rc, 0 if argv[0] == "check" else 1, argv)
+            if "--json" in argv:
+                self.assertEqual(json.loads(out), [])
+            else:
+                self.assertIn("no config yet", out)
+        self.assertFalse(os.path.exists(gone))
 
     def test_planted_project_mcp_json_is_never_executed(self):
         proj = os.path.join(self.d, "repo")

@@ -1,0 +1,23 @@
+# Living next to a governance layer
+
+Some organisations already deliver their own hooks or MCP servers, through a plugin or through managed settings.
+Before you roll out __NAME__, find out which of these keys are set, because each one removes part of a plugin.
+
+| Managed setting | What it does to a plugin like __NAME__ |
+|---|---|
+| `allowManagedHooksOnly` | plugin hooks run only if the plugin is force-enabled in the managed `enabledPlugins` |
+| a managed MCP file (`managed-mcp.json`) | plugin-provided MCP servers are refused; the plugin can ship skills, agents and hooks but must route through the managed servers |
+| `allowedMcpServers` / `deniedMcpServers` | checked against every plugin server too |
+| `strictKnownMarketplaces` | must list this marketplace's source, or the plugin never loads |
+| `strictPluginOnlyCustomization` | user-level skills, agents, hooks and servers are blocked; only plugins and managed sources load |
+| `disableSideloadFlags` | `--plugin-dir` is rejected, so local development needs a different machine |
+
+How to find out: run `/status` in Claude Code and read the managed settings the session reports, or ask the
+administrator for the policy keys in force. Record the answer next to the rollout plan.
+
+What to do about it:
+
+- If hooks are locked to managed sources, ask for `__NAME__` to be added to the managed `enabledPlugins`.
+- If MCP is locked to managed servers, drop `.mcp.json` from the plugin and call the managed server instead, or ask
+  for the server to be added to the allow list.
+- Never work around a lock with a script that edits settings files: the lock is the organisation's decision.

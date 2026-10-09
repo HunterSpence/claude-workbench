@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""__NAME__ MCP server: newline-delimited JSON-RPC over stdio, stdlib only.
+
+Three example tools: ping (read-only), list_items (read-only) and add_item (writes to memory, not destructive).
+Replace them with your own and keep the habits: a title and one safety hint on every tool, specific error text, no
+output on stdout except protocol messages (logs go to stderr), and no tool that takes a free-form method or URL.
+Add the official SDK when you need more than this; it speaks both protocol eras and handles auth for remote servers.
+"""
+import json
+import sys
+
+PROTOCOL = "2025-06-18"
+ITEMS = []
+TOOLS = [
+    {"name": "ping", "title": "Ping", "description": "Check that the server answers.",
+     "inputSchema": {"type": "object", "properties": {}},
+     "annotations": {"title": "Ping", "readOnlyHint": True}},
+    {"name": "list_items", "title": "List items", "description": "Return the items added so far, oldest first.",
+     "inputSchema": {"type": "object", "properties": {}},
+     "annotations": {"title": "List items", "readOnlyHint": True}},
+    {"name": "add_item", "title": "Add item", "description": "Add one short text item to the in-memory list.",
+     "inputSchema": {"type": "object", "properties": {"text": {"type": "string", "maxLength": 200}}, "required": ["text"]},
+     "annotations": {"title": "Add item", "readOnlyHint": False, "destructiveHint": False}},
+]
+
+
+def call(name, args):
+    if name == "ping":
+        return "pong"
+    if name == "list_items":
+        return "\n".join(ITEMS) or "(no items yet)"
+    if name == "add_item":
+        text = args.get("text")
+        if not isinstance(text, str) or not text.strip() or len(text) > 200:
+            raise ValueError("text must be a non-empty string of at most 200 characters")
+        ITEMS.append(text.strip())
+        return f"added item {len(ITEMS)}"
+    raise KeyError(name)
+
+
+def handle(msg):
+    method, mid, params = msg.get("method"), msg.get("id"), msg.get("params") or {}
+    if mid is None:                      # a notification: no reply
+        return None
+    if method == "initialize":
+        result = {"protocolVersion": params.get("protocolVersion") or PROTOCOL, "capabilities": {"tools": {}},
+                  "serverInfo": {"name": "__NAME__", "version": "0.1.0"}}
+    elif method == "ping":
+        result = {}
+    elif method == "tools/list":
+        result = {"tools": TOOLS}
+    elif method == "tools/call":
+        try:
+            result = {"content": [{"type": "text", "text": call(params.get("name"), params.get("arguments") or {})}]}
+        except KeyError:
+            return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32602, "message": f"unknown tool: {params.get('name')}"}}
+        except ValueError as e:
+            result = {"content": [{"type": "text", "text": str(e)}], "isError": True}
+    else:
+        return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": f"method not found: {method}"}}
+    return {"jsonrpc": "2.0", "id": mid, "result": result}
+
+
+def main():
+    for line in sys.stdin:
+        if not line.strip():
+            continue
+        try:
+            reply = handle(json.loads(line))
+        except ValueError:
+            reply = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}}
+        if reply is not None:
+            sys.stdout.write(json.dumps(reply) + "\n")
+            sys.stdout.flush()
+
+
+if __name__ == "__main__":
+    main()

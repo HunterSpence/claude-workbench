@@ -1,2 +1,3 @@
+# State now lives outside the KB (see README); this line only covers a KB left over from an earlier kit.
 .state/
 *.tmp

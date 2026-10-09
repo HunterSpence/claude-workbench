@@ -1,0 +1,85 @@
+{
+  "sheets": [
+    {
+      "name": "RAID",
+      "columns": [
+        "ID",
+        "Type",
+        "Description",
+        "Owner",
+        "Raised",
+        "Impact",
+        "Likelihood",
+        "Status",
+        "Next review"
+      ],
+      "rows": [
+        [
+          "R-01",
+          "Risk",
+          "<what could go wrong>",
+          "<name>",
+          "<date>",
+          "High",
+          "Medium",
+          "Open",
+          "<date>"
+        ],
+        [
+          "A-01",
+          "Assumption",
+          "<what we assume and who confirms it>",
+          "<name>",
+          "<date>",
+          "",
+          "",
+          "Open",
+          "<date>"
+        ]
+      ],
+      "validation": {
+        "B2:B300": [
+          "Risk",
+          "Assumption",
+          "Issue",
+          "Dependency"
+        ],
+        "F2:G300": [
+          "High",
+          "Medium",
+          "Low"
+        ],
+        "H2:H300": [
+          "Open",
+          "Mitigating",
+          "Closed"
+        ]
+      }
+    },
+    {
+      "name": "Summary",
+      "columns": [
+        "Type",
+        "Open items"
+      ],
+      "rows": [
+        [
+          "Risk",
+          "=COUNTIFS(RAID!B:B,\"Risk\",RAID!H:H,\"<>Closed\")"
+        ],
+        [
+          "Assumption",
+          "=COUNTIFS(RAID!B:B,\"Assumption\",RAID!H:H,\"<>Closed\")"
+        ],
+        [
+          "Issue",
+          "=COUNTIFS(RAID!B:B,\"Issue\",RAID!H:H,\"<>Closed\")"
+        ],
+        [
+          "Dependency",
+          "=COUNTIFS(RAID!B:B,\"Dependency\",RAID!H:H,\"<>Closed\")"
+        ]
+      ]
+    }
+  ]
+}

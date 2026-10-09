@@ -1,0 +1,97 @@
+{
+ "_readme": "Pinned product-management skills from the Apache-2.0 knowledge-work plugins, installed by `fetch_upstream.py --pm`. Each skill folder gets its SKILL.md and the upstream LICENSE only: no .mcp.json, no commands, no connector files. Re-pin deliberately; never point a ref at a moving branch.",
+ "sources": [
+  {
+   "id": "pm-pack",
+   "license": "Apache-2.0",
+   "kind": "github",
+   "upstream": "anthropics/knowledge-work-plugins (product-management plugin)",
+   "ref": "commit ae1513ea94dc",
+   "commit": "ae1513ea94dcb74a7f1505ddcf3b0ec3fab327f1",
+   "base": "https://raw.githubusercontent.com/anthropics/knowledge-work-plugins/ae1513ea94dcb74a7f1505ddcf3b0ec3fab327f1/",
+   "note": "Eight product-management skills. They use argument-hint in their frontmatter, so they load in Claude Code but are not portable to a claude.ai skill upload as they stand. They refer to connector placeholders; nothing is connected for you.",
+   "files": [
+    [
+     "product-management/skills/competitive-brief/SKILL.md",
+     "competitive-brief/SKILL.md",
+     "720916695f99a70e723be02d0123908c9c968ce56e1ffdeeb423014587017cd2"
+    ],
+    [
+     "product-management/LICENSE",
+     "competitive-brief/LICENSE",
+     "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    ],
+    [
+     "product-management/skills/metrics-review/SKILL.md",
+     "metrics-review/SKILL.md",
+     "e92f364b668074c72b36fd0f69a6adef2ead66640b2c17dc824c043fb613d278"
+    ],
+    [
+     "product-management/LICENSE",
+     "metrics-review/LICENSE",
+     "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    ],
+    [
+     "product-management/skills/product-brainstorming/SKILL.md",
+     "product-brainstorming/SKILL.md",
+     "53ee71b6863b277aba87002d8a5bb58bd2a4172d7cfeb2e282a0161958edc8e7"
+    ],
+    [
+     "product-management/LICENSE",
+     "product-brainstorming/LICENSE",
+     "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    ],
+    [
+     "product-management/skills/roadmap-update/SKILL.md",
+     "roadmap-update/SKILL.md",
+     "bdb121e290b590d60b94bca84d1700a8803c78db9f68f2a28fd04ccfe8aceb9e"
+    ],
+    [
+     "product-management/LICENSE",
+     "roadmap-update/LICENSE",
+     "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    ],
+    [
+     "product-management/skills/sprint-planning/SKILL.md",
+     "sprint-planning/SKILL.md",
+     "c078d3f838c783e9ab53ca1a4b4c04dcd7930a55a995731b8c020cd656cb1edd"
+    ],
+    [
+     "product-management/LICENSE",
+     "sprint-planning/LICENSE",
+     "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    ],
+    [
+     "product-management/skills/stakeholder-update/SKILL.md",
+     "stakeholder-update/SKILL.md",
+     "bcdb8ee95dc34d025dcc3d98e7435c4dca45930581b3b7a8707f8770dd364e79"
+    ],
+    [
+     "product-management/LICENSE",
+     "stakeholder-update/LICENSE",
+     "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    ],
+    [
+     "product-management/skills/synthesize-research/SKILL.md",
+     "synthesize-research/SKILL.md",
+     "ae98c11102545c911a1ea5d8527be0e08a3db8e53327f2865f0db19bbb2d7e9c"
+    ],
+    [
+     "product-management/LICENSE",
+     "synthesize-research/LICENSE",
+     "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    ],
+    [
+     "product-management/skills/write-spec/SKILL.md",
+     "write-spec/SKILL.md",
+     "ca6670913878b4ac4582727562bfced5271492a5a800d934f68c9e7bc1cd4dcc"
+    ],
+    [
+     "product-management/LICENSE",
+     "write-spec/LICENSE",
+     "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    ]
+   ]
+  }
+ ]
+}

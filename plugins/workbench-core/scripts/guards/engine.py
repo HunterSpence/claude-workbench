@@ -4,8 +4,8 @@
 Contract (pretooluse.py is the hook entry point):
   - stdin: the PreToolUse JSON. stdout: nothing (no opinion: the normal permission flow decides), or ONE
     hookSpecificOutput object whose permissionDecision is "deny" or "ask". This engine never answers "allow" and
-    never rewrites a tool's input: an allow would let a call skip the permission rules, and a rewritten input would
-    be judged by those rules in its new form. A fixable call is denied with the exact command to re-run.
+    never rewrites a tool's input: an allow skips the prompt for a call no rule covers (deny and ask rules still
+    apply), which a guard must never grant, and a rewritten input would be judged by those rules in its new form. A fixable call is denied with the exact command to re-run.
   - Exit code is always 0. Fail open: a crash anywhere says nothing and logs an ERROR line. One exception: past
     the nesting / size caps a command cannot be judged in bounded time, so it is denied (guard id nest-cap).
   - Every shell rule judges ONE parse of the command (lex()): heredocs and what runs them, statements, runner
@@ -893,6 +893,9 @@ READ_TOOLS = ("Read", "Grep", "Glob")
 OTHER_TOOLS = ("WebFetch", "Agent")
 # Browser MCP servers (playwright, chrome-devtools, puppeteer, plugin-namespaced ones): their URL inputs go to TOOL rules.
 BROWSER_MCP = re.compile(r"mcp__.*([Pp]laywright|[Cc]hrome|[Pp]uppeteer|[Bb]rowser).*")
+# Database MCP servers (postgres, mysql, sqlite, mssql ...): their inputs go to TOOL rules. The classes are spelled out
+# letter by letter, exactly as in the hooks.json matcher, so a server name in any letter case is seen.
+DB_MCP = re.compile(r"mcp__.*([Pp][Oo][Ss][Tt][Gg][Rr][Ee][Ss]|[Ss][Qq][Ll]|[Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee]).*")
 _RM_HEADS = {"rm", "rmdir", "remove-item", "ri", "rd", "del", "erase", "unlink", "mv", "move-item", "rename-item"}
 _KIT_RAW = re.compile(r"(?i)(?:^|[/\\])\.claude[/\\]+(?:settings(?:\.local)?\.json$|workbench(?:[/\\]|$)|"
                       r"plugins[/\\].*workbench)")
@@ -1114,7 +1117,7 @@ def _evaluate(data):
         shell_checks(cmd, data, packs)
         if tool == "Bash":
             _bash_mechanics(cmd)
-    elif tool in WRITE_TOOLS + READ_TOOLS + OTHER_TOOLS or BROWSER_MCP.fullmatch(tool):
+    elif tool in WRITE_TOOLS + READ_TOOLS + OTHER_TOOLS or BROWSER_MCP.fullmatch(tool) or DB_MCP.fullmatch(tool):
         path = _tool_path(ti, cwd) if tool not in OTHER_TOOLS else ""
         c = SimpleNamespace(tool=tool, ti=ti, data=data, cwd=cwd, path=path, packs=packs)
         if tool in WRITE_TOOLS:

@@ -2,9 +2,11 @@
 of this session tells Claude to run the save skill (compaction drops what the session knew). Prints nothing:
 PreCompact stdout would become instructions for the compaction summary. Always exits 0.
 
-Contract shared with workbench-kb's save_driver.py (it reads and clears the flag):
-  <kb>/.state/precompact-<session id>.flag     the flag
-  <kb>/.state/snapshots/active-context-<YYYYmmdd-HHMMSS>-<pid>.md   the snapshot (pruned after 14 days)
+Contract shared with workbench-kb's save_driver.py (it reads and clears the flag). Both live in the local state folder
+_wb.kb_state_dir(kb) = <workbench home>/kb-state/<key>/, never inside the KB (an earlier kit wrote <kb>/.state/):
+  precompact-<session id>.flag                                    the flag
+  snapshots/active-context-<YYYYmmdd-HHMMSS>-<pid>.md             the snapshot (pruned after 14 days)
+The hook also stamps last_precompact in the guard heartbeat, which is how setup proves the hook fires.
 """
 import os
 import re
@@ -19,17 +21,18 @@ KEEP_DAYS = 14
 
 
 def flag_path(kb, sid):
-    return kb / ".state" / f"precompact-{sid or 'nosession'}.flag"
+    return _wb.kb_state_dir(kb) / f"precompact-{sid or 'nosession'}.flag"
 
 
 def main():
     d = _wb.read_event()
+    _wb.heartbeat(None, stamp="last_precompact")
     kb = _wb.kb_root()
     if not kb.is_dir():
         return
     sid = re.sub(r"[^A-Za-z0-9-]", "", str(d.get("session_id") or os.environ.get("CLAUDE_CODE_SESSION_ID") or ""))
     now = datetime.now()
-    snaps = kb / ".state" / "snapshots"
+    snaps = _wb.kb_state_dir(kb) / "snapshots"
     ac = kb / "active-context.md"
     try:
         if ac.exists():

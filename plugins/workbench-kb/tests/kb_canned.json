@@ -1,0 +1,32 @@
+{
+  "_about": "Known-answer retrieval set for the knowledge base template. Written from the shipped bug cards, two digests, the HOT files and the index BEFORE the first run; never edit a case to fit a result. Answerable cases name the note that holds the answer (and, where one note holds many answers, a part of the heading of the section); abstain cases use words that appear nowhere in the template and must return nothing. The _floors block (added after the first run) is that run's exact result; kb_eval.py and kb_health.py --eval fail below it. Run: kb_eval.py --set <this file> on a copy of kb-template.",
+  "cases": [
+    {"q": "transcript lines message id usage undercounted",
+     "expect": ["_shared/digests/claude-code-mechanics.md"], "heading": "Reading transcripts"},
+    {"q": "headless tools disabled fake tool-call text",
+     "expect": ["_shared/digests/claude-code-mechanics.md"], "heading": "Headless"},
+    {"q": "idle gap cold cache spend",
+     "expect": ["_shared/digests/claude-code-mechanics.md"], "heading": "Cost"},
+    {"q": "checker bad fixture watch it fail",
+     "expect": ["_shared/digests/testing.md"], "heading": "Evidence"},
+    {"q": "judges models under test calibrate human sample",
+     "expect": ["_shared/digests/testing.md"], "heading": "Benchmarks"},
+    {"q": "mock client transport patching wrapper",
+     "expect": ["_shared/digests/testing.md"], "heading": "Designing fixtures"},
+    {"q": "pipe tail swallows exit code",
+     "expect": ["_shared/bug-cards.md"], "heading": "Exit codes are swallowed"},
+    {"q": "OneDrive virtual environment database lock",
+     "expect": ["_shared/bug-cards.md"], "heading": "OneDrive holds a lock"},
+    {"q": "unpinned npx uvx newest",
+     "expect": ["_shared/bug-cards.md"], "heading": "Unpinned npx"},
+    {"q": "network share working directory refused",
+     "expect": ["_shared/bug-cards.md"], "heading": "network share"},
+    {"q": "servers containers networking DNS certificates monitoring",
+     "expect": ["infra/HOT.md"]},
+    {"q": "start here index of every domain",
+     "expect": ["00-index.md"]},
+    {"q": "zorblax quintessence frobnitz", "abstain": true},
+    {"q": "wibblefrot snarkle plonkity", "abstain": true}
+  ],
+  "_floors": {"cases": 12, "abstain_cases": 2, "hit@1": 1.0, "hit@5": 1.0, "mrr": 1.0, "abstain": 1.0}
+}

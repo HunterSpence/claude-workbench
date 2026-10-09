@@ -12,7 +12,7 @@ reply.json:
   "subject": "...",                           optional; default = "Re: <thread subject>"
   "greeting": "Hi Sam,",
   "answer": ["The answer first, in one or two short paragraphs."],
-  "points": [{"lead": "Scope", "text": "detail with a bold lead-in"}],                    optional
+  "points": [{"lead": "Scope", "text": "the point itself"}],  optional; "lead" optional too
   "asks": [{"owner": "Sam", "ask": "confirm the cut-over window", "due": "Fri 10 Oct"}],  optional
   "closing": "Thanks,", "signature": "<Your name>",
   "quote_name": "...", "quote_date": "..."    only for a pasted .txt thread (no headers to read)
@@ -139,7 +139,7 @@ def compose(reply, thread=None, chat=False):
     """-> (text, html). The answer comes first, then points, then asks with owners and dates."""
     t = thread or {}
     esc = html.escape
-    tx, hx = [], ['<div dir="ltr">']
+    tx, hx = [], ['<div>']
     if reply.get("greeting") and not chat:
         tx.append(reply["greeting"])
         hx.append(f"<p>{esc(reply['greeting'])}</p>")
@@ -147,14 +147,16 @@ def compose(reply, thread=None, chat=False):
         tx.append(para)
         hx.append(f"<p>{esc(para)}</p>")
     if reply.get("points"):
-        tx.append("\n".join(f"- {p['lead']}: {p['text']}" for p in reply["points"]))
-        hx.append("<ul>" + "".join(f"<li><b>{esc(p['lead'])}:</b> {esc(p['text'])}</li>" for p in reply["points"]) + "</ul>")
+        def lead(p):
+            return f"{p['lead']}: " if p.get("lead") else ""
+        tx.append("\n".join(f"- {lead(p)}{p['text']}" for p in reply["points"]))
+        hx.append("<ul>" + "".join(f"<li>{esc(lead(p) + p['text'])}</li>" for p in reply["points"]) + "</ul>")
     if reply.get("asks"):
         def due(a):
             return f" (by {a['due']})" if a.get("due") else ""
         tx.append("Next steps:\n" + "\n".join(f"- {a['owner']}: {a['ask']}{due(a)}" for a in reply["asks"]))
         hx.append("<p>Next steps:</p><ul>" + "".join(
-            f"<li><b>{esc(a['owner'])}:</b> {esc(a['ask'])}{esc(due(a))}</li>" for a in reply["asks"]) + "</ul>")
+            f"<li>{esc(a['owner'])}: {esc(a['ask'])}{esc(due(a))}</li>" for a in reply["asks"]) + "</ul>")
     if not chat:
         sig = reply.get("signature") or "<Your name>"
         closing = reply.get("closing", "Thanks,")
@@ -165,8 +167,8 @@ def compose(reply, thread=None, chat=False):
     if t.get("body") and not chat:
         qh = quote_header(t, reply)
         text += f"\n\n{qh}\n" + "\n".join("> " + ln for ln in t["body"].splitlines())
-        body += (f'\n<div class="quote"><p>{esc(qh)}</p><blockquote style="margin:0 0 0 .8ex;'
-                 f'border-left:1px solid #ccc;padding-left:1ex">{esc(t["body"]).replace(chr(10), "<br>")}</blockquote></div>')
+        body += (f'\n<div class="quote"><p>{esc(qh)}</p><blockquote>'
+                 f'{esc(t["body"]).replace(chr(10), "<br>")}</blockquote></div>')
     return text, body
 
 

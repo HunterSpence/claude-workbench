@@ -1,9 +1,10 @@
 #!/usr/bin/env sh
 # Install claude-workbench (Linux, WSL, macOS, or Git Bash on Windows). DRY RUN by default: prints the plan.
 #   sh bootstrap/install.sh [--apply] [--profile corporate|permissive] [--upstream-plugins]
-#                           [--upstream-plugins-optional] [--kb-root PATH] [--git-hosts h1,h2] [--force] [--no-cli]
+#                           [--upstream-plugins-optional] [--kb-root PATH] [--data-root PATH] [--git-hosts h1,h2]
+#                           [--force] [--no-cli] [--setup auto|plan] [--with LIST] [--no-nightly]
 # Windows (PowerShell or cmd): run  py -3 bootstrap\install.py  instead; nothing here needs an execution-policy change.
-# Needs Python 3.10+ (WORKBENCH_PYTHON picks one). All logic lives in install.py. No root, no network.
+# Needs Python 3.10+ (WORKBENCH_PYTHON picks one). All logic lives in install.py. No root; no network unless --setup.
 set -eu
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$here/_findpython.sh"

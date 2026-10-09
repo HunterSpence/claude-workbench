@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Ingest digest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["synopsis", "decisions", "action_items", "open_questions", "what_this_changes"],
+  "properties": {
+    "synopsis": {"type": "string", "maxLength": 1200},
+    "decisions": {
+      "type": "array", "maxItems": 50,
+      "items": {"type": "object", "additionalProperties": false, "required": ["text", "evidence"],
+                "properties": {"text": {"type": "string", "maxLength": 1000}, "evidence": {"type": "string", "maxLength": 200}}}
+    },
+    "action_items": {
+      "type": "array", "maxItems": 50,
+      "items": {"type": "object", "additionalProperties": false, "required": ["owner", "text", "due", "evidence"],
+                "properties": {"owner": {"type": "string", "maxLength": 200}, "text": {"type": "string", "maxLength": 1000},
+                               "due": {"type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+                               "evidence": {"type": "string", "maxLength": 200}}}
+    },
+    "open_questions": {"type": "array", "maxItems": 50, "items": {"type": "string", "maxLength": 1000}},
+    "what_this_changes": {"type": "array", "maxItems": 50, "items": {"type": "string", "maxLength": 1000}}
+  }
+}

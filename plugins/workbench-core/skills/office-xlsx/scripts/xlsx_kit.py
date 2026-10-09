@@ -8,6 +8,9 @@
       optional recalculation, then: formula errors (#DIV/0!, #REF!, ...), formulas with no
       calculated value, numbers typed into a column of formulas, and newer functions missing their
       _xlfn. prefix. Exit 1 if anything is wrong.
+  python xlsx_kit.py from-spec <spec.json> <new.xlsx>
+      a workbook from a JSON spec (the starter templates in ../templates are specs): sheets with columns,
+      rows (a string starting with = is a formula) and dropdown validation, then `style`.
   python xlsx_kit.py risk <book.xlsx>
       what an openpyxl load-and-save would drop (shapes, threaded comments, pivots, slicers, ...).
       Exit 3 if anything would be lost. `style` runs this first and refuses unless --accept-loss.
@@ -17,7 +20,7 @@ roundtrip_loss, check
 """
 import argparse, json, os, pathlib, re, shutil, subprocess, sys, tempfile, zipfile
 
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Border, Font, NamedStyle, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
@@ -293,6 +296,22 @@ def check(path):
     return out
 
 
+def build_from_spec(spec):
+    """{"sheets": [{"name", "columns", "rows", "validation": {"F2:F200": ["Open", "Closed"]}}]} -> a styled Workbook."""
+    wb = Workbook()
+    wb.remove(wb.active)
+    for s in spec["sheets"]:
+        ws = wb.create_sheet(s["name"])
+        ws.append(s["columns"])
+        for row in s.get("rows", []):
+            ws.append(row)
+        for cells, options in s.get("validation", {}).items():
+            add_list_validation(ws, cells, options)
+    style_workbook(wb)
+    prefix_new_functions(wb)
+    return wb
+
+
 def main(argv=None):
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -305,6 +324,9 @@ def main(argv=None):
     p.add_argument("--out")
     p.add_argument("--header-row", type=int, default=1)
     p.add_argument("--accept-loss", action="store_true", help="save even if openpyxl would drop parts (needs --out)")
+    p = sub.add_parser("from-spec")
+    p.add_argument("spec")
+    p.add_argument("out")
     p = sub.add_parser("risk")
     p.add_argument("book")
     p = sub.add_parser("check")
@@ -312,6 +334,14 @@ def main(argv=None):
     p.add_argument("--recalc", choices=("auto", "excel", "libreoffice", "none"), default="none")
     p.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
+    if a.cmd == "from-spec":
+        if not a.out.lower().endswith(".xlsx"):
+            print("the output must be a .xlsx file", file=sys.stderr)
+            return 2
+        with open(a.spec, encoding="utf-8") as f:
+            build_from_spec(json.load(f)).save(a.out)
+        print(f"wrote {a.out}")
+        return 0
     try:
         refuse_risky(a.book)
     except ValueError as e:

@@ -7,10 +7,11 @@ archives left inside discovery paths, backup files next to live ones, dead @impo
 rule files, path-scoped rules, managed settings in force, and the always-loaded instruction size.
 
     python audit.py [--project DIR] [--max-kb 40] [--json]
+    python audit.py --surface [--json] [--max-lines 200]     only the instruction surface (see surface())
 
 Never prints a credential value: only file paths and key names. Never writes anything.
 """
-import argparse, glob, json, os, re, sys
+import argparse, glob, hashlib, json, os, re, sys
 
 SEV = ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
 ARCHIVE_RX = re.compile(r"(archive|_old|deprecated|backup|_orphaned)", re.I)
@@ -24,6 +25,11 @@ BUILTIN = {"compact", "clear", "help", "config", "effort", "memory", "context", 
            "artifacts", "tasks", "fast", "export", "add-dir", "terminal-setup", "ide", "vim"}
 PATHSEG = {"opt", "root", "tmp", "dev", "etc", "var", "usr", "home", "bin", "srv", "mnt", "proc",
            "sys", "lib", "c", "d", "mnt", "users", "library", "applications", "system"}
+LINE_CAP = 200          # the documented target: "under 200 lines per CLAUDE.md file" (longer files reduce adherence)
+HIDDEN_STATES = ("user-invocable-only", "off")   # skillOverrides values that hide a skill from the model
+DUP_MIN = 40            # a line shorter than this (after trimming) is never counted as a duplicate
+FENCE_RX = re.compile(r"```.*?```", re.S)
+GENERATED_RX = re.compile(r"\bgenerated\b[^\n]{0,200}?\bfrom\b([^\n]*)", re.I)
 MANAGED_DIRS = {"nt": [r"C:\Program Files\ClaudeCode"], "darwin": ["/Library/Application Support/ClaudeCode"]}
 
 
@@ -108,9 +114,18 @@ def loaded_set(home, project):
     return seen, dead, rules
 
 
-def known_names(home):
-    names = {os.path.basename(os.path.dirname(p)) for p in glob.glob(os.path.join(home, "skills", "*", "SKILL.md"))}
-    names |= {os.path.splitext(os.path.basename(p))[0] for p in glob.glob(os.path.join(home, "commands", "**", "*.md"), recursive=True)}
+def personal_names(home, project=None):
+    """Skills and commands that skillOverrides can change: the user's and the project's own."""
+    roots = [home] + ([os.path.join(project, ".claude")] if project else [])
+    names = set()
+    for r in roots:
+        names |= {os.path.basename(os.path.dirname(p)) for p in glob.glob(os.path.join(r, "skills", "*", "SKILL.md"))}
+        names |= {os.path.splitext(os.path.basename(p))[0] for p in glob.glob(os.path.join(r, "commands", "**", "*.md"), recursive=True)}
+    return names
+
+
+def plugin_names(home):
+    names = set()
     inst = load_json(os.path.join(home, "plugins", "installed_plugins.json"))
     if isinstance(inst, dict):
         for key, entries in (inst.get("plugins") or {}).items():
@@ -123,6 +138,114 @@ def known_names(home):
                         else os.path.basename(os.path.dirname(sk))
                     names |= {n, f"{pname}:{n}"}
     return names
+
+
+def known_names(home):
+    return personal_names(home) | plugin_names(home)
+
+
+def skill_overrides(home, project=None):
+    """{skill: (state, settings file)} merged user < project < project-local (the later file wins)."""
+    out = {}
+    files = [os.path.join(home, "settings.json"), os.path.join(home, "settings.local.json")]
+    if project:
+        files += [os.path.join(project, ".claude", "settings.json"), os.path.join(project, ".claude", "settings.local.json")]
+    for f in files:
+        s = load_json(f)
+        if isinstance(s, dict) and isinstance(s.get("skillOverrides"), dict):
+            for k, v in s["skillOverrides"].items():
+                if isinstance(v, str):
+                    out[k] = (v, f)
+    return out
+
+
+def core_roots(home, project):
+    roots = [os.path.join(home, "CLAUDE.md")]
+    if project:
+        roots += [os.path.join(project, "CLAUDE.md"), os.path.join(project, ".claude", "CLAUDE.md"),
+                  os.path.join(project, "CLAUDE.local.md")]
+    return [r for r in roots if os.path.exists(r)]
+
+
+def norm_line(ln):
+    ln = re.sub(r"^\s*(?:[-*+]|\d+[.)])\s+", "", ln.strip())
+    return re.sub(r"\s+", " ", re.sub(r"[*_`]", "", ln)).lower()
+
+
+def duplicate_lines(files):
+    """Lines of 40+ characters that occur twice or more across the given files (or twice in one). Fenced code, headings,
+    imports and table rules are skipped. Reports locations and a short digest, never the text: a line may hold a secret."""
+    seen = {}
+    for p in files:
+        t = read(p)
+        if t is None:
+            continue
+        fenced = False
+        for n, raw in enumerate(t.split("\n"), 1):
+            if raw.lstrip().startswith("```"):
+                fenced = not fenced
+                continue
+            ln = norm_line(raw)
+            if fenced or len(ln) < DUP_MIN or ln.startswith(("#", "@", "<!--", "|-", "|:")) or not re.search(r"[a-z]", ln):
+                continue
+            seen.setdefault(ln, []).append(f"{p}:{n}")
+    rows = [{"id": hashlib.sha1(k.encode("utf-8")).hexdigest()[:8], "count": len(v), "at": v[:6]} for k, v in seen.items() if len(v) > 1]
+    return sorted(rows, key=lambda r: (-r["count"], r["id"]))[:50]
+
+
+def generated_drift(files, home, project):
+    """A file whose first lines say it is generated from `some/source.ext` is stale when that source changed more than a
+    day later, and orphaned when the source cannot be found (relative to the file, the project or the config folder)."""
+    out = []
+    for p in files:
+        head = "\n".join((read(p) or "").split("\n")[:15])
+        m = GENERATED_RX.search(head)
+        if not m:
+            continue
+        for tok in re.findall(r"`([^`\s]+)`", m.group(1)):
+            if "." not in tok and "/" not in tok:
+                continue
+            cands = [os.path.join(b, tok) for b in (os.path.dirname(p), project, home) if b]
+            src = next((c for c in cands if os.path.exists(c)), None)
+            if src is None:
+                out.append({"file": p, "source": tok, "kind": "orphan"})
+            elif os.path.getmtime(src) - os.path.getmtime(p) > 86400:
+                out.append({"file": p, "source": tok, "kind": "stale"})
+    return out
+
+
+def surface(home, project=None, max_kb=40, max_lines=LINE_CAP):
+    """The instruction surface: what is loaded at launch, and what is wrong with it. Report-only.
+    {"surface": {"bytes", "core_lines", "rules_over_cap", "paths_rules", "duplicates", "dead_refs", "generated_drift",
+    "hidden_skills"}, "exit": 0|1}. exit is 1 when anything but paths_rules is non-empty, core_lines passes the cap or the
+    loaded bytes pass max_kb (a path-scoped rule is information, not a defect)."""
+    loaded, dead, rules = loaded_set(home, project)
+    texts = {r: read(r) or "" for r in rules}
+    paths_rules = sorted(r for r, t in texts.items() if re.search(r"^paths\s*:", frontmatter(t), re.M))
+    over = [{"file": r, "lines": t.count("\n") + 1, "cap": max_lines} for r, t in sorted(texts.items())
+            if r not in paths_rules and t.count("\n") + 1 > max_lines]
+    core_lines = max([(read(r) or "").count("\n") + 1 for r in core_roots(home, project)] or [0])
+    dead_refs = [{"file": f, "ref": raw, "kind": "import"} for f, raw in dead]
+    names = personal_names(home, project) | plugin_names(home)
+    for p in sorted(loaded):
+        for cmd in sorted(set(ROUTE_RX.findall(strip_code(read(p) or "")))):
+            if cmd not in names and cmd not in BUILTIN and cmd not in PATHSEG:
+                dead_refs.append({"file": p, "ref": f"/{cmd}", "kind": "route"})
+    hidden, personal = [], personal_names(home, project)
+    plugin_only = plugin_names(home) - personal
+    ov = skill_overrides(home, project)
+    for p in sorted(loaded):
+        for cmd in sorted(set(ROUTE_RX.findall(FENCE_RX.sub("", read(p) or "")))):
+            state, where = ov.get(cmd, ("on", None))
+            if state in HIDDEN_STATES and cmd not in plugin_only:     # skillOverrides never applies to a plugin's skills
+                hidden.append({"skill": cmd, "state": state, "routed_in": p, "set_in": where})
+    total = sum(loaded.values())
+    sf = {"bytes": total, "core_lines": core_lines, "rules_over_cap": over, "paths_rules": paths_rules,
+          "duplicates": duplicate_lines(sorted(loaded) + paths_rules), "dead_refs": dead_refs,
+          "generated_drift": generated_drift(sorted(loaded) + paths_rules, home, project), "hidden_skills": hidden}
+    bad = core_lines > max_lines or total > max_kb * 1024 or any(sf[k] for k in
+          ("rules_over_cap", "duplicates", "dead_refs", "generated_drift", "hidden_skills"))
+    return {"surface": sf, "exit": 1 if bad else 0}
 
 
 def audit(home, project=None, max_kb=40):
@@ -173,11 +296,27 @@ def audit(home, project=None, max_kb=40):
             add("INFO", r, "path-scoped rule: absent until a matching file is read (and after /compact)", "keep anything that must always hold unconditional")
 
     # 4. /routes to skills that do not exist
-    names = known_names(home)
+    names = personal_names(home, project) | plugin_names(home)
     for p in loaded:
         for cmd in sorted(set(ROUTE_RX.findall(strip_code(read(p) or "")))):
             if cmd not in names and cmd not in BUILTIN and cmd not in PATHSEG:
                 add("LOW", p, f"routes to /{cmd}, which is not an installed skill or command", "install it, fix the name, or drop the route")
+
+    # 4b. the surface checks that are not already findings above: hidden skills, over-long files, repeated lines, drift
+    sf = surface(home, project, max_kb)["surface"]
+    for h in sf["hidden_skills"]:
+        add("MEDIUM", h["routed_in"], f"routes to /{h['skill']}, which skillOverrides sets to \"{h['state']}\" ({h['set_in']}): "
+            "the model cannot invoke it, so the route cannot be followed",
+            "set it back to on or name-only, or word the route as something only the user can run")
+    if sf["core_lines"] > LINE_CAP:
+        add("MEDIUM", home, f"a CLAUDE.md file has {sf['core_lines']} lines (target under {LINE_CAP})", "move parts into path-scoped rules or skills")
+    for r in sf["rules_over_cap"]:
+        add("LOW", r["file"], f"unconditional rule file of {r['lines']} lines (target under {r['cap']})", "split it, or scope part of it with paths:")
+    for d in sf["duplicates"]:
+        add("LOW", d["at"][0], f"the same line appears {d['count']} times (id {d['id']}; also {', '.join(d['at'][1:3]) or 'in this file'})",
+            "keep it in one file and link to it from the others")
+    for g in sf["generated_drift"]:
+        add("MEDIUM", g["file"], f"generated file is {g['kind']} against {g['source']}", "regenerate it with the command named in its header")
 
     # 5 + 6. settings: hook targets and secret-looking env values
     for sp in [os.path.join(home, "settings.json")] + ([os.path.join(project, ".claude", "settings.json")] if project else []):
@@ -220,7 +359,22 @@ def main():
     ap.add_argument("--project", help="also audit this project's CLAUDE.md, .claude/ rules and settings")
     ap.add_argument("--max-kb", type=int, default=40, help="warn when always-loaded instructions exceed this many KB")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--surface", action="store_true", help="only the instruction-surface report (exit 1 when it finds anything)")
+    ap.add_argument("--max-lines", type=int, default=LINE_CAP, help="line target per instruction file for --surface")
     a = ap.parse_args()
+    if a.surface:
+        r = surface(os.path.abspath(a.home), os.path.abspath(a.project) if a.project else None, a.max_kb, a.max_lines)
+        if a.json:
+            print(json.dumps(r, indent=1))
+        else:
+            sf = r["surface"]
+            print(f"surface: {sf['bytes']} bytes always loaded, longest CLAUDE.md {sf['core_lines']} lines")
+            for k in ("rules_over_cap", "paths_rules", "duplicates", "dead_refs", "generated_drift", "hidden_skills"):
+                print(f"  {k}: {len(sf[k])}")
+                for x in sf[k]:
+                    print(f"    {x if isinstance(x, str) else json.dumps(x)}")
+            print("Report only: nothing was changed.")
+        return r["exit"]
     F = audit(os.path.abspath(a.home), os.path.abspath(a.project) if a.project else None, a.max_kb)
     if a.json:
         print(json.dumps(F, indent=1))

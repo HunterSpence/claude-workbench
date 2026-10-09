@@ -68,6 +68,13 @@ Small text changes: open it with python-pptx, change the runs you need, save und
 render. Structural changes (reordering, new slide types): rebuild from an outline instead of
 patching XML by hand.
 
+## Before it leaves the organisation
+Render check first (section above), then scrub a copy and send only the copy:
+```bash
+"${user_config.python}" "${CLAUDE_SKILL_DIR}/../office-render/scripts/scrub.py" deck.pptx --out deck-send.pptx --json
+```
+It removes hidden slides and every link to them, comments, author and company names and the preview image; add `--strip-notes` to drop speaker notes too. The sensitivity label stays. Details and limits: the office-render skill.
+
 ## Alternatives
 Anthropic's official `document-skills` plugin and the Claude for PowerPoint add-in are optional,
 separately licensed alternatives; see `THIRD-PARTY.md` before installing either.

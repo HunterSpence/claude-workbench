@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "tenant": "example.com",
+  "retention_days": 90,
+  "sync_root": "C:/Users/<you>/OneDrive - <organisation>",
+  "max_depth": 2,
+  "max_pages": 50,
+  "max_files": 100,
+  "placement": { "shared-files": "local" },
+  "scope": {
+    "intranet": ["https://intranet.example.com/handbook/"],
+    "shared-files": ["Shared with me/Planning", "Shared with me/Budget/forecast.xlsx"]
+  },
+  "deny": {
+    "intranet": ["/handbook/people/"],
+    "shared-files": ["Confidential", "Salary"]
+  }
+}

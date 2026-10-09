@@ -1,0 +1,53 @@
+name: ci
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    # @@ if auth!=none
+    env:
+      # @@ if auth=header
+      MCP_STATIC_TOKEN: ci-only-token-ci-only-token
+      # @@ end
+      # @@ if auth=oauth
+      OAUTH_ISSUER: https://issuer.example.com
+      PUBLIC_URL: http://localhost:8000/mcp
+      OAUTH_JWKS_URL: https://issuer.example.com/jwks
+      # @@ end
+    # @@ end
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # @@ if lang=py
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - run: pip install .
+      - run: python -m unittest discover -s tests -v
+      # @@ end
+      # @@ if lang=ts
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      - run: npm install --ignore-scripts   # commit package-lock.json, then switch to npm ci
+      - run: npm run build
+      - run: npm test
+      # @@ end
+      # @@ if http
+      - name: Inspector (exit 0 ok, 3 auth required, 5 tool error, 6 strict schema error)
+        run: |
+          # @@ if lang=py
+          python server.py --http &
+          # @@ end
+          # @@ if lang=ts
+          node dist/src/server.js --http &
+          # @@ end
+          for i in 1 2 3 4 5 6 7 8 9 10; do curl -s -o /dev/null http://localhost:8000/mcp && break; sleep 1; done
+          INSPECT="npx @modelcontextprotocol/inspector@2.10.1 --cli --transport http --server-url http://localhost:8000/mcp --method tools/list --strict"
+          # @@ if auth=none
+          $INSPECT
+          # @@ end
+          # @@ if auth!=none
+          code=0; $INSPECT || code=$?; test "$code" = 3   # the gate must demand credentials
+          # @@ end
+      # @@ end

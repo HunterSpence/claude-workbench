@@ -1,0 +1,3 @@
+{"version": 1,
+ "allow": [{"glob": "settings/model-evidence.json", "rules": ["P4", "P5"],
+            "reason": "every row cites a source; the G13 test enforces it"}]}

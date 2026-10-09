@@ -1,7 +1,7 @@
 {
   "name": "workbench-core",
   "displayName": "Workbench core",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Agent personas, workflow skills, and stdlib-only hooks: a shell-aware guard engine (generic and corporate rule packs), session start, statusline, read-flood guard, journal checkpoints, credential check.",
   "author": {
     "name": "The claude-workbench contributors"

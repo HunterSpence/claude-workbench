@@ -1,0 +1,9 @@
+{
+  "name": "diagram-render-driver",
+  "private": true,
+  "type": "module",
+  "description": "Drives the offline diagram-render bundle in a local browser for the diagram skill. Read SKILL.md first.",
+  "dependencies": {
+    "playwright-core": "1.62.1"
+  }
+}

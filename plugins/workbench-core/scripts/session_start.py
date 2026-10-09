@@ -1,6 +1,10 @@
 """SessionStart hook: a short banner, the model pins from the USER settings file, the guard status, generic health
 warnings, a pending precompact save, dated active-context items that are due, and the knowledge base's
-active-context.md (re-read on every start, resume, clear and compact).
+active-context.md (re-read on every start, resume, clear and compact). Also, from <workbench home>/state/: setup pending,
+the first five routing rows, "managed policy changed", "guards have not run in N sessions", "knowledge verify: N failing"
+(or a result older than 30 days) and, when the capability report is stale, a detached quick refresh (see extras()). It
+stamps last_start in the guard heartbeat. A pending precompact flag is looked up in the local KB state folder first,
+then in <KB>/.state (an earlier kit's).
 
 The pins come from <claude home>/settings.json only. Managed policy, server-managed settings and /model can
 override them, so the line says so; /status shows what is actually in force. Effort per model comes from
@@ -12,15 +16,20 @@ behind a visible TRUNCATED marker. Always exits 0.
 import json
 import os
 import re
+import subprocess
 import sys
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import _wb  # noqa: E402
 import precompact  # noqa: E402
+try:
+    import policy_snapshot  # noqa: E402
+except Exception:    # the banner must survive a broken snapshot module; extras() then skips the policy line
+    policy_snapshot = None
 
 CAP = 10_000
 
@@ -131,6 +140,110 @@ def due_items(ac, today=None, days=2, cap=6):
     return hits[:cap]
 
 
+def _state(name):
+    try:
+        with open(_wb.workbench_home() / "state" / name, encoding="utf-8-sig") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _flags(folder, fresh_days=None):
+    """Names of the precompact flags in a folder (only those touched within fresh_days when given). Never raises."""
+    names = set()
+    try:
+        for p in folder.glob("precompact-*.flag"):
+            try:
+                if fresh_days is None or time.time() - p.stat().st_mtime < fresh_days * 86400:
+                    names.add(p.name)
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return names
+
+
+def _short(x, n=40):
+    return " ".join(str(x).split())[:n]
+
+
+def start_report():
+    """Start `report.py run --phase refresh --quick --detach` (WORKBENCH_REPORT_CLI = a stand-in script, for tests).
+    True when something was started. report.py re-launches itself in the background, so this returns at once."""
+    kit = Path(__file__).resolve().parents[3]
+    stub = os.environ.get("WORKBENCH_REPORT_CLI")
+    script = Path(stub) if stub else next((p for p in (kit / "bootstrap" / "report.py",
+                                                       _wb.workbench_home() / "kit" / "bootstrap" / "report.py") if p.is_file()), None)
+    if not script or not script.is_file():
+        return False
+    kw = {"creationflags": 0x00000008 | 0x00000200} if os.name == "nt" else {"start_new_session": True}   # detached
+    subprocess.Popen([sys.executable, str(script), "run", "--phase", "refresh", "--quick", "--detach"], stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True, **kw)
+    return True
+
+
+def extras(source):
+    """The runtime-assurance lines, each capped: setup pending (I2), the first five routing rows (I3b), managed policy
+    changed (I20), guards silent (I20 heartbeat; counts a new session, not /clear or a compaction), a failing or
+    30-day-old knowledge-verify result and a stale capability report (older than 7 days, or the policy changed and no
+    refresh in a day) -> a detached quick refresh. Every part is best-effort: one failing never hides the others.
+    ponytail: a refresh that keeps failing restarts every session."""
+    out, changed = [], []
+    try:
+        st = _state("setup-state.json")
+        if st and not (st.get("phase") == "done" and st.get("exit_code") in (None, 0)):
+            it, bad = len(st.get("ask_it") or []), len(st.get("failed") or [])
+            out.append(f"Setup pending: phase {_short(st.get('phase') or 'unknown')}" + (f", {it} item(s) for IT" if it else "")
+                       + (f", {bad} failed" if bad else "") + (f". Next: {_short(st['next'], 160)}" if st.get("next") else ""))
+    except Exception:
+        pass
+    try:
+        rows = [r for r in (_state("routing.effective.json").get("rows") or [])[:5] if isinstance(r, dict)]
+        if rows:
+            out.append("Model routing, first rows (* = a fallback model is in use):")
+            out += [f"  {_short(r.get('id'))} {_short(r.get('persona'))} {re.sub('^claude-', '', _short(r.get('model')))}/"
+                    f"{_short(r.get('effort'), 12)}{'*' if r.get('fallback_used') else ''}" for r in rows]
+    except Exception:
+        pass
+    try:
+        changed = policy_snapshot.status()["changed"]
+        if changed:
+            out.append(f"WARNING: managed policy changed since setup: {', '.join(changed)}; run setup.py doctor.")
+    except Exception:
+        pass
+    try:
+        counted = source not in ("clear", "compact")
+        hb = _wb.heartbeat(False if counted else None, stamp="last_start") or _state("guard-heartbeat.json")
+        n = hb.get("sessions_since_fire")
+        if isinstance(n, int) and n >= 3:
+            out.append(f"WARNING: guards have not run in {n} sessions (the PreToolUse guard has not fired); run setup.py doctor.")
+    except Exception:
+        pass
+    try:   # knowledge-verify.json (written by setup): a failing step, or a result gone stale
+        kv = _state("knowledge-verify.json")
+        failing = [_short(x, 24) for x in ((kv.get("summary") or {}).get("failing") or [])[:6]]
+        if failing:
+            out.append(f"WARNING: knowledge verify: {len(failing)} failing ({', '.join(failing)}); run setup.py doctor --deep.")
+        elif kv:
+            gen = datetime.fromisoformat(str(kv.get("generated") or "").replace("Z", "+00:00"))
+            if (datetime.now(timezone.utc) - (gen if gen.tzinfo else gen.replace(tzinfo=timezone.utc))) > timedelta(days=30):
+                out.append("NOTE: knowledge verify is older than 30 days; run setup.py doctor --deep.")
+    except Exception:
+        pass
+    try:
+        state, now = _wb.workbench_home() / "state", time.time()
+        caps = [state / f"capability-{ph}.json" for ph in ("pre", "post", "refresh")]
+        age = lambda f: now - f.stat().st_mtime if f.is_file() else float("inf")  # noqa: E731
+        newest = min(age(f) for f in caps)
+        if newest != float("inf") and (newest > 7 * 86400 or (changed and age(caps[2]) > 86400)) and start_report():
+            out.append("The capability report is " + (f"{int(newest // 86400)} days old" if newest > 7 * 86400 else "out of date after the "
+                       "policy change") + ": a quick refresh was started in the background.")
+    except Exception:
+        pass
+    return out
+
+
 def build(data):
     kb = _wb.kb_root()
     how = str(data.get("source") or "startup")
@@ -141,17 +254,19 @@ def build(data):
                      "kb-template/ there. Until then /workbench-kb:save has nowhere to write.")
     else:
         mine = precompact.flag_path(kb, sid)
-        if sid and mine.exists():
+        legacy = _wb.legacy_kb_state_dir(kb)
+        if sid and (mine.exists() or (legacy / mine.name).exists()):
             lines += ["", "!! PRECOMPACT SAVE PENDING: this session was compacted and what it knew is not yet in the "
                       "knowledge base. Before answering, run /workbench-kb:save (it reads the pre-compaction snapshot "
                       "and clears this flag).", ""]
-        others = [p for p in (kb / ".state").glob("precompact-*.flag") if p != mine]
+        others = (_flags(mine.parent) | _flags(legacy, fresh_days=7)) - {mine.name}   # legacy: an earlier kit's
         if others:
             lines.append(f"NOTE: {len(others)} other session(s) owe a save after compaction (not yours to clear).")
     try:
         lines += health(kb)
     except Exception:
         pass
+    lines += extras(how)
     head = "\n".join(lines)
     try:
         pin = pins()

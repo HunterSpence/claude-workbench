@@ -104,6 +104,18 @@ formula the way a user would type it, so newer functions and spills work. Pivot 
 `$wb.RefreshAll()`. If COM automation is blocked by policy, ask the user to make the change in Excel
 (or the Claude for Excel add-in, if the tenant allows it); don't work around it.
 
+## Before it leaves the organisation
+Render check first (section above), then scrub a copy and send only the copy:
+```bash
+"${user_config.python}" "${CLAUDE_SKILL_DIR}/../office-render/scripts/scrub.py" book.xlsx --out book-send.xlsx --json
+```
+It removes comments (threaded ones too), author and company names, the saved file path and the preview image. Text cells that start with `=`, `+`, `-` or `@` get a leading apostrophe so nothing reads them as formulas; real formulas stay. The sensitivity label stays. Details and limits: the office-render skill.
+
+## Starter workbooks
+`${CLAUDE_SKILL_DIR}/templates/traceability-matrix.json` and `${CLAUDE_SKILL_DIR}/templates/raid-log.json` are specs for
+`"${user_config.python}" "${CLAUDE_SKILL_DIR}/scripts/xlsx_kit.py" from-spec <spec.json> <new.xlsx>` (sheets, dropdowns, live summary formulas,
+`style` applied). Formulas show values once the workbook is opened in Excel. Fill the `<placeholders>` and edit the rows.
+
 ## Alternatives
 The Claude for Excel add-in (if your tenant allows it) works inside Excel directly; Anthropic's
 `document-skills` plugin is an optionally installed, separately licensed alternative. See

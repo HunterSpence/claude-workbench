@@ -4,9 +4,10 @@
 #   .\fetch-upstream.ps1 -Apply                  # download, verify SHA-256, install
 #   .\fetch-upstream.ps1 -Apply -Only humanizer,impeccable [-Force] [-SkillsDir <path>]
 #   .\fetch-upstream.ps1 -Optional [-Apply]      # also the optional design set (read THIRD-PARTY.md first)
+#   .\fetch-upstream.ps1 -Pm [-Apply]            # the product-management pack instead of the default set
 # If script execution is blocked on your machine, run the Python file directly instead (see README.md);
 # never change or bypass the execution policy.
-param([switch]$Apply, [string[]]$Only, [switch]$Force, [string]$SkillsDir, [string]$Lock, [switch]$Optional)
+param([switch]$Apply, [string[]]$Only, [switch]$Force, [string]$SkillsDir, [string]$Lock, [switch]$Optional, [switch]$Pm)
 $ErrorActionPreference = 'Stop'
 $py = if (Get-Command py -ErrorAction SilentlyContinue) { @('py', '-3') }
       elseif (Get-Command python -ErrorAction SilentlyContinue) { @('python') }
@@ -15,6 +16,7 @@ $a = @((Join-Path $PSScriptRoot 'fetch_upstream.py'))
 if ($Apply) { $a += '--apply' }
 if ($Force) { $a += '--force' }
 if ($Optional) { $a += '--optional' }
+if ($Pm) { $a += '--pm' }
 if ($Only) { $a += @('--only', ($Only -join ',')) }
 if ($SkillsDir) { $a += @('--skills-dir', $SkillsDir) }
 if ($Lock) { $a += @('--lock', $Lock) }

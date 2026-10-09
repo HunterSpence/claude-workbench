@@ -17,7 +17,7 @@ class DraftReplyTest(unittest.TestCase):
         self.d = tempfile.mkdtemp()
         m = EmailMessage()
         m["From"] = "Sam Example <sam@example.com>"
-        m["To"] = "me@example.com, lee@example.com"
+        m["To"] = "me@example.com, ari@example.com"
         m["Cc"] = "kim@example.com"
         m["Subject"] = "Re: Cut-over plan"
         m["Date"] = "Wed, 09 Oct 2024 14:05:00 +0000"
@@ -49,9 +49,9 @@ class DraftReplyTest(unittest.TestCase):
         self.assertLess(text.index("Yes, Friday works."), text.index("Next steps:"), "answer comes before asks")
         self.assertIn("- Sam: confirm the window (by Thu 9 Oct)", text)
         self.assertIn("On Wed, 9 Oct 2024 at 14:05 UTC, Sam Example wrote:\n> Can we do Friday?", text)
-        self.assertTrue(body.startswith('<div dir="ltr">'))
-        self.assertIn("<li><b>Sam:</b> confirm the window (by Thu 9 Oct)</li>", body)
-        self.assertIn("<li><b>Scope:</b> API only</li>", body)
+        self.assertTrue(body.startswith('<div>'))
+        self.assertIn("<li>Sam: confirm the window (by Thu 9 Oct)</li>", body)
+        self.assertIn("<li>Scope: API only</li>", body)
         self.assertNotIn("<script>", body)
         self.assertIn("&lt;script&gt;", body)
         self.assertIn("&lt;b&gt;x&lt;/b&gt;", body, "quoted text is escaped too")
@@ -80,15 +80,15 @@ class DraftReplyTest(unittest.TestCase):
         self.assertEqual((to, cc), (["sam@example.com"], []))
         to, cc = dr.recipients({}, t, reply_all=True, me="me@example.com")
         self.assertEqual(to, ["sam@example.com"])
-        self.assertEqual(sorted(cc), ["kim@example.com", "lee@example.com"])
+        self.assertEqual(sorted(cc), ["ari@example.com", "kim@example.com"])
 
     def test_reply_to_and_followup_to(self):
         t = {"from_addr": "sam@example.com", "reply_to": "Help Desk <help@example.com>",
-             "to": "me@example.com, lee@example.com", "cc": "kim@example.com"}
+             "to": "me@example.com, ari@example.com", "cc": "kim@example.com"}
         self.assertEqual(dr.recipients({}, t), (["help@example.com"], []), "a plain reply honours Reply-To")
         to, cc = dr.recipients({}, t, reply_all=True, me="ME@example.com")
         self.assertEqual(to, ["help@example.com"])
-        self.assertEqual(cc, ["sam@example.com", "lee@example.com", "kim@example.com"], "sender kept, me left out")
+        self.assertEqual(cc, ["sam@example.com", "ari@example.com", "kim@example.com"], "sender kept, me left out")
         t["followup_to"] = "list@example.com, me@example.com"
         self.assertEqual(dr.recipients({}, t, reply_all=True, me="me@example.com"), (["list@example.com"], []),
                          "reply-all follows Mail-Followup-To")

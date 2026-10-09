@@ -1,0 +1,70 @@
+{
+  "sheets": [
+    {
+      "name": "Traceability",
+      "columns": [
+        "Req ID",
+        "Requirement",
+        "Epic",
+        "Story ID",
+        "Test case IDs",
+        "Status"
+      ],
+      "rows": [
+        [
+          "REQ-01",
+          "<requirement text>",
+          "EP-1",
+          "US-1.1",
+          "TC-001",
+          "Covered"
+        ],
+        [
+          "REQ-02",
+          "<requirement text>",
+          "EP-1",
+          "",
+          "",
+          "Gap"
+        ]
+      ],
+      "validation": {
+        "F2:F200": [
+          "Covered",
+          "Partial",
+          "Gap",
+          "Dropped"
+        ]
+      }
+    },
+    {
+      "name": "Summary",
+      "columns": [
+        "Status",
+        "Count"
+      ],
+      "rows": [
+        [
+          "Covered",
+          "=COUNTIF(Traceability!F:F,\"Covered\")"
+        ],
+        [
+          "Partial",
+          "=COUNTIF(Traceability!F:F,\"Partial\")"
+        ],
+        [
+          "Gap",
+          "=COUNTIF(Traceability!F:F,\"Gap\")"
+        ],
+        [
+          "Dropped",
+          "=COUNTIF(Traceability!F:F,\"Dropped\")"
+        ],
+        [
+          "Total requirements",
+          "=COUNTA(Traceability!A:A)-1"
+        ]
+      ]
+    }
+  ]
+}

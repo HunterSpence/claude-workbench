@@ -2,26 +2,35 @@
 """save_driver.py: the mechanical half of the save skill. Safe to run from several sessions at once.
 
   --pre                 audit + automatic history rollover + a recovery snapshot of active-context.md (its path is
-                        printed as ac_base) + the journal window to fold. Prints JSON whose `next` list is the steps.
+                        printed as ac_base) + the journal window to fold + a hash of every note (the baseline --post
+                        compares against). Prints JSON whose `next` list is the steps.
   --inbox-add TEXT      journal one line (append-only, collision-free); the next save folds it into active-context.
   --ac-write DRAFT --base AC_BASE
                         the ONLY writer of active-context.md: a 3-way merge (draft, base, live file) under the lock.
   --post [--domains d1,d2] [--note TEXT] [--files F ...] [--push]
                         credential scan (HARD GATE, exit 3) -> HOT.md caps (HARD GATE, exit 4) -> active-context cap
-                        -> daily log -> clear this session's precompact flag -> reindex -> git commit (only when the
-                        KB folder is a git repository) -> git push (only with --push AND a remote you configured)
-                        -> metrics.
+                        -> daily log -> clear this session's precompact flag -> `updated:` stamp (only notes named by
+                        --files whose bytes changed since --pre; never one past its size cap) -> reindex -> git commit
+                        (only when the KB folder is a git repository) -> git push (only with --push AND a remote you
+                        configured) -> metrics -> advisories (the instruction-surface audit, and weekly the legacy scan;
+                        one line each, never an error: a missing or failing tool reads "skipped: ...").
   --post --skip --note TEXT   record that this save was skipped (nothing significant happened).
+
+All state (the save lock, precompact flags, snapshots, metrics, journal windows) lives in kb_audit.STATE, under the
+workbench home and outside the KB. A KB from an earlier kit has it in <KB>/.state/: --pre copies that across once and
+leaves it readable (see migrate_state).
 
 Nothing is ever pushed by default. Exit codes: 0 ok (read `action_required` if present) · 1 unexpected error, or an
 --ac-write conflict / busy lock · 2 --ac-write refused (missing draft or base; file untouched) · 3 credentials found ·
 4 HOT.md over the hard cap.
 """
 import argparse
+import contextlib
 import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -29,13 +38,18 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import frontmatter  # noqa: E402
 import kb_audit  # noqa: E402  (paths and caps: the one home)
+import kb_facts  # noqa: E402  (is_note: which files are notes)
 import savelock  # noqa: E402
 import secretscan  # noqa: E402
 
 ROOT, STATE, SNAPSHOTS, AC, INBOX = kb_audit.ROOT, kb_audit.STATE, kb_audit.SNAPSHOTS, kb_audit.AC, kb_audit.INBOX
 SAVE_LOCK = kb_audit.SAVE_LOCK
+OLD_STATE, OLD_SNAPSHOTS, OLD_SAVE_LOCK = kb_audit.OLD_STATE, kb_audit.OLD_SNAPSHOTS, kb_audit.OLD_SAVE_LOCK
 METRICS = STATE / "save-metrics.jsonl"
+OLD_METRICS = OLD_STATE / "save-metrics.jsonl"
+MIGRATED = STATE / "migrated-from-kb.json"
 SESSION_ID = re.sub(r"[^A-Za-z0-9-]", "", os.environ.get("CLAUDE_CODE_SESSION_ID") or "")
 LOCK_TIMEOUT = float(os.environ.get("SAVE_LOCK_TIMEOUT") or 120)
 AC_GRACE_BYTES = 512        # a small overage completes the save and owes the trim to the next one
@@ -47,6 +61,9 @@ INBOX_FOLD_CAP_BYTES = 32_768
 INBOX_MAX_CHARS = 8000
 RECENT_SAVE_MIN = 15
 STALE_DAYS = 7
+ADVISORY_TIMEOUT = float(os.environ.get("SAVE_ADVISORY_TIMEOUT") or 20)   # seconds, per advisory tool
+LEGACY_SCAN_DAYS = 7
+LEGACY_STAMP = STATE / "legacy-scan.stamp"
 _read = savelock.read_text
 
 
@@ -68,14 +85,90 @@ def _winpath(s):
     return f"{m.group(1).upper()}:/{m.group(2)}" if m and os.name == "nt" else s
 
 
-def _flag(sid):
+def _flag(sid, state=None):
     """Contract with workbench-core's precompact.py: the flag it raises at compaction."""
-    return STATE / f"precompact-{sid or 'nosession'}.flag"
+    return (state or STATE) / f"precompact-{sid or 'nosession'}.flag"
 
 
 def _my_flag():
-    f = _flag(SESSION_ID)
-    return f if SESSION_ID and f.exists() else None
+    """This session's flag: the local state folder first, then the one an earlier kit wrote in the KB."""
+    for state in (STATE, OLD_STATE):
+        f = _flag(SESSION_ID, state)
+        if SESSION_ID and f.exists():
+            return f
+    return None
+
+
+def _flag_files():
+    """Every pending precompact flag: the local ones, plus legacy ones not copied yet and not stale."""
+    seen = {p.name: p for p in STATE.glob("precompact-*.flag")}
+    cut = _now().timestamp() - STALE_DAYS * 86400
+    for p in OLD_STATE.glob("precompact-*.flag"):
+        try:
+            if p.name not in seen and p.stat().st_mtime >= cut:
+                seen[p.name] = p
+        except OSError:
+            continue
+    return list(seen.values())
+
+
+@contextlib.contextmanager
+def save_lock():
+    """THE save lock. While a legacy <KB>/.state/locks/save.lock exists (a session on an earlier kit still takes it),
+    hold that one first and the local one second, in that order everywhere, so two holders cannot deadlock. The legacy
+    file is never created here. Raises savelock.LockBusy when either is held past LOCK_TIMEOUT."""
+    with contextlib.ExitStack() as stack:
+        if OLD_SAVE_LOCK.exists():
+            try:
+                stack.enter_context(savelock.filelock(OLD_SAVE_LOCK, timeout=LOCK_TIMEOUT))
+            except OSError:   # a legacy lock file that cannot be opened cannot be contended for either
+                pass
+        stack.enter_context(savelock.filelock(SAVE_LOCK, timeout=LOCK_TIMEOUT))
+        yield
+
+
+def migrate_state():
+    """COPY (never move) an earlier kit's <KB>/.state/ into the local state folder, once, holding BOTH save locks.
+    Files already present in the new folder win; the old folder is left as it is and stays readable for one release
+    (readers fall back to it). Returns None when there is nothing to do, else one line for the --pre report.
+    ponytail: the copy is by name, so the journal windows and snapshots of a half-upgraded KB travel too."""
+    if MIGRATED.exists() or not OLD_STATE.is_dir():
+        return None
+    try:
+        with save_lock():
+            if MIGRATED.exists():   # another process finished while this one waited
+                return None
+            copied = 0
+            for src in sorted(OLD_STATE.rglob("*")):
+                rel = src.relative_to(OLD_STATE)
+                if rel.parts[0] == "locks" or src.suffix == ".tmp" or not src.is_file():
+                    continue
+                dst = STATE / rel
+                if dst.exists():
+                    continue
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                tmp = dst.with_name(f"{dst.name}.{os.getpid()}.tmp")
+                shutil.copy2(src, tmp)
+                os.replace(tmp, dst)
+                copied += 1
+            savelock.atomic_write(MIGRATED, json.dumps({"copied": copied, "from": OLD_STATE.as_posix(),
+                                                        "at": _now().strftime("%Y-%m-%dT%H:%M:%SZ")}) + "\n")
+            return f"copied {copied} file(s) from {OLD_STATE.as_posix()}; the old folder is kept for one release"
+    except savelock.LockBusy:
+        return "skipped: another session holds the save lock; the next --pre retries"
+    except OSError as e:
+        return f"skipped: {type(e).__name__}: {e}"[:200]
+
+
+def _resolve_base(path):
+    """The --base file as given, else the same file name in the local snapshots or the legacy ones (an older kit's
+    --pre printed a <KB>/.state path that may since have been cleaned up; migrate_state copied the file)."""
+    if not path:
+        return None
+    p = Path(_winpath(path))
+    if p.exists():
+        return p
+    return next((d / p.name for d in (SNAPSHOTS, OLD_SNAPSHOTS) if (d / p.name).exists()), None)
 
 
 def _need(report, msg):
@@ -94,14 +187,17 @@ def _run(cmd, timeout=120):
 
 # ── metrics ──────────────────────────────────────────────────────────────────────────────────────────────────
 def _metric_rows():
-    rows = []
-    for line in _read(METRICS).splitlines():
-        try:
-            r = json.loads(line)
-            if isinstance(r, dict):
+    """Local rows first, then legacy ones whose key the local file lacks (written by a session on an earlier kit)."""
+    rows, seen = [], set()
+    for f in (METRICS, OLD_METRICS):
+        for line in _read(f).splitlines():
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(r, dict) and (r.get("key") is None or r["key"] not in seen):
+                seen.add(r.get("key"))
                 rows.append(r)
-        except ValueError:
-            continue
     return rows
 
 
@@ -124,8 +220,9 @@ def _append_metric(row):
             if any(r.get("key") == row["key"] for r in _metric_rows()):
                 return "already"
             METRICS.parent.mkdir(parents=True, exist_ok=True)
+            torn = METRICS.exists() and METRICS.stat().st_size > 0 and not METRICS.read_bytes().endswith(b"\n")
             with METRICS.open("a", encoding="utf-8", newline="\n") as f:
-                f.write(json.dumps(row, ensure_ascii=True) + "\n")
+                f.write(("\n" if torn else "") + json.dumps(row, ensure_ascii=True) + "\n")   # a cut-off last line must not swallow this row
             return "recorded"
     except savelock.LockBusy:
         return "busy"
@@ -158,6 +255,9 @@ def inbox_add(text):
         text = text[:a] + "[REDACTED: credential shape; refer to it by name]" + text[b:]
     if spans:
         warns.append(f"{len(spans)} credential-shaped value(s) masked before journalling")
+    if "`" in text:   # a shell runs what sits between two backticks BEFORE this driver sees the text
+        warns.append("entry holds a backtick: a shell may already have run, and dropped, what sat between two of them; "
+                     "check the text and quote with single quotes")
     if len(text) > INBOX_MAX_CHARS:
         text = text[:INBOX_MAX_CHARS] + f" ...[TRUNCATED {len(text) - INBOX_MAX_CHARS} chars]"
     nbytes = len(text.encode("utf-8"))
@@ -208,9 +308,10 @@ def _inbox_survey(now):
 def _reap(report, keep=None):
     """Sweep what dead sessions leave behind; never this session's own files."""
     now = _now().timestamp()
-    sweep = [(p, STALE_DAYS) for p in STATE.glob("precompact-*.flag") if p != keep]
+    sweep = [(p, STALE_DAYS) for p in STATE.glob("precompact-*.flag") if not (keep and p.name == keep.name)]
     sweep += [(p, 1) for p in ROOT.rglob("*.tmp") if re.search(r"\.\d+\.tmp$", p.name)]
     sweep += [(p, 7) for p in STATE.glob("inbox-window.*.jsonl") if not (SESSION_ID and SESSION_ID in p.name)]
+    sweep += [(p, 7) for p in STATE.glob("note-hashes.*.json") if not (SESSION_ID and SESSION_ID in p.name)]
     sweep += [(p, 14) for p in SNAPSHOTS.glob("*.md")]
     reaped = []
     for p, days in sweep:
@@ -224,22 +325,156 @@ def _reap(report, keep=None):
         report["reaped"] = reaped[:20]
 
 
+# ── the `updated:` stamp ─────────────────────────────────────────────────────────────────────────────────────
+def _stampable(rel):
+    """A curated note a save may stamp: not a record (history, daily, inbox), not active-context (--ac-write owns it)."""
+    parts = rel.split("/")
+    return kb_facts.is_note(parts) and parts[-1] != "active-context.md"
+
+
+def _baseline_file():
+    return STATE / f"note-hashes.{SESSION_ID or 'nosession'}.json"
+
+
+def _note_hashes():
+    out = {}
+    for p in ROOT.rglob("*.md"):
+        rel = p.relative_to(ROOT).as_posix()
+        if _stampable(rel):
+            try:
+                out[rel] = hashlib.sha1(p.read_bytes()).hexdigest()
+            except OSError:
+                continue
+    return out
+
+
+def _stamp(files, rows):
+    """Set `updated:` to today on each note in `files` whose bytes differ from the --pre baseline. Nothing else in the
+    note moves, and a note that would end past its HOT.md cap is left alone. -> (stamped, {note: why not})."""
+    try:
+        base = json.loads(_read(_baseline_file()))
+    except ValueError:
+        base = None
+    if not isinstance(base, dict):
+        return [], {"*": "no --pre baseline for this session: run --pre first"}
+    caps = {f"{r['domain']}/HOT.md": r["hot_warn_cap"] for r in rows}
+    today, root, stamped, skipped = datetime.now().strftime("%Y-%m-%d"), ROOT.resolve(), [], {}
+    for f in files:
+        try:
+            rel = Path(f).resolve().relative_to(root).as_posix()
+        except (ValueError, OSError):
+            continue
+        if not _stampable(rel) or rel in stamped or rel in skipped:
+            continue
+        try:
+            raw = (root / rel).read_bytes()
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            skipped[rel] = "not UTF-8"
+            continue
+        except OSError:
+            continue
+        if base.get(rel) == hashlib.sha1(raw).hexdigest():
+            continue                                         # not changed since --pre
+        new = frontmatter.set_key(text, "updated", today)
+        if new is None:
+            skipped[rel] = "no front matter"
+        elif new != text:
+            if rel in caps and len(new.encode("utf-8")) - new.count("\r\n") > caps[rel]:
+                skipped[rel] = "over its size cap"
+                continue
+            try:
+                savelock.atomic_write(root / rel, new, newline="")
+            except OSError:
+                skipped[rel] = "could not be written (held open?)"
+                continue
+            stamped.append(rel)
+    return stamped, skipped
+
+
+# ── --post advisories ────────────────────────────────────────────────────────────────────────────────────────
+# Each runs a script of the workbench-core plugin beside this one, in a subprocess with a timeout. None can fail the
+# save: a missing, slow, crashing or garbled tool reads "skipped: ..." and nothing else changes.
+def _core_tool(*parts):
+    p = Path(__file__).resolve().parents[2] / "workbench-core" / Path(*parts)
+    return p if p.is_file() else None
+
+
+def _advise(tool, *args):
+    """(parsed JSON, None) from running `tool`, else (None, 'skipped: <why>'). A non-zero exit still counts when it printed JSON."""
+    if tool is None:
+        return None, "skipped: not found"
+    try:
+        p = subprocess.run([sys.executable, str(tool), *args], capture_output=True, text=True, timeout=ADVISORY_TIMEOUT,
+                           encoding="utf-8", errors="replace", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except subprocess.TimeoutExpired:
+        return None, f"skipped: timed out after {ADVISORY_TIMEOUT:g} s"
+    except OSError as e:
+        return None, f"skipped: could not start ({type(e).__name__})"
+    try:
+        return json.loads(p.stdout), None
+    except ValueError:
+        return None, f"skipped: no usable answer (exit {p.returncode})"
+
+
+def _advise_surface():
+    data, why = _advise(_core_tool("skills", "brain-audit", "scripts", "audit.py"), "--surface", "--json")
+    if why:
+        return why
+    sf = data["surface"]
+    n = sum(len(sf[k]) for k in ("rules_over_cap", "duplicates", "dead_refs", "generated_drift", "hidden_skills"))
+    return f"{sf['bytes']} B always loaded, {n} finding(s)" + ("; the brain-audit skill lists them" if n else "")
+
+
+def _advise_legacy():
+    tool = _core_tool("skills", "cleanup", "scripts", "scan_legacy.py")
+    if tool is None:
+        return "skipped: not found"
+    try:
+        last = datetime.strptime(_read(LEGACY_STAMP).strip(), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        last = None
+    if last and _now() - last < timedelta(days=LEGACY_SCAN_DAYS):
+        return f"not due (ran {(_now() - last).days} day(s) ago)"
+    data, why = _advise(tool, "--root", str(ROOT), "--json")
+    if why:
+        return why
+    savelock.atomic_write(LEGACY_STAMP, _now().strftime("%Y-%m-%dT%H:%M:%SZ") + "\n")
+    # status: archived is how this KB retires a note on purpose, so it is not a finding
+    n = sum(1 for c in data["candidates"] if "status: archived" not in c["reason"])
+    return f"{n} note(s) marked deprecated, obsolete or similar" + ("; the cleanup skill reviews them (report only)" if n else "")
+
+
+def _advisories():
+    out = {}
+    for name, fn in (("surface", _advise_surface), ("legacy_scan", _advise_legacy)):
+        try:
+            out[name] = fn()
+        except Exception as e:   # noqa: BLE001  an advisory can never fail the save
+            out[name] = f"skipped: {type(e).__name__}"
+    return out
+
+
 # ── --pre ────────────────────────────────────────────────────────────────────────────────────────────────────
 def pre(verbose=False):
     if not kb_audit.domains():
         print(json.dumps({"error": f"no knowledge base at {ROOT.as_posix()} (no domain folder with a HOT.md)",
                           "action_required": "run the workbench bootstrap, or copy kb-template/ to that folder"}))
         return 1
-    out = {"driver": "workbench-1", "session": SESSION_ID or "unknown", "kb_root": ROOT.as_posix()}
+    out = {"driver": "workbench-1", "session": SESSION_ID or "unknown", "kb_root": ROOT.as_posix(),
+           "state_dir": STATE.as_posix()}
+    moved = migrate_state()
+    if moved:
+        out["state_migration"] = moved
     mine = _my_flag()
     _reap(out, keep=mine)
     out["resume_pending"] = mine is not None
     out["mode_hint"] = "precompact-resume" if mine else "inline"
     out["stamp"] = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %z")   # the clock for history headings
-    others = [p.name for p in STATE.glob("precompact-*.flag") if p != mine]
+    others = [p.name for p in _flag_files() if not (mine and p.name == mine.name)]
     if others:
         out["other_sessions_pending"] = others
-    out["concurrent_save_active"] = savelock.is_locked(SAVE_LOCK)
+    out["concurrent_save_active"] = savelock.is_locked(SAVE_LOCK) or (OLD_SAVE_LOCK.exists() and savelock.is_locked(OLD_SAVE_LOCK))
 
     now = _now()
     inbox, pruned, win_cut = _inbox_survey(now)
@@ -255,7 +490,15 @@ def pre(verbose=False):
     omitted = len(folded) - shown
     marker = [json.dumps({"ts": None, "marker": True, "text": f"[{omitted} older, already-folded entries not shown; "
                           f"all are still in {INBOX.as_posix()}]"}) + "\n"] if omitted else []
-    savelock.atomic_write(win, "".join(marker + folded[omitted:] + new))
+    body = "".join(marker + folded[omitted:] + new)
+    try:
+        savelock.atomic_write(win, body)
+    except OSError:   # the usual name is held open (an editor, a scanner): write a name of this process's own instead
+        win = STATE / f"inbox-window.{SESSION_ID or 'nosession'}.{os.getpid()}.jsonl"
+        try:
+            savelock.atomic_write(win, body)
+        except OSError as e:
+            _need(out, f"the journal window could not be written ({type(e).__name__}): re-run --pre")
     out.update(inbox_file=win.as_posix(), inbox_pending=len(new), inbox_folded=len(folded),
                inbox_window_from=win_cut.strftime("%Y-%m-%dT%H:%M:%SZ"))
     if pruned:
@@ -267,10 +510,14 @@ def pre(verbose=False):
         out["ac_base"] = snap.as_posix()
     except OSError as e:
         _need(out, f"active-context snapshot failed ({e}): re-run --pre")
+    try:   # what --post compares against to stamp `updated:` only on notes whose bytes changed
+        savelock.atomic_write(_baseline_file(), json.dumps(_note_hashes()))
+    except OSError:
+        pass
 
     rolled = []
     try:   # rollovers rewrite history.md whole: one writer at a time, audit re-read inside the lock
-        with savelock.filelock(SAVE_LOCK, timeout=LOCK_TIMEOUT):
+        with save_lock():
             rows = kb_audit.audit()
             for r in rows:
                 if not r.get("history_over_cap"):
@@ -308,7 +555,8 @@ def pre(verbose=False):
 
     nxt = []
     if mine:
-        snap = max(SNAPSHOTS.glob("active-context-2*.md"), key=lambda p: p.stat().st_mtime, default=None)
+        snap = max([*SNAPSHOTS.glob("active-context-2*.md"), *OLD_SNAPSHOTS.glob("active-context-2*.md")],
+                   key=lambda p: p.stat().st_mtime, default=None)
         nxt.append(f"this session was compacted: read {(snap or AC).as_posix()} (the pre-compaction snapshot) and write "
                    "what it knew to the KB; --post then clears the flag")
     if out["ac_hash_already_saved"]:
@@ -366,14 +614,14 @@ def ac_write(draft_path, base_path):
     if not ours.strip():
         print(json.dumps({"status": "error", "error": f"draft missing or empty: {draft}"}))
         return 2
-    if not base_path or not Path(_winpath(base_path)).exists():
+    base = _resolve_base(base_path)
+    if base is None:
         print(json.dumps({"status": "error", "error": "--base is required and must exist: pass the ac_base that --pre "
                           "(or your previous --ac-write) printed. Without it this write would overwrite other sessions."}))
         return 2
-    base = Path(_winpath(base_path))
     out = {"draft": draft.as_posix(), "base": base.as_posix()}
     try:
-        with savelock.filelock(SAVE_LOCK, timeout=LOCK_TIMEOUT):
+        with save_lock():
             theirs, base_text = _read(AC), _read(base)
             if theirs == base_text or theirs == ours:
                 merged, conflicts, out["merge"] = ours, 0, "direct"
@@ -477,7 +725,8 @@ def post(args):
         print(json.dumps(report, indent=1))
         return 3
 
-    over = [r["domain"] for r in kb_audit.audit() if r.get("hot_over_cap")]   # 2. HARD GATE (touched domains)
+    rows = kb_audit.audit()
+    over = [r["domain"] for r in rows if r.get("hot_over_cap")]   # 2. HARD GATE (touched domains)
     report["hot_over_cap_all"] = over
     blocking = [d for d in over if d in domains]
     if blocking:
@@ -501,13 +750,17 @@ def post(args):
                       "on the next save.")
 
     try:                                                                # 4. daily log + this session's flag
-        with savelock.filelock(SAVE_LOCK, timeout=LOCK_TIMEOUT):
+        with save_lock():
             report["daily_log"] = _daily_log(domains, args.note or "session save")
+            report["stamped"], skipped = _stamp(files, rows)
+            if skipped:
+                report["stamp_skipped"] = skipped
             if mine:
-                mine.unlink(missing_ok=True)
+                for state in (STATE, OLD_STATE):   # the legacy copy too, or the next start would raise it again
+                    _flag(SESSION_ID, state).unlink(missing_ok=True)
                 report["flag_cleared"] = mine.name
     except savelock.LockBusy:
-        report["daily_log"] = "skipped: lock busy"
+        report["daily_log"], report["stamped"] = "skipped: lock busy", []
         _need(report, "daily log and flag clear skipped under lock contention: re-run --post when the other save ends")
 
     try:                                                                # 5. search index
@@ -525,6 +778,7 @@ def post(args):
     res = _append_metric({"ts": report["ts"], "key": key, "mode": report["mode"], "domains": domains,
                           "ac_hash": _ac_hash(), "reindex": str(report["reindex"])[:80], "note": (args.note or "")[:400]})
     report["metrics"] = {"busy": "NOT recorded (lock busy): re-run --post", "already": "already recorded"}.get(res, "recorded")
+    report["advisories"] = _advisories()                                # 8. never an action, never an error
     print(json.dumps(report, indent=1))
     return 0
 

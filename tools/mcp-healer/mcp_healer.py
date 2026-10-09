@@ -17,9 +17,11 @@ minimal environment (OS essentials plus the variables named in that server's own
 from an empty temporary directory unless --cwd is given, and their command is resolved on PATH
 only (never the current directory); each gets a JSON-RPC `initialize`. HTTP servers get an
 `initialize` POST (the one network call, made only when you run it). Servers that managed
-allowedMcpServers / deniedMcpServers would block are skipped, not launched. A repository's
+allowedMcpServers / deniedMcpServers would block are skipped, not launched. A server with a
+headersHelper is skipped too: a helper is a command, and check never runs one. A repository's
 .mcp.json is never launched or expanded: --project only LISTS its server names. Exit code 1 if
-anything is DOWN. Config changes take effect on the next Claude Code restart. Stdlib only.
+anything is DOWN. No .claude.json yet = "no config yet", exit 0. Config changes take effect on the
+next Claude Code restart. Stdlib only.
 """
 import argparse, datetime, fnmatch, glob, json, os, re, shutil, subprocess, sys, tempfile, threading, urllib.error, urllib.request
 
@@ -47,6 +49,16 @@ def managed_dir():
 def load(path):
     with open(path, encoding="utf-8") as f:
         return json.load(f)
+
+
+def load_config(path, say=True):
+    """The parsed .claude.json, or None (after saying so) when Claude Code has not written one yet."""
+    try:
+        return load(path)
+    except FileNotFoundError:
+        if say:
+            print(f"no config yet: {path} does not exist (start Claude Code once, then run this again)")
+        return None
 
 
 def managed_mcp_policy(mdir=None):
@@ -141,7 +153,7 @@ def build(name, spec, existing):
         for k, v in (spec.get("setEnv") or {}).items():
             obj.setdefault("env", {})[k] = v
     else:
-        obj = {k: spec[k] for k in ("type", "command", "args", "url", "headers") if k in spec}
+        obj = {k: spec[k] for k in ("type", "command", "args", "url", "headers", "headersHelper", "oauth") if k in spec}
         env = {}
         for k, ev in (spec.get("env") or {}).items():
             if isinstance(ev, dict) and "fromExisting" in ev:   # keep a secret already in the live entry
@@ -155,8 +167,12 @@ def build(name, spec, existing):
                 env[k] = ev
         if env:
             obj["env"] = env
-        if any("{{" in str(v) for v in [obj.get("command", "")] + list(obj.get("args", []))):
+        text = json.dumps(obj)   # command, args, url, headers and headersHelper alike
+        if "{{" in text:
             return None, "golden entry still has a {{PLACEHOLDER}}; fill it in first"
+        unset = sorted({m for m in re.findall(r"\$\{(\w+)\}", text) if m not in os.environ})
+        if unset:
+            return None, "environment variable not set: " + ", ".join(unset) + " (set it, then re-run)"
     if "alwaysLoad" in spec:
         obj["alwaysLoad"] = spec["alwaysLoad"]
     elif existing and "alwaysLoad" in existing:
@@ -220,7 +236,10 @@ def write(cfg, path, expect):
 
 
 def cmd_apply(a):
-    golden, cfg = load(a.golden), load(a.config)
+    cfg = load_config(a.config)
+    if cfg is None:
+        return 1
+    golden = load(a.golden)
     changes, warnings = plan(golden, cfg)
     for w in warnings:
         print("  " + w)
@@ -243,7 +262,9 @@ def cmd_apply(a):
 
 
 def cmd_unpark(a):
-    cfg = load(a.config)
+    cfg = load_config(a.config)
+    if cfg is None:
+        return 1
     parked = cfg.get("mcpServersParked") or {}
     if a.name not in parked:
         print(f"'{a.name}' is not parked. Parked: {', '.join(sorted(parked)) or '(none)'}")
@@ -339,13 +360,19 @@ def probe(name, spec, cwd, timeout, allowed=None, denied=()):
     blocked = policy_blocks(name, spec, allowed, denied)
     if blocked:
         return SKIP, blocked
+    if spec.get("headersHelper"):
+        return SKIP, "uses a headersHelper; check never runs one (use /mcp in Claude Code)"
     if spec.get("type") in ("http", "sse") or (spec.get("url") and not spec.get("command")):
         return http_probe(spec, timeout) if spec.get("url") else (DOWN, "no url")
     return handshake(spec, cwd, timeout)
 
 
 def cmd_check(a):
-    cfg = load(a.config)
+    cfg = load_config(a.config, say=not a.json)
+    if cfg is None:
+        if a.json:
+            print("[]")
+        return 0
     servers = dict(cfg.get("mcpServers") or {})   # user scope only: your own configuration
     allowed, denied = managed_lists(a.managed_dir)
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as empty:

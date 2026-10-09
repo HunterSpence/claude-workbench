@@ -2,6 +2,7 @@
 """render.py: render .pptx / .docx / .xlsx / .pdf to one PNG per slide or page, for visual QA.
 
   python render.py <file> --out <dir> [--engine auto|office|libreoffice] [--dpi 110] [--first N]
+  python render.py <file.pptx|file.docx> --lint      accessibility notes without rendering: alt text, slide titles, heading jumps
 
 Step 1, document -> PDF:
   office       Windows only: PowerPoint / Word / Excel through COM (PowerShell), read-only, no window.
@@ -10,7 +11,7 @@ Step 1, document -> PDF:
   auto         office on Windows if it works, else libreoffice.
 Step 2, PDF -> PNG: pypdfium2 (Apache-2.0 / BSD-3-Clause). Prints the PNG paths, one per line.
 """
-import argparse, os, pathlib, shutil, subprocess, sys, tempfile
+import argparse, os, pathlib, re, shutil, subprocess, sys, tempfile, zipfile
 
 APP = {".pptx": "powerpoint", ".docx": "word", ".xlsx": "excel"}
 # Macro-enabled and legacy binary formats are refused outright: they can carry code, and the legacy
@@ -123,14 +124,42 @@ def render(src, out_dir, engine="auto", dpi=110, first=None):
     return pdf_to_png(pdf, out_dir, stem, dpi, first), used
 
 
+def lint(path):
+    """Accessibility notes for a .pptx or .docx, read from the XML (nothing is rendered). -> list of messages."""
+    out = []
+    with zipfile.ZipFile(path) as z:
+        parts = {n: z.read(n).decode("utf-8", "replace") for n in z.namelist() if n.endswith(".xml")}
+    noalt = lambda xml, tag: [m for m in re.findall(rf"<{tag}\b[^>]*>", xml) if not re.search(r'\bdescr="[^"]+"', m)]  # noqa: E731
+    for name in sorted((n for n in parts if re.fullmatch(r"ppt/slides/slide\d+\.xml", n)), key=lambda n: int(re.findall(r"\d+", n)[0])):
+        no, xml = re.findall(r"\d+", name)[0], parts[name]
+        if not re.search(r'<p:ph\b[^>]*type="(title|ctrTitle)"', xml):
+            out.append(f"slide {no}: no title (screen readers and navigation use it)")
+        out += [f"slide {no}: picture without alt text" for pic in re.findall(r"<p:pic>.*?</p:pic>", xml, re.S) if noalt(pic, "p:cNvPr")]
+    if "word/document.xml" in parts:
+        xml, last = parts["word/document.xml"], 0
+        out += ["picture without alt text" for _ in noalt(xml, "wp:docPr")]
+        for level in (int(m) for m in re.findall(r'<w:pStyle w:val="Heading(\d)"', xml)):
+            if level > last + 1:
+                out.append(f"heading level jumps from {last or 'none'} to {level}")
+            last = level
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("file")
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out")
+    ap.add_argument("--lint", action="store_true", help="accessibility notes only (.pptx, .docx); renders nothing")
     ap.add_argument("--engine", choices=("auto", "office", "libreoffice"), default="auto")
     ap.add_argument("--dpi", type=int, default=110)
     ap.add_argument("--first", type=int, help="only the first N pages")
     a = ap.parse_args(argv)
+    if a.lint:
+        notes = lint(a.file)
+        print("\n".join(f"LINT: {n}" for n in notes) or "# no accessibility findings")
+        return 0
+    if not a.out:
+        ap.error("--out is required unless --lint is given")
     try:
         paths, used = render(a.file, a.out, a.engine, a.dpi, a.first)
     except Exception as e:
