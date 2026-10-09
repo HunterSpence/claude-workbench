@@ -37,7 +37,9 @@ PATTERNS = [
     r'"type"\s*:\s*"service_account"',                               # GCP service-account JSON
     r"(?<![A-Za-z0-9])hf_[A-Za-z0-9]{30,}",                          # Hugging Face
     r"npm_[A-Za-z0-9]{36}",                                          # npm
-    r"-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----",                # SSH / TLS / PGP private key
+    # SSH / TLS / PGP private key: the whole block, not the header alone (the body lines are the secret); a block with no END
+    # line runs to the end of the text.
+    r"(?s:-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----.*?(?:-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----|\Z))",
     r"(?i:AccountKey)=" + V + r"[A-Za-z0-9+/]{40,}={0,2}",           # Azure storage connection string
     r"(?i:\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp)://)[^:@\s/]+:" + V + r"(?!<|\$|\{)[^@\s]{6,}@",
     r"(?i:\bbearer[ \t]+)" + V + SLUG + r"(?!<|\$|\{)[A-Za-z0-9._~+/=-]{24,}",
@@ -64,7 +66,7 @@ PATTERNS = [
     # ...;Password=value; in an ADO/ODBC style connection string: a key=value pair must come before it on the line
     r"(?i:\b\w[\w ]{0,40}=[^;\n]{0,200};[ \t]*(?:password|pwd)[ \t]*=[ \t]*)" + V + _PLACEHOLDER +
     r"(?![a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)+(?![\w/+=.-]))(?=[^;\s\"']*[0-9!@#%^&*])[^;\s\"'<>{}]{8,}",
-    r"PuTTY-User-Key-File-[0-9]+:",                                  # PuTTY private key file header
+    r"(?s:PuTTY-User-Key-File-[0-9]+:.*?(?:Private-MAC:[^\n]*|\Z))",   # PuTTY private key file: header through Private-MAC
     # "<admin|root|wifi|db|...> password: value" and "password for <thing>: value" in prose; the value is 8+ characters with
     # a digit or symbol AND a capital or symbol, so a phrase such as "8-12-characters" is no hit.
     r"(?i:\b(?:admin|root|wifi|ssid|router|login|db|database|ssh|vpn|server|account|service)[ \t_-]{0,3}"
@@ -76,6 +78,19 @@ PATTERNS = [
     r"(?i:\bpass(?:word|phrase)[ \t]+is[ \t]+[\"'`]?)" + V + _PLACEHOLDER + r"(?!(?-i:[A-Z][A-Z0-9_]{3,})\b)"
     r"(?=[^\s\"'|`]*[0-9!@#%^&*])(?=[^\s\"'|`]*[A-Z!@#%^&*])[^\s\"'|`()\[\]{}<>,;]{8,}",
     r"(?i:app[ _-]?password[ \t]*[:=|]?[ \t]*)" + V + r"[a-z]{4} [a-z]{4} [a-z]{4} [a-z]{4}\b",   # 16-letter app password in 4 groups
+    # ---- shapes found missing in the field (each has a run-time positive control in test_secretscan.py) ----
+    # an opaque API-key header or option: the value holds a digit or runs 24+ characters, so "api-key: required" is no hit
+    r"(?i:\b(?:x-api-key|api-key|x-auth-token|x-functions-key|ocp-apim-subscription-key)[ \t]*[:=][ \t]*[\"']?)" + V + _PLACEHOLDER +
+    r"(?=[^\s\"',;]*\d|[^\s\"',;]{24})[^\s\"',;]{8,}",
+    # curl with -u (or --user) and a user:password pair: the password, of any length
+    r"(?i:\bcurl\b[^\n]{0,200}?[ \t](?:-u|--user)[ \t=]+[\"']?[^\s:\"']+:)" + V + _PLACEHOLDER + r"[^\s\"']+",
+    # a JSON "password" of any length, including a value with an escaped quote in it (not code that builds the JSON: '...' + x)
+    r"(?i:\"(?:password|passwd|pwd|secret|client_secret)\"[ \t]*:[ \t]*\")" + V + _PLACEHOLDER + r"(?!')(?:[^\"\\\n]|\\.)+",
+    # an Azure storage SAS signature in a URL
+    r"(?i:[?&;]sig=)" + V + r"[A-Za-z0-9%+/=_-]{16,}",
+    # a password option with its value after = or a space (not the -stdin form, not another flag, not a placeholder), 3+ characters
+    r"(?i:(?<![\w-])--(?:password|passwd|api-key|apikey|secret-key|client-secret|access-key)(?:=|[ \t]+)[\"']?)" + V +
+    r"(?!-|<|\$|\{|\[|REDACTED|xxx|\.\.\.)[^\s\"']{3,}",
 ]
 _COMBINED = re.compile("|".join(f"(?:{p.replace(V, f'(?P<v{i}>)')})" for i, p in enumerate(PATTERNS)))
 

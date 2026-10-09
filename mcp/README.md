@@ -61,7 +61,7 @@ python tools/mcp-healer/mcp_healer.py apply --golden <your-golden.json> --dry-ru
 python tools/mcp-healer/mcp_healer.py apply --golden <your-golden.json>             # backup, then write
 python tools/mcp-healer/mcp_healer.py check                                         # probe every server (never runs a headersHelper)
 ```
-Or ask Claude to run the `mcp-heal` skill. If a managed MCP policy is present (`managed-mcp.json`,
+Or run `/workbench-core:mcp-heal` yourself (Claude can only suggest it). If a managed MCP policy is present (`managed-mcp.json`,
 or `allowedMcpServers`, `deniedMcpServers`, `allowManagedMcpServersOnly`, `managedMcpServers` or
 `strictPluginOnlyCustomization` in managed settings), `apply` refuses to write and names the
 policy. The healer reads only file-based managed settings; `/status` shows policy delivered by the
@@ -150,9 +150,16 @@ broad Graph permissions it does not need for reading.
 A Rust code-graph server (MIT, `aovestdipaperino/tokensave`) that answers "who calls this", "what
 breaks if I change it" and similar from a local index, so Claude reads less code.
 
-Install a **pinned, verified** binary. Never run `tokensave install` or `tokensave upgrade`:
-`install` registers the server globally and adds its own hooks, CLAUDE.md rules and tool
-permissions; `upgrade` replaces the binary outside your control.
+Install a **pinned, verified** binary. Never run `tokensave install`, `reinstall`, `upgrade`, `doctor`,
+`uninstall`, `claude-install` or `claude-uninstall`: `install` registers the server globally and adds
+its own hooks, CLAUDE.md rules and tool permissions; `reinstall` and `claude-install` rewrite them
+again and `uninstall` and `claude-uninstall` remove them (tokensave itself says to run `reinstall` to
+update permissions); `upgrade` replaces the binary outside your control; `doctor` is not read-only,
+it "auto-repairs" by adding hooks to your Claude Code settings (observed with 7.12.1 on a plain
+diagnostic run). The workbench guard blocks all seven when they are typed as the command, also inside `$(...)`,
+a script block or a `powershell -Command` string. It does not see one that another program starts or that is spelled
+indirectly (`xargs`, `find -exec`, `Start-Process`, an alias, a shim: the list is in `docs/known-limits.md`), so the rule
+holds only while nobody goes looking for a way around it.
 The kit pins 7.12.1: from 7.13.0, the first launch of a new version silently reinstalls its agent integrations
 (rules text and git-hook sections), so move past the pin only after reviewing what that writes.
 ```bash
@@ -172,6 +179,14 @@ tokensave sync                     # incremental refresh after changes
 Rules that keep it contained:
 - **No hook command may contain the word "tokensave".** A hook that calls its CLI can re-register
   its integrations. Run `tokensave sync` by hand or from your own scheduler.
+- **Its edit tools are guarded like Edit and Write.** The server can also change files (`str_replace`, `multi_str_replace`,
+  `insert_at`, `insert_at_symbol`, `replace_symbol`, `ast_grep_rewrite`, `replace_lines`, `delete_symbol`). The guard puts
+  their `path` (tokensave has no `project_root` option: a relative path is read against the folder the server was started in,
+  taken to be the session's folder; a root the call supplies is judged as well, and any other base-folder key makes the call ask)
+  through the same checks: credential files, `.env` files, the guards' own configuration and
+  your settings files are refused, and so is a folder that holds them (`~/.claude`, your home folder), because a rewrite tool
+  reaches everything beneath the folder it is given. Approving the server as a whole therefore does not approve those
+  paths; the search and callers tools are untouched.
 - Pass `graph_root` to query another initialised repo instead of re-indexing.
 - It misses some cross-file calls in some languages; confirm a blast radius with grep before a
   risky change.

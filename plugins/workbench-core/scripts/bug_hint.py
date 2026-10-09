@@ -8,6 +8,10 @@ card is named (<= 300 characters); no match, a bad file or any error prints noth
                       (only `terminalSequence` is honoured), so nothing can be injected now. Match `last_assistant_message`
                       (the API error string), else the `error` type through ENUM_CARD, queue the line in
                       <workbench home>/state/pending-hint-<session_id>.json (atomic) and print one bell as terminalSequence.
+  PostToolUseFailure  also appends one JSON line per failed call (not a user interrupt) to <workbench home>/state/issues.jsonl:
+                      UTC time, tool, session id, the first 10 error lines passed through _wb.redact. Rotated at 5 MB (one
+                      .1 kept); writes only inside <workbench home>/state; any failure to write is swallowed. Read it with
+                      issues.py show.
   UserPromptSubmit    (--pending)  inject this session's queued line once, then delete the file. Another session's file is
                       never read. Files older than 24 hours are removed. Installed by setup only at or above
                       STOPFAILURE_MIN_CC; never from the static hooks.json.
@@ -32,6 +36,10 @@ STOPFAILURE_MIN_CC = (2, 1, 78)
 ENUM_CARD = {"rate_limit": 19, "overloaded": 67, "server_error": 67, "authentication_failed": 70,
              "oauth_org_not_allowed": 71, "account_on_hold": 71, "billing_error": 69, "model_not_found": 76,
              "cloud_credential_error": 69}
+# Lines are redacted over a window wider than the 2000 characters kept, so a token that straddles the kept width is whole when
+# the scanner sees it; a line longer than the window loses its last unbroken run (it may be half a token) before redaction.
+ISSUES_MAX, ISSUE_LINES, ISSUE_LINE_CHARS = 5 * 1024 * 1024, 10, 2000
+ISSUE_WINDOW = ISSUE_LINE_CHARS + 2048
 STALE_S = 24 * 3600
 BELL = "\a"                                    # a bare BEL is on the documented terminalSequence allowlist
 SID = re.compile(r"[A-Za-z0-9_-]{1,80}")       # a session id becomes part of a file name: nothing else gets through
@@ -81,6 +89,27 @@ def render(card, title, lead=""):
 def hint(error):
     hit = match(error)
     return render(*hit) if hit else None
+
+
+def issue_lines(err):
+    """The first ISSUE_LINES lines of an error, each cut to ISSUE_WINDOW; a cut line ends in [CUT] in place of its last unbroken run."""
+    out = []
+    for x in re.split(r"\r\n|\r|\n", err, maxsplit=ISSUE_LINES)[:ISSUE_LINES]:
+        out.append(re.sub(r"\S+$", "[CUT]", x[:ISSUE_WINDOW]) if len(x) > ISSUE_WINDOW else x)
+    return out
+
+
+def log_issue(ev):
+    """Append this failed tool call to the issues log. Never raises; a redaction failure writes nothing."""
+    try:
+        err = ev.get("error")
+        lines = issue_lines(err) if isinstance(err, str) else []
+        row = {"time": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+               "tool": str(ev.get("tool_name") or "")[:200], "session": str(ev.get("session_id") or "")[:80],
+               "error": [x[:ISSUE_LINE_CHARS] for x in _wb.redact("\n".join(lines)).split("\n")] if lines else []}
+        _wb.append_line(state_dir() / "issues.jsonl", json.dumps(row), timeout=2.0, max_bytes=ISSUES_MAX)
+    except Exception:
+        pass
 
 
 # ── StopFailure relay ─────────────────────────────────────────────────────────────────────────────────────────
@@ -167,6 +196,9 @@ if __name__ == "__main__":
             msg = hint(err) if isinstance(err, str) and not ev.get("is_interrupt") else None
             if msg:
                 _wb.emit("PostToolUseFailure", additionalContext=msg)
+                sys.stdout.flush()
+            if ev and ev.get("hook_event_name", "PostToolUseFailure") == "PostToolUseFailure" and not ev.get("is_interrupt"):
+                log_issue(ev)
     except Exception:
         pass
     sys.exit(0)

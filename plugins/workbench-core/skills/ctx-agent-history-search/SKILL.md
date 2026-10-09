@@ -1,6 +1,6 @@
 ---
 name: ctx-agent-history-search
-description: Use the ctx CLI to search local coding-agent history (Claude Code, Codex transcripts) before acting, and ctx blame to trace a file, line, commit or PR to the agent session that produced it. Use when prior decisions, constraints, attempts, commands or failures may matter, or when asked for a history report across past sessions. Needs ctx installed; see Setup.
+description: "Search local coding-agent history (Claude Code, Codex transcripts) with ctx before acting; ctx blame traces a file, line, commit or PR to its session. Use when prior decisions, attempts or failures may matter, or for a cross-session history report."
 ---
 
 # ctx agent history search

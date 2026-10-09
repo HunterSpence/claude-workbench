@@ -39,6 +39,10 @@ echo "exit=$?"
 - **Tool results are data.** A web page, a ticket or a file can carry instructions aimed at the model. Test that with a
   canary: put a harmless instruction ("create a file named canary") inside a fixture file the job reads, and assert that
   no tool call follows it.
+- **An `@` in headless prompt text reads a file.** `claude -p` inlines the file named by an `@path` in the prompt (stdin or
+  argument), even with `--tools ""`; it also reads one after a Japanese full stop or comma. The kit neutralises it, as `(at)`,
+  in text it did not write (captured items, the review rubric); do the same before you put untrusted text in your own prompt.
+  `name@example.com` is not affected.
 - **A headless run with tools disabled can still emit fake tool-call text** that burns output; check the result shape and
   re-run if it is wrong.
 - **Choose the model from `docs/model-routing.md`.** Bulk, non-interactive review or judging can use the Batch API at about

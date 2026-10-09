@@ -31,8 +31,8 @@ names them `workbench-core:<name>`. Roles stay fixed so findings stay attributab
   explicit user choice of model, agent count or effort wins. The final pass of any
   build/attack/verify run is `blue-verify`.
 - Think-then-build tasks (fix, build, refactor, migrate) go through the `cascade` skill unasked;
-  hard ones use its best-of-N mode. Non-interactive review, judging or bulk passes go through
-  `batch-review` (Batch API: about half price, minutes to hours, needs an organisation API key).
+  hard ones use its best-of-N mode. Non-interactive review, judging or bulk passes can use the Batch API
+  (about half price, minutes to hours, needs an organisation API key): suggest the user run `/workbench-core:batch-review`.
 - Record a non-obvious routing pick in the KB's `ops/model-routing-ledger.md`, same session.
 
 ## Delegating

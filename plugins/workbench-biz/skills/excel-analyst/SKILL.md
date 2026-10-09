@@ -1,6 +1,6 @@
 ---
 name: excel-analyst
-description: Analyse tabular data from an Excel file, CSV or rows pasted in chat. Profiles and cleans it, answers questions such as which team uses most or how weekdays differ, states assumptions and checks totals. Use whenever data needs analysing.
+description: Analyse tabular data from an Excel file, CSV or pasted rows. Profiles and cleans it, answers questions such as which team uses most, states assumptions and checks totals. Use whenever data needs analysing.
 license: MIT
 compatibility: Best with code execution and file upload enabled; with pasted data only, it gives the method and formulas.
 ---

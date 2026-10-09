@@ -630,7 +630,16 @@ def d17_capture(v):
     (drop / "planning-check-in-20260105_1000.meta.json").write_text(json.dumps(fx.get("meta") or {}), encoding="utf-8")
     env = {"WORKBENCH_HOME": str(wb), "CLAUDE_CONFIG_DIR": str(t / "ch"), "WORKBENCH_KNOWLEDGE_DB": str(t / "find.sqlite")}
     ing = v.kit / "plugins" / "workbench-capture" / "skills" / "ingest" / "scripts" / "ingest.py"
+    # The sandbox is a fresh profile, so it has no acknowledgement. Mirror the one recorded in the live profile (only that
+    # field, only when it exists): the check then tests the pipeline, and never forges what the person has not done.
+    ack = (jload(ctx.wb / "capture" / "ingest.json", {}) or {}).get("infosec_ack")
+    if ack:
+        write_atomic(wb / "capture" / "ingest.json", json.dumps({"infosec_ack": ack}))
     rc, _, err = v.run([v.py, ing, "meetings", "run", "--no-digest", "--json"], env, timeout=300)
+    if rc == 5:     # ingest.py: "5 InfoSec acknowledgement missing"; step_row keeps 300 characters, so say the next step early
+        return WARN, ("the InfoSec acknowledgement is not recorded in this profile, so ingest stopped (exit 5); the install is "
+                      "fine. Next: tell your security team what capture does (bootstrap/infosec-note.txt), then run once: "
+                      "ingest.py ack-infosec")
     written = [p for p in (data / "captured").rglob("*.md") if "_drop" not in p.parts]
     if rc != 0 or len(written) != 1 or list(drop.glob("*.vtt")):
         return WARN, f"sandbox meeting ingest: exit {rc}, {len(written)} meeting file(s), original " \
@@ -640,7 +649,7 @@ def d17_capture(v):
 
 def d18_opt_ins(v):
     pk = {p["id"]: p for p in (jload(v.kit / "bootstrap" / "packages.json", {}) or {}).get("packages") or []}
-    rows, bad = [], []
+    rows, bad, tools = [], [], {}
     for pid in ("tokensave", "ctx"):
         p = pk.get(pid)
         if not p:
@@ -649,10 +658,11 @@ def d18_opt_ins(v):
         if status == "absent":
             continue
         rows.append(f"{pid} {ver}" if status == "works" else f"{pid} does not answer")
+        tools[pid] = PASS if status == "works" else WARN      # per tool: the report rates pkg-ctx and pkg-tokensave on their own
         bad += [] if status == "works" else [pid]
     if not rows:
         return OFF, "no optional knowledge tool is installed (code graph: --with tokensave; transcripts: --with ctx)"
-    return (WARN if bad else PASS), "; ".join(rows)
+    return (WARN if bad else PASS), "; ".join(rows), None, tools
 
 
 def d19_full_refresh(v):
@@ -740,9 +750,11 @@ STEPS = (("D1", "kb-seeded", d1_kb_seeded), ("D2", "kb-state", d2_kb_state), ("D
 
 def step_row(sid, name, res, ms):
     status, detail, ask = (list(res) + [None])[:3]
+    tools = res[3] if len(res) > 3 else None      # a step that covers several tools may record each one's status
     if status == FAIL and sid not in FAIL_LIST:      # only the named steps can fail Day 1
         status = WARN
-    return {"id": sid, "name": name, "status": status, "detail": str(detail)[:300], "ms": int(ms), "ask_it": ask or None}
+    row = {"id": sid, "name": name, "status": status, "detail": str(detail)[:300], "ms": int(ms), "ask_it": ask or None}
+    return {**row, "tools": dict(tools)} if tools else row
 
 
 def run_steps(v):

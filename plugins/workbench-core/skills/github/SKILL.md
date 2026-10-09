@@ -1,6 +1,7 @@
 ---
 name: github
-description: "GitHub through the gh CLI, including GitHub Enterprise Server, GHE.com data-residency tenants and Enterprise Managed Users: PRs, issues, Actions runs and logs, reviews, releases, API queries. Use for any GitHub task or 'which gh command' question. Not for local-only git work or complex web-UI flows."
+description: "GitHub through the gh CLI, including Enterprise Server, GHE.com tenants and Managed Users: pull requests, issues, Actions runs and logs, reviews, releases, API queries. Use for any GitHub task or \"which gh command\" question. Not for local-only git."
+when_to_use: "ALWAYS load before any gh command, issue or CI task; review a foreign PR with repo-review."
 ---
 
 # GitHub via `gh`

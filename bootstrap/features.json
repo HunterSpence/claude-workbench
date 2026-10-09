@@ -37,7 +37,8 @@
    "feature": "Document search: keyword mode",
    "rule": "find_keyword",
    "evidence": [
-    "/sections/knowledge/data/find"
+    "/sections/knowledge/data/find",
+    "/sections/knowledge/data/verify"
    ],
    "ask_it": null,
    "unlocks": []
@@ -60,7 +61,8 @@
    "rule": "find_mcp",
    "evidence": [
     "/sections/policies/data/managed_claude",
-    "/sections/knowledge/data/find"
+    "/sections/knowledge/data/find",
+    "/sections/knowledge/data/verify"
    ],
    "ask_it": "Please allow the local stdio MCP server `find` (a local search index; no network egress) in the managed MCP allow list.",
    "unlocks": []
@@ -72,7 +74,8 @@
    "rule": "find_hybrid",
    "evidence": [
     "/sections/knowledge/data/find",
-    "/sections/network/data/endpoints"
+    "/sections/network/data/endpoints",
+    "/sections/knowledge/data/verify"
    ],
    "ask_it": "Please allow downloads from huggingface.co (a one-time embedding model), or provide an approved internal mirror of the model files.",
    "unlocks": []
@@ -84,7 +87,8 @@
    "rule": "refresh_task",
    "evidence": [
     "/sections/knowledge/data/refresh_task",
-    "/sections/knowledge/data/schedule_service"
+    "/sections/knowledge/data/schedule_service",
+    "/sections/knowledge/data/verify"
    ],
    "ask_it": "Please make sure the Windows Task Scheduler service is running so a per-user refresh task can be created.",
    "unlocks": []
@@ -227,7 +231,8 @@
    "rule": "plugin_core",
    "evidence": [
     "/sections/claude/data/plugins_installed",
-    "/sections/policies/data/managed_claude"
+    "/sections/policies/data/managed_claude",
+    "/sections/knowledge/data/verify"
    ],
    "ask_it": null,
    "unlocks": []
@@ -239,7 +244,8 @@
    "rule": "plugin_kb",
    "evidence": [
     "/sections/claude/data/plugins_installed",
-    "/sections/policies/data/managed_claude"
+    "/sections/policies/data/managed_claude",
+    "/sections/knowledge/data/verify"
    ],
    "ask_it": null,
    "unlocks": []
@@ -275,7 +281,8 @@
    "rule": "hooks_guards",
    "evidence": [
     "/sections/policies/data/managed_claude",
-    "/sections/claude/data/plugins_installed"
+    "/sections/claude/data/plugins_installed",
+    "/sections/knowledge/data/verify"
    ],
    "ask_it": "Please allow user hooks for the Claude Code kit: lift the managed hooks-only setting (allowManagedHooksOnly) or add the kit's hooks to the managed hook set.",
    "unlocks": []

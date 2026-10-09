@@ -1,7 +1,7 @@
 """SessionStart hook: a short banner, the model pins from the USER settings file, the guard status, generic health
 warnings, a pending precompact save, dated active-context items that are due, and the knowledge base's
 active-context.md (re-read on every start, resume, clear and compact). Also, from <workbench home>/state/: setup pending,
-the first five routing rows, "managed policy changed", "guards have not run in N sessions", "knowledge verify: N failing"
+a post-update verify pending (post-update-verify.json; one line, gone once `kit_update.py verify` has run), the first five routing rows, "managed policy changed", "guards have not run in N sessions", "knowledge verify: N failing"
 (or a result older than 30 days) and, when the capability report is stale, a detached quick refresh (see extras()). It
 stamps last_start in the guard heartbeat. A pending precompact flag is looked up in the local KB state folder first,
 then in <KB>/.state (an earlier kit's).
@@ -85,7 +85,7 @@ def guard_status():
         return "Guards: generic only (the corporate pack is turned off in corporate-allowlist.json)."
     n = len(c.get("git_remote_hosts") or [])
     return (f"Guards: generic + corporate ({n} approved git host(s)" +
-            ("; every push to a remote host is refused until the user adds hosts)." if not n else ")."))
+            ("; a push to a remote host is refused or asked about until the user adds hosts)." if not n else ")."))
 
 
 def health(kb):
@@ -196,6 +196,15 @@ def extras(source):
             it, bad = len(st.get("ask_it") or []), len(st.get("failed") or [])
             out.append(f"Setup pending: phase {_short(st.get('phase') or 'unknown')}" + (f", {it} item(s) for IT" if it else "")
                        + (f", {bad} failed" if bad else "") + (f". Next: {_short(st['next'], 160)}" if st.get("next") else ""))
+    except Exception:
+        pass
+    try:   # post-update-verify.json (written by setup / kit_update.py, deleted by `kit_update.py verify`): ONE line, until the verify has run
+        mk = _state("post-update-verify.json")
+        if mk:
+            cli = _wb.workbench_home() / "kit" / "bootstrap" / "kit_update.py"
+            out.append(f"A post-update verify is pending (kit {_short(mk.get('version') or 'unknown', 20)}): on the user's next message, before "
+                       f"anything else, run `{sys.executable} {cli.as_posix()} verify` (Bash timeout 600000 ms; on exit 6 run it again), show its "
+                       "table, then do the live guard test the kit-update skill describes.")
     except Exception:
         pass
     try:

@@ -14,6 +14,9 @@ Read this before branching, cleaning up, writing a workflow or wiring a secret s
   under another. Give every session its own worktree.
 - **A branch checked out in a forgotten worktree is invisible.** `git worktree remove` leaves the branch behind and a
   fix can sit there unmerged. List worktrees and unmerged branches after every cleanup.
+- **Deleting a worktree can delete files outside it.** A recursive delete that goes through a Windows junction or symlink in the
+  worktree (`rm -rf link/`, some older tools) empties the folder the link points to. List links first (`dir /AL /S`), remove
+  each with `rmdir`, then remove the worktree (the bug cards have the steps).
 - **A folder inside a bigger repository is "a repo".** `git -C dir` walks up to the parent. Check for `dir/.git`
   before looping over folders, or set `GIT_CEILING_DIRECTORIES`.
 - **Editable installs follow the main checkout.** In a worktree, put the worktree's source first on `PYTHONPATH`.

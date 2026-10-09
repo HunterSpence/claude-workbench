@@ -1,7 +1,7 @@
 ---
 name: brand-spec
-description: One question at a time, then BRAND_SPEC.md - personality, audience, visual identity, motion, voice, anti-goals and locked design tokens - before UI or deck work starts on a product with no brand spec. Use for "what should this look and feel like", "brand intake", "new product, no style guide".
-when_to_use: Load before the first UI or deck work for a product with no brand spec yet.
+description: "Ask one question at a time, then write BRAND_SPEC.md with locked design tokens."
+disable-model-invocation: true
 ---
 
 # brand-spec

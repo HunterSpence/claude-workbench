@@ -26,6 +26,7 @@ import time  # noqa: E402
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+import asks  # noqa: E402
 import devbench  # noqa: E402
 import probe  # noqa: E402
 
@@ -116,9 +117,20 @@ def wsl2(p):
     return U, "admin rights unknown"
 
 
+def day_one(p, step):
+    """The status of one Day-1 knowledge check (D1-D23) as the probe read it from knowledge-verify.json, else None."""
+    return (((D(p, "knowledge").get("verify") or {}).get("steps")) or {}).get(step)
+
+
 @rule
 def find_keyword(p):
-    return (R, "search index tool present") if D(p, "knowledge")["find"]["available"] else (I, "installed with the kit")
+    if day_one(p, "D10") == "FAIL":      # doctor --deep says the guides are not found by keyword: the report must not say READY
+        return I, "the Day-1 check D10 failed: setup.py doctor --deep says why"
+    if D(p, "knowledge")["find"]["available"]:
+        return R, "search index tool present"
+    if day_one(p, "D10") == "PASS":     # the probe's own find call can fail where the Day-1 check (the knowledge venv) passes
+        return R, "the Day-1 check D10 found the how-to guides by keyword"
+    return I, "installed with the kit"
 
 
 @rule
@@ -126,13 +138,19 @@ def find_hybrid(p):
     f = D(p, "knowledge")["find"]
     if f["mode"] == "hybrid" and (f["vectors"] or 0) > 0:
         return R, "embeddings present"
+    if "PASS" in (day_one(p, "D9"), day_one(p, "D11")):
+        return R, "the Day-1 checks D9/D11 passed: the index holds vectors and hybrid search answers"
     eps = [e for e in endpoints(p) if "huggingface" in e["url"]]
-    if not eps:
-        return U, "model host not in the package table"
-    r = eps[0]["result"]
+    r = eps[0]["result"] if eps else None
     if r == "ok":
         return I, "model host reachable; one download at setup"
-    return (N, "model host not reachable") if r in ("blocked", "proxy-auth") else (U, "model host not tested")
+    if r in ("blocked", "proxy-auth"):
+        return N, "model host not reachable"
+    if "WARN" in (day_one(p, "D9"), day_one(p, "D11")):      # what doctor --deep says: keyword-only, and the ask that goes with it
+        return N, "the Day-1 check found the index keyword-only: the embedding model is not available"
+    if not eps:
+        return U, "model host not in the package table"
+    return U, "model host not tested (a quick report has no network) and the Day-1 check has not run"
 
 
 @rule
@@ -140,6 +158,8 @@ def refresh_task(p):
     k = D(p, "knowledge")
     if k["refresh_task"]:
         return R, "the kit's task exists"
+    if day_one(p, "D15") == "PASS":
+        return R, "the Day-1 check D15 found the task registered as setup recorded it"
     if k["schedule_service"] == "Running":
         return I, "Task Scheduler is running; the task is created at setup"
     return (N, "Task Scheduler is not running") if k["schedule_service"] else (U, "Task Scheduler state unknown")
@@ -215,6 +235,8 @@ def find_mcp(p):
     m = managed(p)
     if "find" in m["mcp_deny"] or (m["mcp_managed_only"] and "find" not in (m["mcp_allow"] or [])):
         return B, "managed MCP policy does not allow the local find server"
+    if day_one(p, "D13") == "PASS":
+        return R, "registered; the Day-1 check D13 passed the handshake and a search"
     return I, "registered by setup; a local stdio server, no network egress"
 
 
@@ -262,6 +284,8 @@ def plugin_rule(pid):
         m, cl = managed(p), D(p, "claude")
         if any(x.startswith(pid + "@") for x in cl["plugins_installed"]):
             return R, "installed"
+        if pid in ("workbench-core", "workbench-kb") and day_one(p, "D14") == "PASS":   # D14 passes only with both enabled and hooks run
+            return R, "the Day-1 check D14 ran the hooks with this plugin enabled"
         if m["marketplaces_strict"]:
             return B, "managed marketplace allow list", ASK_PLUGINS
         return (I, "installed by setup") if tool(p, "claude").get("works") else (U, "Claude Code not found")
@@ -280,6 +304,8 @@ def hooks_guards(p):
         return B, "managed settings allow only managed hooks"
     if any(x.startswith("workbench-core@") for x in D(p, "claude")["plugins_installed"]):
         return R, "hooks installed with the core plugin"
+    if day_one(p, "D14") == "PASS":
+        return R, "the Day-1 check D14 ran session start and precompact with the plugin enabled"
     return (I, "installed with the core plugin") if tool(p, "claude").get("works") else (U, "Claude Code not found")
 
 
@@ -333,10 +359,14 @@ def browser_automation(p):
 def package_rule(pkg):
     def f(p):
         t = D(p, "tools")["packages"].get(pkg["id"])
+        if t and t["works"]:
+            return R, "version %s" % t["version"]
+        if pkg["id"] == "playwright-cli" and day_one(p, "D23") == "PASS":     # setup's own PATH finds what the probe's may not
+            return R, "the Day-1 check D23 opened and closed headless Edge with it"
+        if pkg["id"] in ("ctx", "tokensave") and ((D(p, "knowledge").get("verify") or {}).get("tools") or {}).get(pkg["id"]) == "PASS":
+            return R, "the Day-1 check D18 ran it and it answered"
         if t is None:
             return U, "not probed"
-        if t["works"]:
-            return R, "version %s" % t["version"]
         pol = D(p, "policies")
         for k in pkg.get("policy_keys") or []:
             if any(denies(n, v) for n, v in (pol["package_keys"].get(k) or {}).items() if isinstance(v, int)):
@@ -370,6 +400,12 @@ def mcp_rule(name, cfg):
         cmd = str(cfg.get("command", ""))
         if cmd in ("npx", "node"):
             return (R, "runtime present") if tool(p, "node").get("works") else (I, "needs Node, installed by setup")
+        if cmd in ("uvx", "uv"):
+            return (R, "runtime present") if tool(p, "uv").get("works") else (I, "needs uv, installed by setup")
+        if cmd in ("{{PYTHON}}", "{{KNOWLEDGE_PYTHON}}"):     # a kit script run by Python; this report is running in Python
+            if name == "find" and day_one(p, "D13") != "PASS":
+                return I, "registered by setup; the Day-1 check D13 has not passed yet"
+            return R, "the Day-1 check D13 passed" if name == "find" else "a kit script run by the kit's Python"
         if cmd.startswith("{{"):
             return (R, "binary found") if tool(p, name).get("found") else (I, "binary installed by setup")
         return U, "runtime not checked"
@@ -431,11 +467,12 @@ def row_defs(kit, packages_path=None, features=None):
         if isinstance(x, dict) and x.get("id"):
             add({"id": "pkg-" + x["id"], "group": "provision", "feature": "Install " + str(x.get("name") or x["id"]),
                  "evidence": ["/sections/tools/data/packages/" + x["id"].replace("~", "~0").replace("/", "~1"),
-                              "/sections/identity/data/admin_capable"],
+                              "/sections/identity/data/admin_capable", "/sections/knowledge/data/verify"],
                  "ask_it": x.get("ask_it"), "unlocks": [], "_fn": package_rule(x)})
     for name, cfg in ((load_json(os.path.join(kit, "mcp", "golden-config.template.json")) or {}).get("servers") or {}).items():
         add({"id": "mcp-" + name, "group": "mcp", "feature": "MCP server: " + name,
-             "evidence": ["/sections/tools/data/node", "/sections/policies/data/managed_claude"], "ask_it": None,
+             "evidence": ["/sections/tools/data/node", "/sections/policies/data/managed_claude",
+                          "/sections/knowledge/data/verify"], "ask_it": None,
              "unlocks": [], "_fn": mcp_rule(name, cfg if isinstance(cfg, dict) else {})})
     routing = load_json(os.path.join(kit, "settings", "model-routing.json")) or {}
     for rw in routing.get("rows") or []:
@@ -481,14 +518,22 @@ def evaluate(p, kit=KIT, packages_path=None, features=None, rules=None):
     return out
 
 
-def roadmap(rows):
+def roadmap(rows, extra=()):
+    """The ranked IT asks, ONE per distinct text (asks.key: case and spacing do not make a second ask). `extra` = asks setup and
+    the Day-1 checks raised that no row carries (asks.gather); they join the same list with nothing unlocked."""
     ids = {r["id"] for r in rows}
-    groups = {}
+    groups, text = {}, {}
     for r in rows:
         if r["status"] in (N, B) and r["ask_it"]:
-            groups.setdefault(r["ask_it"], set()).update([r["id"]] + [u for u in r["unlocks"] if u in ids])
-    ranked = sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
-    return [{"rank": i + 1, "ask": ask, "unlocks": sorted(s)} for i, (ask, s) in enumerate(ranked)]
+            k = asks.key(r["ask_it"])
+            text.setdefault(k, r["ask_it"])
+            groups.setdefault(k, set()).update([r["id"]] + [u for u in r["unlocks"] if u in ids])
+    for a in extra:
+        k = asks.key(a["ask"])
+        text.setdefault(k, a["ask"])
+        groups.setdefault(k, set())
+    ranked = sorted(groups.items(), key=lambda kv: (-len(kv[1]), text[kv[0]]))
+    return [{"rank": i + 1, "ask": text[k], "unlocks": sorted(s)} for i, (k, s) in enumerate(ranked)]
 
 
 def ep_ms(p, pred):
@@ -642,6 +687,7 @@ def run_report(phase, out, quick=False, no_bench=False, no_model_call=False, pac
                                                   model=devbench.pick_model(m["denied"], m["available"]) if call else None)
     probe_path = os.path.join(out, "probe-%s.json" % phase)
     c = build(p, phase, bench, quick, kit, packages, probe_path, features, rules)
+    c["roadmap"] = roadmap(c["features"], asks.gather(out, report={}))     # + the asks setup and the Day-1 checks raised: one list
     c["duration_s"] = round(time.monotonic() - t0, 1)
     probe.write_atomic(probe_path, json.dumps(p, indent=1))
     probe.write_atomic(os.path.join(out, "capability-%s.json" % phase), json.dumps(c, indent=1))

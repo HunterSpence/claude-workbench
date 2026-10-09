@@ -1,0 +1,486 @@
+{
+ "version": 1,
+ "note": "Kit probe: 5 should-fire and 5 should-not-fire cases for every kit skill that carries a when_to_use line. 'examples' are one literal prompt per pattern (same order); the tool reads only 'should' and 'should_not'.",
+ "skills": {
+  "github": {
+   "should": [
+    "\\b(open|create|raise|make) (a |the )?(pull request|pr)\\b",
+    "\\bwhy is (the )?(ci|build|actions? run)\\b.{0,30}\\bfail",
+    "\\b(list|show|find) (the )?(open )?(issues|prs|pull requests)\\b",
+    "\\bwhich gh command\\b|\\bgh (run|pr|issue|api)\\b",
+    "\\b(comment on|close|label|assign) (issue|pr|pull request)\\b|\\brequest (a )?review\\b"
+   ],
+   "should_not": [
+    "\\bexplain (how )?git\\b",
+    "\\bdifference between git\\b",
+    "\\bcommit (my|the) (local )?changes\\b",
+    "\\bgitlab\\b",
+    "\\breview (this|that|a) (foreign |external |stranger's )?(pr|pull request)\\b"
+   ],
+   "examples": {
+    "should": [
+     "open a pull request for this branch",
+     "why is the ci run failing on my pr",
+     "list the open issues labelled bug",
+     "which gh command shows the logs of a workflow run",
+     "comment on issue 42 and request a review"
+    ],
+    "should_not": [
+     "explain how git rebase works",
+     "what is the difference between git merge and git rebase",
+     "commit my local changes with a short message",
+     "set up a gitlab pipeline for the monorepo",
+     "review this pull request from a contractor i do not know"
+    ]
+   }
+  },
+  "linux-service-triage": {
+   "should": [
+    "\\b50[234]\\b",
+    "\\b(systemctl|journalctl)\\b|\\b(systemd|pm2)\\b.{0,30}\\b(fail|failed|failing|crash|status|log)",
+    "\\b(site|website|api|server)\\b.{0,20}\\b(down|unreachable|not responding)\\b",
+    "\\bcontainer\\b.{0,20}\\b(restart|crash)",
+    "\\bnginx\\b.{0,40}\\b(refused|timed? out|error|proxy)"
+   ],
+   "should_not": [
+    "\\binstall (nginx|docker|postgres)\\b",
+    "\\bwhat is (systemd|pm2|nginx)\\b",
+    "\\bwrite (a )?(dockerfile|docker-compose)",
+    "\\b(laptop|pc|computer)\\b.{0,20}\\bslow\\b",
+    "\\bsummari[sz]e\\b.{0,30}\\b(outage|postmortem)\\b"
+   ],
+   "examples": {
+    "should": [
+     "the site returns 502 after the last deploy",
+     "systemctl says the api service failed, why",
+     "the website is unreachable but the server is up",
+     "my container keeps restarting on the vps",
+     "nginx reverse proxy shows connection refused"
+    ],
+    "should_not": [
+     "how do i install nginx on my laptop",
+     "what is systemd",
+     "write a dockerfile for my python app",
+     "my laptop is slow since the update",
+     "summarise this outage postmortem for the team"
+    ]
+   }
+  },
+  "deep-research": {
+   "should": [
+    "\\bdeep research\\b",
+    "\\bshould we (adopt|use|switch to|move to)\\b",
+    "\\bcompare\\b.{0,50}\\b(vendors?|tools?|platforms?)\\b",
+    "\\bresearch (this )?in depth\\b|\\bverify each claim\\b",
+    "\\bdecision list\\b|\\bevaluate\\b.{0,30}\\bvendors?\\b"
+   ],
+   "should_not": [
+    "\\bwhat year\\b",
+    "\\bsearch the (code ?base|repo)\\b",
+    "\\bwhat does this error\\b",
+    "\\bquick question\\b",
+    "\\bsummari[sz]e this (article|page|paper)\\b"
+   ],
+   "examples": {
+    "should": [
+     "do deep research on vector database vendors",
+     "should we adopt rust for the new service",
+     "compare the top three observability tools and cite sources",
+     "research this in depth and verify each claim",
+     "evaluate three vendors and give me a decision list"
+    ],
+    "should_not": [
+     "what year was python released",
+     "search the codebase for the retry helper",
+     "what does this error message mean",
+     "quick question: is a tuple immutable",
+     "summarise this article for me"
+    ]
+   }
+  },
+  "office-docx": {
+   "should": [
+    "\\bwrite (a |the )?memo\\b",
+    "\\b(make|turn|save)\\b.{0,30}\\bword (doc|document|file)\\b",
+    "\\b(document|word) template\\b",
+    "\\bconvert\\b.{0,20}\\bdocx\\b",
+    "\\bturn\\b.{0,30}\\binto a (report|memo|document)\\b"
+   ],
+   "should_not": [
+    "\\bwhat (a |is a )?docx\\b",
+    "\\bsummari[sz]e\\b.{0,30}\\bword (doc|document)\\b",
+    "\\bformat this python\\b",
+    "\\bwrite (a )?(function|script|class)\\b",
+    "\\bemail the memo\\b"
+   ],
+   "examples": {
+    "should": [
+     "write a memo about the office move",
+     "make this a word document",
+     "use our document template for the report",
+     "convert this docx to markdown",
+     "turn these notes into a report with headings"
+    ],
+    "should_not": [
+     "explain what a docx file is",
+     "summarise the attached word document",
+     "format this python file with black",
+     "write a function that parses a header line",
+     "email the memo to my manager"
+    ]
+   }
+  },
+  "office-pptx": {
+   "should": [
+    "\\bmake (a |the )?(deck|presentation)\\b",
+    "\\binto slides\\b",
+    "\\b(presentation|deck) template\\b|\\buse our template\\b.{0,30}\\b(deck|slides|presentation)\\b",
+    "\\b(add|insert)\\b.{0,15}\\bslide\\b",
+    "\\bpower ?point\\b"
+   ],
+   "should_not": [
+    "\\bwhat (does )?a good slide\\b",
+    "\\bsummari[sz]e\\b.{0,25}\\b(presentation|deck|slides)\\b",
+    "\\btips for presenting\\b",
+    "\\bpptx to pdf\\b",
+    "\\bslide rule\\b"
+   ],
+   "examples": {
+    "should": [
+     "make a deck for friday's review",
+     "turn this outline into slides",
+     "use our template for the presentation",
+     "add a chart slide with last quarter's numbers",
+     "build a powerpoint with speaker notes"
+    ],
+    "should_not": [
+     "what does a good slide look like",
+     "summarise the attached presentation",
+     "tips for presenting to executives",
+     "convert this pptx to pdf with libreoffice",
+     "who invented the slide rule"
+    ]
+   }
+  },
+  "office-xlsx": {
+   "should": [
+    "\\bmake (a |the )?spreadsheet\\b",
+    "\\bbuild (a |the )?(financial )?model\\b",
+    "\\bsummary sheet\\b",
+    "\\bfix (this|the) (workbook|spreadsheet)\\b",
+    "\\bcreate (an )?excel\\b"
+   ],
+   "should_not": [
+    "\\bwhat is the\\b.{0,20}\\bfunction in excel\\b",
+    "\\bexplain how a pivot\\b",
+    "\\banalyse this csv\\b",
+    "\\bexport\\b.{0,20}\\bcsv\\b",
+    "\\bshortcut\\b.{0,20}\\bfreeze panes\\b"
+   ],
+   "examples": {
+    "should": [
+     "make a spreadsheet of monthly costs",
+     "build a model with live formulas for the budget",
+     "add a summary sheet to this workbook",
+     "fix this workbook, the totals are wrong",
+     "create an excel file with a dropdown for status"
+    ],
+    "should_not": [
+     "what is the sum function in excel",
+     "explain how a pivot table works",
+     "analyse this csv and tell me which team uses most",
+     "export the report to csv",
+     "what is the shortcut to freeze panes"
+    ]
+   }
+  },
+  "repo-fix": {
+   "should": [
+    "\\bfix (this|the|my) repo\\b",
+    "\\breview (this|the) repository\\b",
+    "\\bclean ?up (this|the) (code ?base|repo)\\b",
+    "\\bfix the bugs in\\b",
+    "\\blook over this (github )?(project|repo)\\b"
+   ],
+   "should_not": [
+    "\\bfix this typo\\b",
+    "\\bexplain the structure\\b",
+    "\\breview this pull request\\b",
+    "\\bcreate a new repo(sitory)?\\b",
+    "\\bwhat licen[cs]e\\b"
+   ],
+   "examples": {
+    "should": [
+     "fix this repo, tests are red and lint fails",
+     "review this repository and fix what you find",
+     "clean up this codebase",
+     "fix the bugs in acme/widgets",
+     "look over this github project and open a draft pr"
+    ],
+    "should_not": [
+     "fix this typo in the readme",
+     "explain the structure of this directory",
+     "review this pull request read-only",
+     "create a new repository for the demo",
+     "what license does this project use"
+    ]
+   }
+  },
+  "repo-review": {
+   "should": [
+    "\\breview this (pr|pull request)\\b",
+    "\\blook over this repo\\b",
+    "\\bcheck this plugin folder\\b",
+    "\\breview\\b.{0,30}\\b(repository|repo)\\b.{0,40}\\b(vendor|received|did not write|someone else)\\b",
+    "\\b(audit|inspect)\\b.{0,20}\\brepo\\b.{0,30}\\bwithout cloning\\b"
+   ],
+   "should_not": [
+    "\\bfix the failing test\\b",
+    "\\bwrite (a )?(pr|pull request) description\\b",
+    "\\bmerge this (pr|pull request)\\b",
+    "\\breview my own\\b",
+    "\\bwhat does this repo(sitory)?\\b"
+   ],
+   "examples": {
+    "should": [
+     "review this pr for me",
+     "look over this repo, read-only",
+     "check this plugin folder before we use it",
+     "review the code in this repository we received from a vendor",
+     "audit this github repo without cloning it into my workspace"
+    ],
+    "should_not": [
+     "fix the failing test in my project",
+     "write a pull request description",
+     "merge this pr now",
+     "review my own code before i commit",
+     "what does this repository do"
+    ]
+   }
+  },
+  "skill-scan": {
+   "should": [
+    "\\bscan (this|the|a) (skill|plugin)\\b",
+    "\\bsafe\\b.{0,25}\\b(skill|plugin)\\b|\\b(skill|plugin)\\b.{0,25}\\bsafe\\b",
+    "\\baudit\\b.{0,20}\\b(installed )?skills\\b",
+    "\\bbefore (i|we) (trust|install)\\b.{0,30}\\b(skill|plugin)\\b",
+    "\\bskillspector\\b"
+   ],
+   "should_not": [
+    "\\bwrite a new skill\\b",
+    "\\blist (the )?(installed )?plugins\\b",
+    "\\buninstall\\b",
+    "\\bwhat is a skill\\b",
+    "\\bupdate (my|the) plugins\\b"
+   ],
+   "examples": {
+    "should": [
+     "scan this skill before i install it",
+     "is this third-party plugin safe to install",
+     "audit the installed skills for risky code",
+     "before i trust this marketplace plugin, check what it runs",
+     "run skillspector over my plugin cache"
+    ],
+    "should_not": [
+     "write a new skill for our team",
+     "list the installed plugins",
+     "uninstall the plugin i do not use",
+     "what is a skill in claude code",
+     "update my plugins to the latest version"
+    ]
+   }
+  },
+  "ui-build": {
+   "should": [
+    "\\bbuild (this|the) page\\b",
+    "\\breview (this|the) ui\\b",
+    "\\bfix the layout\\b",
+    "\\bmake it responsive\\b",
+    "\\badd dark mode\\b"
+   ],
+   "should_not": [
+    "\\bwhat does flexbox\\b",
+    "\\bwrite a python script\\b",
+    "\\bdatabase schema\\b",
+    "\\bdifference between margin\\b",
+    "\\bapi endpoint\\b"
+   ],
+   "examples": {
+    "should": [
+     "build this page for the settings screen",
+     "review this ui for accessibility",
+     "fix the layout on mobile",
+     "make it responsive",
+     "add dark mode to the dashboard"
+    ],
+    "should_not": [
+     "what does flexbox do",
+     "write a python script to rename files",
+     "design the database schema for orders",
+     "explain the difference between margin and padding",
+     "update the api endpoint for login"
+    ]
+   }
+  },
+  "diagram": {
+   "should": [
+    "\\barchitecture diagram\\b",
+    "\\bmermaid\\b",
+    "\\b(sketch|draw|make|create) (me )?(a |the )?flow ?chart\\b",
+    "\\bsequence diagram\\b",
+    "\\bdiagram of\\b"
+   ],
+   "should_not": [
+    "\\bwhat is a (flow ?chart|diagram)\\b",
+    "\\bexplain this diagram\\b",
+    "\\bin words\\b",
+    "\\bpicture of a\\b",
+    "\\bbar chart\\b"
+   ],
+   "examples": {
+    "should": [
+     "draw an architecture diagram of the nightly job",
+     "turn this mermaid into an excalidraw file",
+     "sketch a flowchart for the approval process",
+     "make a sequence diagram for the login flow",
+     "i need a diagram of how these services talk to each other"
+    ],
+    "should_not": [
+     "what is a flowchart",
+     "explain this diagram to me",
+     "describe the architecture in words",
+     "draw a picture of a cat",
+     "make a bar chart of sales"
+    ]
+   }
+  },
+  "draft-reply": {
+   "should": [
+    "\\bdraft (a |my )?reply\\b",
+    "\\bhelp me respond\\b",
+    "\\bwrite back to\\b",
+    "\\banswer this (e-?mail|message)\\b",
+    "\\breply to this thread\\b"
+   ],
+   "should_not": [
+    "\\bsubject line\\b",
+    "\\bsummari[sz]e this (e-?mail|thread)\\b",
+    "\\bemail filter\\b",
+    "\\btranslate this\\b",
+    "\\bblog post\\b"
+   ],
+   "examples": {
+    "should": [
+     "draft a reply to this email",
+     "help me respond to this thread",
+     "write back to the vendor about the delay",
+     "answer this email from my manager",
+     "reply to this thread agreeing to the dates"
+    ],
+    "should_not": [
+     "what is a good subject line for a newsletter",
+     "summarise this email thread",
+     "set up an email filter",
+     "translate this message into french",
+     "write a blog post about our launch"
+    ]
+   }
+  },
+  "find": {
+   "should": [
+    "\\bfind the (doc|document|file)s? about\\b",
+    "\\bwhat do (our|the) (files|docs|documents) say\\b",
+    "\\blatest version of (the|our|my)\\b",
+    "\\bsearch (our|the|my) (sharepoint|library|shared drive|files)\\b",
+    "\\bwhich (document|file) mentions\\b"
+   ],
+   "should_not": [
+    "\\bfind the bug\\b",
+    "\\brestaurant\\b",
+    "\\bsearch the web\\b",
+    "\\bgrep\\b",
+    "\\blatest version of python\\b"
+   ],
+   "examples": {
+    "should": [
+     "find the doc about travel policy",
+     "what do our files say about retention",
+     "latest version of the pricing sheet",
+     "search our sharepoint library for the onboarding checklist",
+     "which document mentions the security review"
+    ],
+    "should_not": [
+     "find the bug in this function",
+     "find a restaurant near the office",
+     "search the web for pricing of tool x",
+     "grep the codebase for the error string",
+     "what is the latest version of python"
+    ]
+   }
+  },
+  "handoff": {
+   "should": [
+    "\\bwrite (a )?handoff\\b",
+    "\\b(hitting|near|close to|reached) (my|the) usage limit\\b",
+    "\\bresume note\\b",
+    "\\bhand (this|it) off\\b",
+    "\\bsurvive a restart\\b"
+   ],
+   "should_not": [
+    "\\bsummari[sz]e this meeting\\b",
+    "\\bwhat is a handoff\\b",
+    "\\bclear the context\\b",
+    "\\bwhat is my usage limit\\b",
+    "\\bcompact the conversation\\b"
+   ],
+   "examples": {
+    "should": [
+     "write a handoff for the next session",
+     "i am hitting my usage limit, save where we are",
+     "make a resume note so a fresh session can continue",
+     "this mission is outgrowing the session, hand it off",
+     "the plan must survive a restart, write it down"
+    ],
+    "should_not": [
+     "summarise this meeting",
+     "what is a handoff in a relay race",
+     "clear the context and start over",
+     "what is my usage limit on this plan",
+     "compact the conversation"
+    ]
+   }
+  },
+  "brain-audit": {
+   "should": [
+    "\\baudit the (setup|config)\\b",
+    "\\bbrain-audit\\b",
+    "\\binstructions\\b.{0,30}\\b(ignored|contradict|stale)",
+    "\\bdead @?imports?\\b|\\bmissing hook\\b",
+    "\\b(stale|ignored)\\b.{0,20}\\b(hooks?|rules?|kb|knowledge base)\\b"
+   ],
+   "should_not": [
+    "\\baudit the security\\b",
+    "\\bspelling\\b",
+    "\\bwhat is a knowledge base\\b",
+    "\\badd a new rule\\b",
+    "\\bdelete the old\\b"
+   ],
+   "examples": {
+    "should": [
+     "audit the setup for stale config",
+     "run brain-audit",
+     "my instructions seem ignored or contradictory",
+     "check for dead @imports and missing hook targets",
+     "are any of my rules stale or my hooks ignored"
+    ],
+    "should_not": [
+     "audit the security of this web app",
+     "check the spelling in my notes",
+     "what is a knowledge base",
+     "add a new rule to my instructions",
+     "delete the old config backup"
+    ]
+   }
+  }
+ }
+}

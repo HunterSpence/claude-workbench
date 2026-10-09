@@ -1,6 +1,6 @@
 ---
 name: vdi-drive
-description: OPT-IN, user-invoked only. Drive a remote desktop that a web client draws into an HTML canvas (Citrix, Horizon, Azure Virtual Desktop, noVNC or Guacamole web clients) by attaching over CDP to a browser the human already signed into. Needs written authorisation from the desktop's owner and a local authorisation note; never handles credentials. Not for normal web pages (use Playwright) or anything an API can do.
+description: "OPT-IN. Drive a remote desktop shown as an image in a browser (Citrix, Horizon, Azure Virtual Desktop, noVNC). Needs written authorisation."
 disable-model-invocation: true
 ---
 

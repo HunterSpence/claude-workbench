@@ -1,0 +1,4 @@
+{
+  "_readme": "OWNER/REPO of the page this kit's releases are published on. kit_update.py reads it when neither --repo, the env var WB_KIT_REPO nor config.json (kit_repo) names a repository. It stays empty on purpose: the first update names the repository in the user's message, and the kit remembers it.",
+  "repo": ""
+}

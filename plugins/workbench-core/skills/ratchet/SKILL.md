@@ -1,6 +1,6 @@
 ---
 name: ratchet
-description: "Keep fixing and re-auditing a target in rounds until two consecutive rounds find nothing new. Use for /workbench-core:ratchet, 'audit this in rounds', 'until there are no new findings', or when work was declared done too early. Each round hunts for NEW defects, fixes them, locks each fix behind a test proven to fail without it, and re-verifies. Not for a single known bug or a quick question."
+description: "Fix and re-audit a target in rounds until two consecutive rounds find nothing new, each fix locked behind a test proven to fail without it. Use for \"audit this in rounds\", \"until there are no new findings\", or when work was declared done too early."
 ---
 
 # /workbench-core:ratchet: fix, re-hunt, repeat until dry

@@ -1,7 +1,7 @@
 ---
 name: draft-reply
-description: Draft a reply to an email or chat thread - answer first, then the asks with owners and dates, in the user's voice - as plain text and HTML, optionally as a .eml draft file or (opt-in) an Outlook draft. Never sends. Use for "draft a reply", "help me respond to this", "write back to", "answer this email", "reply to this thread", or a pasted thread, .eml or .msg file.
-when_to_use: ALWAYS load before drafting any email, chat reply or message for the user.
+description: "Draft a reply to an email or chat thread in the user's voice: answer first, then asks with owners and dates, as plain text and HTML or a .eml file. Never sends. Use for \"draft a reply\", \"help me respond\", \"write back to\", \"answer this email\", \"reply to this thread\", or a pasted thread, .eml or .msg."
+when_to_use: "ALWAYS load before drafting any email, chat reply or message for the user."
 ---
 
 # draft-reply

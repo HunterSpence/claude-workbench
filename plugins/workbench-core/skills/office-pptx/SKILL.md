@@ -1,6 +1,7 @@
 ---
 name: office-pptx
-description: Build or rebuild a PowerPoint deck (.pptx) with python-pptx from an outline or on a corporate template - titles, bullets, tables, native editable charts, images, speaker notes - then render every slide and fix what looks wrong. Use for "make a deck", "turn this into slides", "use our template", "add a chart slide".
+description: "Build or rebuild a PowerPoint deck (.pptx) with python-pptx from an outline or corporate template (tables, editable charts, images, speaker notes), then render every slide and fix it. Use for \"make a deck\", \"turn this into slides\", \"use our template\", \"add a chart slide\"."
+when_to_use: "ALWAYS load before creating or editing a PowerPoint deck, even a small one."
 ---
 
 # office-pptx

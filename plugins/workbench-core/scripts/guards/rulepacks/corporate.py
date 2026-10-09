@@ -2,12 +2,17 @@
 
 ON by default. Its settings live in <claude config dir>/workbench/corporate-allowlist.json (the installer writes it;
 the engine refuses agent writes into the workbench folder that it can recognise; a program that builds the path at run
-time is not seen). A missing or unreadable file means the defaults: ON, no approved hosts, so every push to a remote
-host is refused until the user adds hosts. So does a CLAUDE_CONFIG_DIR that differs from the one the installer
+time is not seen). A missing or unreadable file means the defaults: ON, no approved hosts, so a push to a remote
+host is held (refused at the strict guard level, asked about at the standard one) until the user adds hosts. So does a CLAUDE_CONFIG_DIR that differs from the one the installer
 recorded (see _wb.config_redirected).
 Known limits: see "_known_limits" in corporate-allowlist.template.json.
 "enabled": false turns the pack off. Keys:
   enabled               default true
+  guard_level           "standard" (default, also when the key or file is missing or invalid) or "strict". Read by the
+                        engine (engine.guard_level) for every rule, this pack's and the generic one's. Under standard,
+                        remote-not-allowlisted, upload-not-allowlisted and no-verify ASK instead of refusing, and browser-cli
+                        plain navigation (an http(s) URL with no credential) passes and is logged; strict refuses them, as 0.3.1 did. A file that
+                        exists but cannot be parsed, or is not a JSON object, means strict (logged).
   git_remote_hosts      hosts code may be pushed to: exact host names, case-insensitive (list each subdomain and each
                         ssh alias). Pushes to local paths and file:// are refused.
   upload_hosts          extra hosts that file uploads (curl -T, -d @file, -F file=@...) may go to (git hosts count too)
@@ -72,15 +77,17 @@ import _wb
 DEFAULTS = {"enabled": True, "git_remote_hosts": [], "upload_hosts": [],
             "block_public_repos": True, "send_endpoints": [], "extra_secret_paths": [],
             "production_hosts": [], "protected_db_tables": []}
+# No pattern here starts with an open-ended prefix (`[\w.-]*\.logic`) or runs on without a bound: on a long run of the characters the
+# prefix accepts, either one is quadratic or worse, and a command is long when it carries a base64 blob.
 DEFAULT_SEND_ENDPOINTS = [
-    r"graph\.microsoft\.com/[^\s\"']*/sendMail",
-    r"graph\.microsoft\.com/[^\s\"']*/(?:chats|channels)/[^\s\"']*/messages",   # Teams chat / channel post
-    r"[\w.-]*\.logic\.azure\.com[^\s\"']*/triggers/",                          # Power Automate / Logic Apps
-    r"[\w.-]*webhook\.office\.com/",
+    r"graph\.microsoft\.com/[^\s\"']{0,2000}/sendMail",
+    r"graph\.microsoft\.com/[^\s\"']{0,2000}/(?:chats|channels)/[^\s\"']{0,2000}/messages",   # Teams chat / channel post
+    r"\.logic\.azure\.com[^\s\"']{0,2000}/triggers/",                                  # Power Automate / Logic Apps
+    r"webhook\.office\.com/",
     r"hooks\.slack\.com/(?:services|workflows|triggers)/",
     r"slack\.com/api/chat\.(?:postMessage|scheduleMessage|postEphemeral)",
     r"api\.sendgrid\.com/v3/mail/send",
-    r"api\.mailgun\.net/v3/[^\s\"']*/messages",
+    r"api\.mailgun\.net/v3/[^\s\"']{0,2000}/messages",
     r"discord(?:app)?\.com/api/webhooks/",
 ]
 
@@ -129,7 +136,7 @@ def _allowed(host, conf, *keys):
 def _why(conf, key="git_remote_hosts"):
     src = allowlist_path().as_posix()
     if not _hosts(conf, key):
-        return (f"No hosts are approved yet ({key} in {src} is empty), so this is refused. The user adds the "
+        return (f"No hosts are approved yet ({key} in {src} is empty). The user adds the "
                 "company's hosts there by hand, or re-runs the installer with --git-hosts.")
     return f"That host is not in {key} in {src}. The user edits that file; the agent does not."
 
@@ -311,18 +318,21 @@ def _read_only(words):
 
 def _alias(sub, cwd, cmdline=()):
     """How `git <sub> <cmdline>` resolves through aliases on disk: "none" (no alias: git will error), "ok" (it ends at
-    a read-only builtin), "deny" (anything else, including a chain too long or looping)."""
+    a read-only builtin), "shell" (a `!` alias: it runs a shell command), "deny" (anything else, including a chain too long or
+    looping)."""
     seen, extra = [], list(cmdline)
     while True:
         v = _git(cwd, "config", "--get", "alias." + sub)
         if not v:
             return "none" if not seen else "deny"
         seen.append(sub)
+        if v.lstrip().startswith("!"):
+            return "shell"
         try:
             words = shlex.split(v)
         except ValueError:
             return "deny"
-        if v.lstrip().startswith("!") or not words or len(seen) > 8 or words[0] in seen:
+        if not words or len(seen) > 8 or words[0] in seen:
             return "deny"
         extra = words[1:] + extra
         if words[0] in _GIT_BUILTINS:
@@ -357,8 +367,8 @@ def remotes(c):
     def check(url, what, seg):
         host = dest_host(url)
         if host is None or not _allowed(host, conf):
-            E.block(f"{what} {host or url} is blocked: company code goes only to approved hosts (exact host names; "
-                    "local paths and unclear URLs are refused). " + _why(conf), "remote-not-allowlisted", seg[:160])
+            E.block(f"{what} {host or url} is not on the approved list: company code goes only to approved hosts (exact host "
+                    "names; local paths and unclear URLs do not qualify). " + _why(conf), "remote-not-allowlisted", seg[:160])
 
     for k, v in E.git_config_pairs(c.cmd, c.ps):     # -c, GIT_CONFIG_* env, `git config` writes
         if re.fullmatch(r"(?i)remote\..+\.(?:url|pushurl)", k):
@@ -386,6 +396,9 @@ def remotes(c):
             elif name not in _GIT_BUILTINS:                             # an alias, or git-<name> on PATH
                 cwd = c.cwd if not remote else ""
                 how = "deny" if sub > 1 or not cwd or not os.path.isdir(cwd) else _alias(name, cwd, toks[sub + 1:])
+                if how == "shell":
+                    E.block(f"`git {name}` is an alias that runs a shell command (its value starts with !), and the guard cannot "
+                            "tell what that command does: it could push anywhere. " + PLAIN_PUSH, "remote-not-allowlisted", seg[:160])
                 if how == "deny" or (how == "none" and _ALIAS_SOURCES.search(c.cmd)):
                     E.block(f"`git {name}` is not a git builtin; as an alias it may only expand to a read-only command "
                             "(status, log, diff, show, ...) with no git options before it. " + PLAIN_PUSH,
@@ -409,7 +422,7 @@ def remotes(c):
             if what:
                 host = _gh_host(seg, toks[2:], c.cwd, repo_flag=what.startswith("Publishing"))
                 if not _allowed(host, conf):
-                    E.block(f"{what} {host} is blocked: company code and files go only to approved hosts. "
+                    E.block(f"{what} {host} is not on the approved list: company code and files go only to approved hosts. "
                             + _why(conf), "remote-not-allowlisted", seg[:160])
         elif _PUSH_WORDS.search(seg):                                   # xargs git push, find -exec git push, ...
             pushing = True
@@ -535,11 +548,11 @@ def uploads(c):
         hosts = [_url_host(d) for d in dests]
         if hidden or not hosts or None in hosts:
             E.block("This uploads a file and the guard cannot tell where to (no URL, or a variable, glob or config "
-                    "file names it), so it is refused. Write the destination URL out in full.",
+                    "file names it), so it cannot be checked. Write the destination URL out in full.",
                     "upload-not-allowlisted", seg[:160])
         for host in hosts:
             if not _local(host) and not _allowed(host, conf, "git_remote_hosts", "upload_hosts"):
-                E.block(f"Uploading a file to {host} is blocked: files leave only for approved hosts. "
+                E.block(f"Uploading a file to {host} is not on the approved list: files leave only for approved hosts. "
                         + _why(conf, "upload_hosts"), "upload-not-allowlisted", seg[:160])
 
 
@@ -646,7 +659,7 @@ _WRITE_SIG = re.compile(r"""(?ix)
     | -Method\s+["']?(?:Post|Put|Patch)\b | -Body\b
     | --data(?:-raw|-binary|-ascii|-urlencode)?\b | --json\b | --form(?:-string)?\b | --upload-file\b | --post-data\b
     | \.(?:post|send|create|sendMail)\s*\( | \brequests\.(?:post|put|patch)\b
-    | urlopen\([^)]*\bdata\s*= | Request\([^)]*\bdata\s*=""")
+    | urlopen\([^)]{0,2000}\bdata\s*= | Request\([^)]{0,2000}\bdata\s*=""")
 PY_FILE_RE = re.compile(r'\bpython[\d.]*(?:\.exe)?["\']?\s+(?:-[A-Za-z]\S*\s+)*["\']?([^\s;&|<>"\']+\.py)\b')
 
 
@@ -660,10 +673,17 @@ def _endpoints(conf):
     return out
 
 
+_MAX_SEND_HITS = 64
+
+
 def _send_hit(text, eps):
     """First outbound send in shell text, skipping one in the args of a statement whose HEAD searches or prints.
-    An HTTP endpoint counts only when its statement carries a write signal (a GET of the same URL is a read)."""
+    An HTTP endpoint counts only when its statement carries a write signal (a GET of the same URL is a read).
+    More than 64 candidates: the first is returned without looking at its statement (one ask), because judging each
+    one rescans its statement and a command that repeats an endpoint thousands of times would take minutes."""
     hits = [(m, False) for m in SEND_RE.finditer(text)] + [(m, True) for rx in eps for m in rx.finditer(text)]
+    if len(hits) > _MAX_SEND_HITS:
+        return min(hits, key=lambda x: x[0].start())[0].group(0)
     for m, is_ep in sorted(hits, key=lambda x: x[0].start()):
         a, b = E._stage(text, m.start())
         if E._head(text[a:b]) in _SEND_INERT:
@@ -955,6 +975,31 @@ def _cli_args(toks):
     return words, flags
 
 
+def _plain_http_url(word):
+    """True for a plain navigation target: an http(s) URL (or a bare host or host:port, which the CLI reads as https) that names a
+    host and carries no credential: no user:password@, no key or token in the address. Any other scheme (file, data, javascript,
+    chrome ...), a variable, a glob and a URL the guard cannot read are not plain."""
+    w = word.strip("\"'")
+    if not w or any(ch in w for ch in "$`{}()<>*\\ \t") or w.startswith("@"):
+        return False
+    m = re.match(r"(?i)^([a-z][a-z0-9+.-]*)://", w)
+    if m:
+        if m.group(1).lower() not in ("http", "https"):
+            return False
+        rest = w[m.end():]
+    elif re.match(r"(?i)^[a-z][a-z0-9+.-]*:(?!\d+(?:[/?#]|$))", w):      # data:, javascript:, mailto: ... (host:port is fine)
+        return False
+    else:
+        rest = w
+    if "@" in re.split(r"[/?#]", rest, maxsplit=1)[0]:                      # user:password@host, or an @ trick
+        return False
+    host = _url_host(w)
+    if not host or not ("." in host or _local(host) or ":" in host):
+        return False
+    import secretscan
+    return not secretscan.scan_text(w)                                     # a key or token in the query string
+
+
 def browser_cli(c):
     conf = cfg()
     if not conf:
@@ -999,7 +1044,11 @@ def browser_cli(c):
                   "browser-cli", seg[:160])
         elif cmd in _CLI_NAV and len(words) > 1 and words[1].lower() != "about:blank":
             host = _url_host(words[1])
-            if host is None or not (_local(host) or _allowed(host, conf, "git_remote_hosts", "upload_hosts")):
+            if host is not None and (_local(host) or _allowed(host, conf, "git_remote_hosts", "upload_hosts")):
+                pass                                                       # localhost or an approved host
+            elif E.CTX["level"] == "standard" and _plain_http_url(words[1]):
+                E.relaxed("browser-cli", f"playwright-cli {cmd} {host}")   # standard level: plain navigation passes, logged
+            else:
                 E.ask(f"playwright-cli {cmd} opens {host or 'a URL the guard cannot read'}, which is not localhost and not an "
                       "approved host (git_remote_hosts or upload_hosts in the corporate settings file). Approve only if you "
                       "meant to visit it.", "browser-cli", seg[:160])

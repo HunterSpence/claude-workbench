@@ -15,7 +15,9 @@ python mcp_healer.py check --project <repo>                    # also LIST (neve
 
 - Start the golden file from `mcp/golden-config.template.json`. Actions: `ensure` (rebuild from the
   golden entry, or `preserveExisting` to keep the live entry and apply `setEnv`), `park` (move to
-  `mcpServersParked`, which Claude Code ignores), `remove`, `ignore`. Unlisted servers are untouched.
+  `mcpServersParked`, which Claude Code ignores; a `park` entry that carries a `command` or `url` and finds the server
+  neither live nor parked REGISTERS it parked, which is how setup adds tokensave: its `serve` exits until a repository is
+  indexed, so a live entry would show DOWN), `remove`, `ignore`. Unlisted servers are untouched.
 - Secrets: keep them in your environment (servers inherit it, and `${VAR}` / `${VAR:-default}`
   expand in `command`, `args`, `env`, `url`, `headers`), or keep an existing value with
   `{"fromExisting": "VAR"}`. The tool prints server names and reasons, never values.
@@ -39,6 +41,7 @@ python mcp_healer.py check --project <repo>                    # also LIST (neve
   and never launched.
 - A server with a `headersHelper` is reported as SKIP: a helper is a command, and `check` never runs one (use `/mcp`
   inside Claude Code). It also never signs in for you.
+- A parked server is listed as PARKED (not loaded at startup; `unpark <name>` turns it on) and never changes the exit code.
 - HTTP servers get an `initialize` POST. Exit 1 if anything is DOWN. With no `.claude.json` yet, `check` says
   "no config yet" and exits 0 (`--json` prints `[]`); `apply` and `unpark` say the same and exit 1. No scheduling, no alerts, no
   network calls except the probes you run.

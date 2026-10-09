@@ -1,6 +1,7 @@
 ---
 name: repo-fix
-description: Review and fix a GitHub (or GitHub Enterprise) repository end to end - clone into a scratch folder, detect the stack and its test/lint commands, record a baseline, review with /code-review, /security-review and the red-team persona, fix on a branch with a failing test first, re-run everything, write a PR description, push only the plain form to an approved host, and open a draft PR only when asked. Use for "fix this repo", "review this repository", "clean up this codebase", "fix the bugs in <repo>", "look over this GitHub project".
+description: "Review and fix a GitHub repository end to end: clone to a scratch folder, baseline the tests, fix on a branch with a failing test first; a draft PR only when asked. Use for \"fix this repo\", \"review this repository\", \"clean up this codebase\", \"fix the bugs in <repo>\"."
+when_to_use: "ALWAYS load before reviewing or fixing a whole repository, even if the steps seem clear."
 ---
 
 # repo-fix

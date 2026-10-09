@@ -30,6 +30,16 @@ on your plan, one per scenario, and the grading itself calls no model. `<KIT>` i
    what the user would say and add a `when_to_use` line beginning "ALWAYS load before" (`docs/AUTHORING.md` section 1). A
    skill that fires on near misses: add them under "NOT for" in the description.
 
+   **The kit's own skills, and plugin skills in general.** You do not have to write a probe file for the kit's skills: step 3 with
+   `--kit` in place of `--spec` (`py -3 <KIT>/tools/skill-probe/skill_probe.py --kit`) reads the kit's `tools/skill-probe/probe.kit.json`,
+   five should and five should-not patterns for every kit skill that carries a `when_to_use` line. For a skill that ships in a
+   plugin, `skillOverrides` cannot switch the skill off to get a baseline, so the vendor's own check is `claude plugin eval`:
+   `claude plugin eval init` (run in the plugin's folder) proposes prompts that should and should not start the skill and writes
+   the graders, a `tool_used` grader on the `Skill` tool tells you the skill was chosen, and `claude plugin eval .` runs every case
+   in isolated sessions with and without the plugin and reports the score and the difference. It calls the model with your own
+   credentials and counts against your plan, which the offline probe does not. A "currently in early access" message means
+   `claude update` first.
+
 **Rules**
 6. Print the scenarios:
    ```

@@ -18,6 +18,8 @@ index is a local copy of what was on this machine at its last refresh. `<KIT>` i
    ```
    Use `--root <label>` for one root and `--detach` to run in the background. `--embed off` skips the vectors for a fast keyword-only pass.
    A refresh also drops files that no longer exist; `--rebuild` re-reads everything.
+   If the one-time model download fails (for example the host is blocked), the refresh says so in one `embedding:` line and
+   does not try again for 24 hours, so it stays quick; `doc_index.py embed` tries at once, for instance after the host is unblocked.
 3. Know what refreshes for you. A `search` starts a background refresh (memory capped, ten minutes) when the last one is
    more than 24 hours old, and answers from the current index meanwhile. Set `WB_FIND_LAZY=0` to turn that off.
 4. The nightly task. Setup creates a per-user scheduled task `\claude-workbench\knowledge-refresh` (memory capped,

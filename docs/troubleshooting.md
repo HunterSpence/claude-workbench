@@ -19,6 +19,8 @@ you.
 | Setup exit 5, phase `reboot-wait` | Save your work, restart, sign in; setup resumes (guide `docs/howto/05-wsl-setup-and-resume.md`) | - |
 | The guard test is not blocked | Hooks are not running: check `/hooks`, the plugin's Python path, and whether policy allows only managed hooks | 10 |
 | "Managed policy changed since setup" at session start | Read the change class and the matching ask in `docs/admin-asks.md` section 2 | - |
+| `Hook failed to run` with `Plugin option "python" isn't set`, on every tool call | The plugin has no interpreter, so none of its hooks run (the guards too). Find the path with `py -3 -c "import sys; print(sys.executable)"`, run `claude plugin install workbench-core@workbench --config python=<absolute python path>` and the same for `workbench-kb@workbench`, then close every Claude Code window and start a new one | - |
+| You want the failed tool calls listed, or a failure kept to fix later | Each failed call is logged, with credential-shaped values removed, in `<WB>/state/issues.jsonl`: `py -3 <KIT>/plugins/workbench-core/scripts/issues.py show [--since YYYY-MM-DD]` prints a numbered table. An empty log after failures means the failure hook is not running: see the row above | - |
 | "Guards have not run in N sessions" | The hook interpreter moved or the plugin is disabled: re-run the installer, then the guard test | 10 |
 | A hook or script that calls `python3` hangs or says `Permission denied` | The Microsoft Store stub: use `py -3` or the full interpreter path | 46 |
 | `ModuleNotFoundError` for a package you installed | The wrong interpreter: use the knowledge environment's Python from `<WB>/config.json` | 13 |

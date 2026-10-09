@@ -1,6 +1,7 @@
 ---
 name: web-packager
-description: "Check whether a skill or plugin folder can be uploaded to claude.ai, say what will not survive, and build the upload zip (forward slashes, LF, no junk). Use for 'can web users use this' or 'package this skill for claude.ai'. It never uploads anything."
+description: "Check whether a skill or plugin can be uploaded to claude.ai and build the upload zip. Never uploads."
+disable-model-invocation: true
 ---
 
 # web-packager

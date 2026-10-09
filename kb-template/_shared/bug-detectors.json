@@ -498,6 +498,24 @@
    "title": "A model change is rejected by the API",
    "pattern": "output_config\\.effort '\\w+' is not supported when thinking is disabled",
    "repro": "output_config.effort 'xhigh' is not supported when thinking is disabled on this model. Use effort 'high' or below, or enable thinking."
+  },
+  {
+   "card": 95,
+   "title": "A recursive delete through a Windows junction empties the folder it points to",
+   "pattern": "contains modified or untracked files, use --force to delete it",
+   "repro": "fatal: 'C:/work/wt-fix' contains modified or untracked files, use --force to delete it"
+  },
+  {
+   "card": 96,
+   "title": "A container restart keeps the environment it was created with",
+   "pattern": "(?s)^(?!.*(?:port is already allocated|address already in use|x509)).*variable is not set\\. Defaulting to a blank string",
+   "repro": "WARN The \"API_URL\" variable is not set. Defaulting to a blank string."
+  },
+  {
+   "card": 97,
+   "title": "A bulk search-and-replace rewrites binary files",
+   "pattern": "file is not a database|database disk image is malformed",
+   "repro": "sqlite3.DatabaseError: file is not a database"
   }
  ]
 }

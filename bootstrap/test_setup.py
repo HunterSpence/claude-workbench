@@ -5,6 +5,7 @@ Run: python -m unittest discover -s bootstrap -p "test_setup.py" -v   (WB_REQUIR
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -24,6 +25,20 @@ import knowledge_verify as KV  # noqa: E402
 import setup as S  # noqa: E402
 
 WINDOWS_ONLY = unittest.skipUnless(os.name == "nt" or REQUIRE, "fake .cmd programs need Windows")
+REAL_HOME = Path.home()      # captured at import, before any test replaces the environment
+
+
+def assert_sandboxed():
+    """Fail when HOME, USERPROFILE, CLAUDE_CONFIG_DIR or LOCALAPPDATA (or what Path.home() returns from them) point outside the
+    system temp folder. A test that builds an installer or a setup context in-process must run ENTIRELY under a temp profile:
+    code that resolves Path.home() or the config dir at call time would otherwise write into the developer's real ~/.claude."""
+    tmp = tempfile.gettempdir()
+    for k in ("HOME", "USERPROFILE", "CLAUDE_CONFIG_DIR", "LOCALAPPDATA"):
+        v = os.environ.get(k)
+        if not v or not I.under(v, tmp):
+            raise AssertionError(f"{k}={v!r} is not inside the temp folder {tmp}: this test would touch a real profile")
+    if not I.under(Path.home(), tmp):
+        raise AssertionError(f"Path.home() is {Path.home()}, outside the temp folder {tmp}")
 TEL = list(S.TELEMETRY_ENV)
 # Neutralised `wsl` output for a machine without WSL (captured by live_controls.py step 4), plus a synthetic
 # `-l -v` table in the documented layout. Encoded to UTF-16LE here, as wsl.exe writes them. Without WSL all three
@@ -89,6 +104,21 @@ if tool.startswith("exe:"):
     name = tool[4:]
     if name == "ctx" and sc.get("ctx_exe") and not Path(sc["ctx_exe"]).exists():
         done(1)                                 # the shim outlives a deleted ctx.exe only in this fake: act as if it were gone
+    cargs = args[1:] if name == "ctx" and args[:1] and args[0].lower().endswith("ctx.exe") else args   # alias= puts the exe path first
+    if name == "ctx" and cargs[:1] == ["status"]:        # what ctx 2.2.8 prints: the config file it reads (build-notes/v032-fetch.md)
+        root = os.environ.get("CTX_DATA_ROOT") or str(Path(os.environ["USERPROFILE"]) / ".ctx")
+        out(json.dumps({"config_path": str(Path(root) / "config.toml")}) + "\n"); done(0)
+    if name == "ctx" and cargs[:2] == ["sources", "add"]:    # the vendor's editor: add; same settings = kept; other settings = exit 1
+        root = Path(os.environ.get("CTX_DATA_ROOT") or Path(os.environ["USERPROFILE"]) / ".ctx")
+        cfgf = root / "config.toml"
+        txt = cfgf.read_text(encoding="utf-8") if cfgf.exists() else ""
+        nm, rt = cargs[2], cargs[cargs.index("--root") + 1]
+        head = f"[sources.roots.{nm}]"
+        if head in txt:
+            done(0 if f"path = '{rt}'" in txt else 1)
+        root.mkdir(parents=True, exist_ok=True)
+        cfgf.write_text(txt + ("\n" if txt and not txt.endswith("\n") else "") + f"\n{head}\nprovider = \"claude\"\npath = '{rt}'\n", encoding="utf-8")
+        done(0)
     if name == "git" and args[:2] == ["config", "--global"]:
         a = args[2:]
         if a[0] == "--get":
@@ -196,16 +226,27 @@ with open(Path(os.environ["WB_FAKE_DIR"]) / "calls.jsonl", "a") as f:
 a = sys.argv[1:]
 if TOOL == "find":
     if a[0] == "discover":
-        print(json.dumps({{"libraries": [{{"path": os.environ["WB_FAKE_LIB"], "kind": "documents", "label": "documents",
-                                          "on_device_files": 2, "cloud_only_files": 0, "sampled": False}}]}}))
+        libs = json.loads(os.environ["WB_FAKE_LIBS"]) if os.environ.get("WB_FAKE_LIBS") else [
+            {{"path": os.environ["WB_FAKE_LIB"], "kind": "documents", "label": "documents",
+             "on_device_files": 2, "cloud_only_files": 0, "sampled": False}}]
+        print(json.dumps({{"libraries": libs}}))
     elif a[0] == "add-root":
         print(json.dumps({{"root": a[a.index("--label") + 1] if "--label" in a else "x", "path": a[1]}}))
     elif a[0] == "status":
         print(json.dumps({{"last_refresh": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "paragraphs": 3}}))
+    elif a[0] == "roots":
+        print(os.environ.get("WB_FAKE_ROOTS") or "{{}}")
     else:
         print("{{}}")
 elif TOOL == "policy":
     print(json.dumps({{"version": 1, "changed": json.loads(os.environ.get("WB_FAKE_POLICY_CHANGED", "[]"))}}))
+elif TOOL == "report":
+    cap = os.environ.get("WB_FAKE_CAPABILITY")
+    if cap and "--phase" in a:      # the capability file the real report.py would write (its rows carry the asks)
+        sd = os.path.join(os.environ["CLAUDE_CONFIG_DIR"], "workbench", "state")
+        os.makedirs(sd, exist_ok=True)
+        open(os.path.join(sd, "capability-" + a[a.index("--phase") + 1] + ".json"), "w", encoding="utf-8").write(cap)
+    print("report " + " ".join(a))
 else:
     print("report " + " ".join(a))
 '''
@@ -220,7 +261,7 @@ VERSION_TEXT = {"git": "git version 2.55.0", "gh": "gh version 2.102.0 (stable)"
                 "ctx": "ctx 2.2.8"}       # = the pins in packages.json: a fresh install is already "current"
 IDS = {p["winget"]: [p["verify"][0], VERSION_TEXT[p["verify"][0]]] for p in PACKAGES if p.get("winget")}
 IDS.update({"npm:@playwright/cli": ["playwright-cli", VERSION_TEXT["playwright-cli"]],
-            "release:ctx": ["ctx", VERSION_TEXT["ctx"]]})
+            "release:ctx": ["ctx", VERSION_TEXT["ctx"]], "release:tokensave": ["tokensave", VERSION_TEXT["tokensave"]]})
 ROUTING = {"version": 1, "provider_ids": {"claude-opus-5-5": {"bedrock": "vendor.claude-opus-5-5"}},
            "rows": [{"id": "R-build-hard", "persona": "flagship", "evidence": ["E1"],
                      "chain": [{"model": "claude-opus-5-5", "effort": "xhigh"}, {"model": "claude-sonnet-5-5", "effort": "xhigh"}]},
@@ -256,6 +297,8 @@ def mini_kit(dst):
     cap.mkdir(parents=True)
     (cap / "package.json").write_text('{"name": "capture", "version": "0.3.0"}\n', encoding="utf-8")
     (cap / "capture.mjs").write_text("// fixture\n", encoding="utf-8")
+    (dst / "mcp").mkdir()
+    shutil.copyfile(REPO / "mcp/golden-config.template.json", dst / "mcp/golden-config.template.json")
     (dst / "docs/howto").mkdir(parents=True)
     (dst / "templates").mkdir()
     shutil.copyfile(REPO / "templates/USER.md", dst / "templates/USER.md")
@@ -275,10 +318,10 @@ def probe_json(admin=True, tls=False, denied=(), automation=True, headless=True,
 
 
 class FakeEnv:
-    def __init__(self, kit=None, profile="corporate", scenario=None, probe=None, registry=None, preinstalled=()):
+    def __init__(self, kit=None, profile="corporate", scenario=None, probe=None, registry=None, preinstalled=(), ch_name=None):
         self.root = Path(tempfile.mkdtemp(prefix="wb-setup-"))
         self.home, self.lad = self.root / "home", self.root / "lad"
-        self.ch = self.home / ".claude"
+        self.ch = self.root / ch_name if ch_name else self.home / ".claude"      # ch_name: CLAUDE_CONFIG_DIR is NOT ~/.claude
         self.wb, self.bin, self.dir = self.ch / "workbench", self.root / "fakebin", self.root / "fake"
         for d in (self.wb, self.bin, self.dir, self.lad, self.root / "lib"):
             d.mkdir(parents=True, exist_ok=True)
@@ -549,7 +592,9 @@ class RestoreSafety(unittest.TestCase):
         (self.t / "ch" / "workbench").mkdir(parents=True)
         (self.t / "ch" / "workbench" / "config.json").write_text(json.dumps(
             {"data_root": I.fwd(self.t / "data"), "kb_root": I.fwd(self.t / "kb")}))
-        os.environ.update(CLAUDE_CONFIG_DIR=str(self.t / "ch"), WORKBENCH_FAKE_REGISTRY=str(self.t / "reg.json"))
+        os.environ.update(CLAUDE_CONFIG_DIR=str(self.t / "ch"), WORKBENCH_FAKE_REGISTRY=str(self.t / "reg.json"),
+                          HOME=str(self.t / "home"), USERPROFILE=str(self.t / "home"), LOCALAPPDATA=str(self.t / "lad"))
+        assert_sandboxed()
 
     def restore(self, arc, data=b"x", symlink=False, **kw):
         z = self.t / "b.zip"
@@ -656,7 +701,8 @@ class Flows(unittest.TestCase):
         self.assertTrue(eff["rows"][0]["fallback_used"])
         self.assertEqual(eff["rows"][0]["model"], "claude-sonnet-5-5")
         roots = [x["argv"] for x in e.calls("find") if x["argv"][0] == "add-root"]
-        self.assertEqual(sorted(a[a.index("--label") + 1] for a in roots), ["captured", "documents", "howto", "kb"])
+        self.assertEqual(sorted(a[a.index("--label") + 1] for a in roots), ["captured", "howto", "kb"],
+                         "the discovered Documents library is a suggestion, not a root")
         cfg = json.loads((e.wb / "config.json").read_text(encoding="utf-8"))
         self.assertTrue(cfg["knowledge_python"].endswith("venv/Scripts/python.exe"))
         self.assertTrue(cfg["knowledge_db"].endswith("doc-index/knowledge/index.sqlite"))
@@ -1648,11 +1694,13 @@ class Relay(unittest.TestCase):
         self.managed.write_text("{}", encoding="utf-8")
         env = {k: v for k, v in os.environ.items() if not k.startswith(("WORKBENCH_", "WB_"))}
         env.update(CLAUDE_CONFIG_DIR=str(self.ch), WORKBENCH_MANAGED_SETTINGS=str(self.managed),
-                   WORKBENCH_FAKE_REGISTRY=str(self.root / "reg.json"), WORKBENCH_FAKE_BIN=str(self.root / "bin"))
+                   WORKBENCH_FAKE_REGISTRY=str(self.root / "reg.json"), WORKBENCH_FAKE_BIN=str(self.root / "bin"),
+                   HOME=str(self.root / "home"), USERPROFILE=str(self.root / "home"), LOCALAPPDATA=str(self.root / "lad"))
         (self.root / "reg.json").write_text("{}")
         for p in (mock.patch.dict(os.environ, env, clear=True), mock.patch.object(S, "KIT", self.kit)):
             p.start()
             self.addCleanup(p.stop)
+        assert_sandboxed()
 
     def install(self, version="2.1.295"):
         ctx = S.Ctx()
@@ -1739,6 +1787,558 @@ class Relay(unittest.TestCase):
         self.assertIn("find", json.loads(cfg.read_text())["mcpServers"], "a dry run changes nothing")
         self.assertEqual(S.undo_config(apply=True), 0)
         self.assertEqual(json.loads(cfg.read_text())["mcpServers"], {"mine": {"command": "x"}})
+
+
+def setup_report_lines(e):
+    return (e.wb / "state" / "setup-report.md").read_text(encoding="utf-8").rstrip("\n").splitlines()
+
+
+class FieldFixes(unittest.TestCase):
+    """v0.3.2 field fixes in setup.py: G2 doctor rows, G3 roots, G4 tokensave parked, G5 PATH and the report's last line, G6 ctx
+    config, G7 kit_version. Fakes only: no registry, scheduler, winget, npm or home folder of this PC is touched."""
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="wb-kit-"))
+        cls.kit = mini_kit(cls.tmp / "kit")
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def env(self, **kw):
+        kw.setdefault("scenario", {"wsl": "installed", "distros": ["Ubuntu-24.04"]})
+        e = FakeEnv(kit=self.kit, **kw)
+        self.addCleanup(e.close)
+        return e
+
+    def in_process(self, e):
+        """Run the rest of this test with the fake machine as os.environ (not only while an object is built)."""
+        p = mock.patch.dict(os.environ, e.env, clear=True)
+        p.start()
+        self.addCleanup(p.stop)
+        assert_sandboxed()
+
+    def test_the_guard_refuses_an_environment_that_points_at_a_real_profile(self):
+        e = self.env()
+        self.in_process(e)
+        assert_sandboxed()
+        for key in ("HOME", "USERPROFILE", "CLAUDE_CONFIG_DIR", "LOCALAPPDATA"):
+            with mock.patch.dict(os.environ, {key: str(REAL_HOME / ".claude")}):
+                with self.assertRaises(AssertionError, msg=key):
+                    assert_sandboxed()
+        with mock.patch.dict(os.environ, {"USERPROFILE": ""}):
+            with self.assertRaises(AssertionError):
+                assert_sandboxed()
+
+    # ── G2: the doctor reads the plugin options, and only a real guard fire counts ──
+    def healthy_doctor_state(self, e):
+        sd = e.wb / "state"
+        sd.mkdir(parents=True, exist_ok=True)
+        S.jwrite(sd / "setup-state.json", {"phase": "done", "failed": [], "ask_it": []})
+        S.jwrite(sd / "guard-heartbeat.json", {"version": 1, "last_fired": S.now(), "sessions_since_fire": 0, "fired_total": 4})
+        S.jwrite(sd / "backup.json", {"last": S.now(), "path": "x.zip"})
+        return sd
+
+    def doctor_rows(self, e, *args):
+        r = e.run("doctor", "--json", *args)
+        return r.returncode, {x["check"]: x for x in json.loads(r.stdout[:r.stdout.rindex("}") + 1])["rows"]}
+
+    def test_doctor_plugin_option_row_unset_missing_interpreter_ok_and_disabled(self):
+        e = self.env()
+        self.healthy_doctor_state(e)
+        sp = e.ch / "settings.json"
+        on = {"workbench-core@workbench": True, "workbench-kb@workbench": True}
+        rc, rows = self.doctor_rows(e)
+        self.assertEqual((rc, rows["plugin python option"]["status"]), (0, "INFO"), "nothing enabled yet")
+        sp.write_text(json.dumps({"enabledPlugins": on, "pluginConfigs": {}}), encoding="utf-8")
+        rc, rows = self.doctor_rows(e)                                   # unset: the field failure
+        row = rows["plugin python option"]
+        self.assertEqual((rc, row["status"]), (2, "FAIL"))
+        self.assertIn("workbench-core@workbench: python is not set", row["detail"])
+        self.assertIn("workbench-kb@workbench: python is not set", row["detail"])
+        self.assertIn("Plugin option \"python\" isn't set", row["detail"])
+        self.assertIn("claude plugin install <id> --config python=", row["detail"])
+        self.assertEqual(rows["guard heartbeat"]["status"], "OK", "the heartbeat alone cannot see it: that is why this row exists")
+        self.assertEqual(e.run("doctor", "--deep").returncode, 2, "doctor --deep exits 2 on it")
+        gone = I.fwd(e.root / "nowhere" / "python.exe")                  # an interpreter that does not run
+        sp.write_text(json.dumps({"enabledPlugins": on, "pluginConfigs": {
+            "workbench-core@workbench": {"options": {"python": gone}},
+            "workbench-kb@workbench": {"options": {"python": I.fwd(sys.executable)}}}}), encoding="utf-8")
+        rc, rows = self.doctor_rows(e)
+        row = rows["plugin python option"]
+        self.assertEqual((rc, row["status"]), (2, "FAIL"))
+        self.assertIn(f"workbench-core@workbench: {gone} does not run", row["detail"])
+        self.assertNotIn("workbench-kb", row["detail"])
+        sp.write_text(json.dumps({"enabledPlugins": on, "pluginConfigs": {i: {"options": {"python": I.fwd(sys.executable)}}
+                                                                          for i in on}}), encoding="utf-8")
+        rc, rows = self.doctor_rows(e)
+        self.assertEqual((rc, rows["plugin python option"]["status"]), (0, "OK"))
+        self.assertEqual(e.run("doctor", "--deep").returncode, 0)
+        sp.write_text(json.dumps({"enabledPlugins": {"workbench-core@workbench": False}}), encoding="utf-8")
+        rc, rows = self.doctor_rows(e)
+        self.assertEqual((rc, rows["plugin python option"]["status"]), (0, "INFO"), "a disabled plugin is not checked")
+
+    def test_doctor_heartbeat_counts_only_a_real_fire_not_the_installer_self_test(self):
+        e = self.env()
+        sd = self.healthy_doctor_state(e)
+        S.jwrite(sd / "guard-heartbeat.json", {"version": 1, "self_test_at": S.now(), "sessions_since_fire": 0, "fired_total": 0})
+        rc, rows = self.doctor_rows(e)
+        self.assertEqual(rows["guard heartbeat"]["status"], "WARN")
+        self.assertIn("self-test", rows["guard heartbeat"]["detail"])
+        self.assertEqual(rc, 1)
+        S.jwrite(sd / "guard-heartbeat.json", {"version": 1, "last_fired": S.now(), "self_test_at": S.now(),
+                                               "sessions_since_fire": 0, "fired_total": 4})
+        self.assertEqual(self.doctor_rows(e)[1]["guard heartbeat"]["status"], "OK")
+
+    # ── G13 ──
+    ASK = ("Please allow downloads from huggingface.co (a one-time embedding model), or provide an approved internal mirror of "
+           "the model files.")
+
+    def test_two_checks_that_need_the_same_download_are_one_ask_in_setup_the_doctor_and_the_status(self):
+        e = self.env()
+        e.set_verify(D9=("WARN", self.ASK), D11=("WARN", self.ASK.replace("Please", "please  ")))
+        e.run("run", code=3)
+        asked = [x for x in e.state()["ask_it"] if S.ASKS.key(x["text"]) == S.ASKS.key(self.ASK)]
+        self.assertEqual(len(asked), 1, e.state()["ask_it"])
+        self.assertEqual((asked[0]["item"], asked[0]["also"]), ("knowledge:find-build", ["knowledge:find-meaning"]))
+        rc, rows = self.doctor_rows(e)
+        self.assertIn("1 ask-IT item(s)", rows["setup"]["detail"])
+        self.assertEqual(rows["IT asks"]["detail"].count("huggingface.co"), 1)
+        self.assertIn("1 distinct ask(s)", rows["IT asks"]["detail"])
+        self.assertEqual(rows["IT asks"]["status"], "INFO")
+        self.assertEqual(e.run("status").stdout.count("huggingface.co"), 1)
+
+    def test_ctx_ask_replaces_the_same_item_and_a_new_wording_of_a_different_ask_stays_separate(self):
+        e = self.env()
+        self.in_process(e)
+        ctx = S.Ctx()
+        ctx.ask("a", "Please allow X.")
+        ctx.ask("b", "please   allow x.")
+        ctx.ask("c", "Please allow Y.")
+        ctx.ask("a", "Please allow X.")
+        self.assertEqual([(x["item"], x.get("also")) for x in ctx.st["ask_it"]], [("a", ["b"]), ("c", None)])
+        ctx.ask("a", "Something else entirely.")
+        self.assertEqual([(x["item"], x["text"]) for x in ctx.st["ask_it"]],
+                         [("a", "Something else entirely."), ("b", "Please allow X."), ("c", "Please allow Y.")],
+                         "b still needs what a used to share with it")
+
+    def test_the_doctor_says_no_ask_outstanding_on_a_clean_machine(self):
+        e = self.env()
+        self.healthy_doctor_state(e)
+        rc, rows = self.doctor_rows(e)
+        self.assertEqual((rows["IT asks"]["status"], rows["IT asks"]["detail"]), ("OK", "none outstanding"))
+
+
+    # ── review round: item 1 (the healer's exit code), 3 (indexed by an earlier setup), 4 (a live tokensave), 5 (one ask list),
+    #    7 (doctor corners), 8 (no tomllib) ──
+    def test_mcp_row_reads_the_healers_exit_code_and_a_traceback_is_never_healthy(self):
+        down = json.dumps([{"server": "dead", "status": "DOWN", "detail": "x"}])
+        ok = json.dumps([{"server": "a", "status": "OK", "detail": "x"}])
+        self.assertEqual(S.mcp_row(None, 0, ok.encode()), ("OK", "healthy"))
+        self.assertEqual(S.mcp_row(None, 0, b"[]"), ("OK", "healthy"))
+        self.assertEqual(S.mcp_row(None, 1, down.encode())[0], "WARN")
+        for rc, out in ((1, b""), (1, b"Traceback (most recent call last):\n"), (2, ok.encode()), (None, ok.encode()),
+                        (0, b""), (0, b"{}"), (-1, b"")):
+            st, detail = S.mcp_row(None, rc, out)
+            self.assertEqual(st, "WARN", (rc, out))
+            self.assertIn(f"mcp_healer.py check exit {rc} gave no readable result: run it by hand", detail)
+
+    def test_a_malformed_claude_json_makes_the_mcp_row_warn_not_say_healthy(self):
+        e = self.env()
+        self.healthy_doctor_state(e)
+        (e.ch / ".claude.json").write_text("{ not json", encoding="utf-8")
+        rc, rows = self.doctor_rows(e)
+        self.assertEqual(rows["MCP servers"]["status"], "WARN")
+        self.assertIn("gave no readable result: run it by hand", rows["MCP servers"]["detail"])
+        self.assertNotIn("healthy", rows["MCP servers"]["detail"])
+        self.assertEqual(rc, 1)
+
+    def libs(self):
+        return [{"path": I.fwd(self.tmp / "OneDrive - Example Org"), "kind": "onedrive-business", "label": "example-org"},
+                {"path": I.fwd(self.tmp / "Documents"), "kind": "documents", "label": "documents"}]
+
+    def test_a_library_an_earlier_setup_registered_is_named_as_such_and_never_removed_by_this_one(self):
+        libs = self.libs()
+        e = self.env()
+        (e.home / "Workbench" / "kb").mkdir(parents=True)
+        # the index holds the Documents library as a root already (a 0.3.1 setup added it), spelled with backslashes and capitals
+        old = str(Path(libs[1]["path"])).upper()
+        e.env["WB_FAKE_LIBS"] = json.dumps(libs)
+        e.env["WB_FAKE_ROOTS"] = json.dumps({"roots": [{"label": "docs-old", "kind": "documents", "path": old, "files": 12},
+                                                       {"label": "kb", "kind": "kb", "path": "x", "files": 1}]})
+        e.run("run", code=0)
+        text = "\n".join(setup_report_lines(e))
+        self.assertIn("indexed by an earlier setup: remove-root docs-old", text)
+        self.assertIn("Setup does not remove a root", text)
+        self.assertIn("never all of OneDrive", text)
+        known = [x for x in e.state()["suggestions"] if x["root"]]
+        self.assertEqual([(x["kind"], x["root"]) for x in known], [("documents", "docs-old")])
+        fresh = text.split("Libraries found on this machine but NOT indexed")[1]
+        self.assertIn("example-org", fresh)
+        self.assertNotIn("Documents", fresh.replace("Documents (", "x"), "the registered one is not listed as not indexed")
+        argvs = [c["argv"][0] for c in e.calls("find")]
+        self.assertNotIn("remove-root", argvs)
+        self.assertEqual(sorted(c["argv"][c["argv"].index("--label") + 1] for c in e.calls("find") if c["argv"][0] == "add-root"),
+                         ["captured", "howto", "kb"], "and it registered nothing new either")
+
+    def test_when_the_roots_cannot_be_read_the_report_does_not_claim_a_library_is_not_indexed(self):
+        e = self.env()
+        e.env["WB_FAKE_LIBS"] = json.dumps(self.libs())      # the stub's `roots` answers {} : no root list
+        e.run("run", code=0)
+        text = "\n".join(setup_report_lines(e))
+        self.assertIn("the registered roots could not be read", text)
+        self.assertNotIn("NOT indexed", text)
+        self.assertIn(I.fwd(self.tmp / "Documents"), text)
+
+    def test_a_live_tokensave_entry_gets_a_note_with_the_one_command_and_is_not_changed(self):
+        e = self.env()
+        e.add_tool("tokensave", exe=True)
+        cfg = e.ch / ".claude.json"
+        mine = {"mcpServers": {"tokensave": {"command": "my-own", "args": ["serve"]}}}
+        cfg.write_text(json.dumps(mine), encoding="utf-8")
+        e.run("run", "--with", "tokensave", code=0)
+        self.assertEqual(json.loads(cfg.read_text(encoding="utf-8")), mine)
+        note = next(n for n in e.state()["notes"] if n.startswith("tokensave:") and "LIVE" in n)
+        self.assertIn("mcp_healer.py", note)
+        self.assertIn("apply --golden", note)
+        self.assertIn("tokensave-mcp.golden.json", note)
+        g = json.loads((e.wb / "state" / "tokensave-mcp.golden.json").read_text(encoding="utf-8"))
+        self.assertEqual(g["servers"]["tokensave"]["action"], "park")
+        self.assertIn("unpark tokensave", note)
+
+    def report_ask_env(self, ask_only_in_report=False):
+        ask = ("Please allow downloads from huggingface.co (a one-time embedding model), or provide an approved internal mirror "
+               "of the model files.")
+        e = self.env()
+        rows = [{"id": "find-hybrid", "status": "NEEDS-IT", "ask_it": ask},
+                {"id": "capture-teams", "status": "NEEDS-IT", "ask_it": "Please allow the capture add-on for Teams."},
+                {"id": "wsl2", "status": "READY", "ask_it": None}]
+        e.env["WB_FAKE_CAPABILITY"] = json.dumps({"features": rows})
+        if not ask_only_in_report:
+            e.set_verify(D9=("WARN", ask), D11=("WARN", ask.upper()))
+        return e, ask
+
+    def test_the_setup_report_lists_the_one_deduplicated_ask_list_including_the_post_report_s(self):
+        e, ask = self.report_ask_env()
+        e.run("run", code=3)
+        text = "\n".join(setup_report_lines(e))
+        self.assertEqual(text.count("huggingface.co"), 1, "setup, two Day-1 checks and the report raised it: one line")
+        self.assertEqual(text.count("Teams"), 1, "an ask only the post report raised reaches the same list")
+        self.assertIn("IT asks (2, each listed once", text)
+        line = next(x for x in text.splitlines() if "huggingface.co" in x)
+        for src in ("setup", "day-1 check D9", "day-1 check D11", "report find-hybrid"):
+            self.assertIn(src, line)
+        self.assertNotIn("- ASK IT", text, "no second, unfiltered list")
+
+    def test_an_ask_only_the_post_report_raised_is_listed_and_does_not_change_the_exit_code(self):
+        e, _ = self.report_ask_env(ask_only_in_report=True)
+        e.run("run", code=0)
+        text = "\n".join(setup_report_lines(e))
+        self.assertIn("IT asks (2, each listed once", text)
+        self.assertEqual(text.count("Teams"), 1)
+        self.assertEqual(e.state()["ask_it"], [], "setup itself asked for nothing")
+
+    def test_the_doctor_fails_an_interpreter_that_exists_but_does_not_run(self):
+        e = self.env()
+        self.healthy_doctor_state(e)
+        bad = e.root / "bad" / ("python.cmd" if os.name == "nt" else "python")
+        bad.parent.mkdir()
+        bad.write_text("@exit /b 9009\r\n" if os.name == "nt" else "#!/bin/sh\nexit 127\n", encoding="utf-8")
+        bad.chmod(0o755)
+        on = {"workbench-core@workbench": True}
+        (e.ch / "settings.json").write_text(json.dumps({"enabledPlugins": on, "pluginConfigs": {
+            "workbench-core@workbench": {"options": {"python": I.fwd(bad)}}}}), encoding="utf-8")
+        rc, rows = self.doctor_rows(e)
+        self.assertTrue(bad.is_file())
+        self.assertEqual((rc, rows["plugin python option"]["status"]), (2, "FAIL"))
+        self.assertIn(f"{I.fwd(bad)} does not run", rows["plugin python option"]["detail"])
+
+    def test_the_doctor_reads_settings_in_claude_config_dir_when_that_is_not_the_home_dot_claude(self):
+        e = self.env(ch_name="cfg-elsewhere")
+        self.assertNotEqual(e.ch, e.home / ".claude")
+        self.healthy_doctor_state(e)
+        on = {"workbench-core@workbench": True}
+        decoy = e.home / ".claude"
+        decoy.mkdir(parents=True, exist_ok=True)
+        (decoy / "settings.json").write_text(json.dumps({"enabledPlugins": on, "pluginConfigs": {
+            "workbench-core@workbench": {"options": {"python": I.fwd(sys.executable)}}}}), encoding="utf-8")
+        (e.ch / "settings.json").write_text(json.dumps({"enabledPlugins": on}), encoding="utf-8")      # the real one: unset
+        rc, rows = self.doctor_rows(e)
+        self.assertEqual((rc, rows["plugin python option"]["status"]), (2, "FAIL"), "the decoy in ~/.claude must not be read")
+        (e.ch / "settings.json").write_text(json.dumps({"enabledPlugins": on, "pluginConfigs": {
+            "workbench-core@workbench": {"options": {"python": I.fwd(sys.executable)}}}}), encoding="utf-8")
+        (decoy / "settings.json").write_text(json.dumps({"enabledPlugins": on}), encoding="utf-8")      # now the decoy is the bad one
+        rc, rows = self.doctor_rows(e)
+        self.assertEqual((rc, rows["plugin python option"]["status"]), (0, "OK"))
+        e.run("run", code=0)                                    # and a whole run works with a config dir elsewhere
+        self.assertTrue((e.ch / "workbench" / "state" / "setup-report.md").is_file())
+
+    def test_without_tomllib_the_ctx_config_is_not_edited_and_the_note_says_what_to_do_by_hand(self):
+        e = self.ctx_env()
+        e.run("run", "--with", "ctx", code=0)                   # installs the fake ctx and records it
+        cfg = self.ctx_cfg(e)
+        cfg.unlink()
+        e.clear_calls()
+        self.in_process(e)
+        ctx = S.Ctx()
+        with mock.patch.dict(sys.modules, {"tomllib": None}):     # `import tomllib` raises ImportError, as on Python 3.10
+            S.do_ctx_config(ctx)
+        self.assertFalse(cfg.exists(), "nothing was written unvalidated")
+        self.assertEqual(ctx.st["failed"], [])
+        note = next(n for n in ctx.notes if "cannot validate TOML" in n)
+        for want in ("[analytics] enabled = false", "[sources] automatic = false", "ctx sources add claude", "3.11"):
+            self.assertIn(want, note)
+        self.assertFalse([c for c in e.calls("exe:ctx") if c["argv"][1:3] == ["sources", "add"]])
+        self.assertEqual(ctx.extra_env, S.CTX_ENV, "the environment opt-outs stay on")
+
+    # ── G7 ──
+    def test_kit_version_is_the_running_kit_after_an_upgrade_from_a_0_3_0_state_file(self):
+        e = self.env()
+        sd = e.wb / "state"
+        sd.mkdir(parents=True, exist_ok=True)
+        S.jwrite(sd / "setup-state.json", {"version": 1, "kit_version": "0.3.0", "phase": "done", "infosec_shown": True,
+                                           "options": {"with": [], "no_nightly": False, "no_update": False}})
+        self.in_process(e)
+        ctx = S.Ctx()
+        self.assertEqual(ctx.st["kit_version"], I.VERSION)
+        self.assertTrue(ctx.st["infosec_shown"], "the rest of the old state is kept")
+        e.run("run", code=0)
+        self.assertEqual(e.state()["kit_version"], I.VERSION)
+
+    # ── G3, G5: roots, PATH and the report ──
+    def test_discovered_libraries_are_suggestions_with_a_pointer_to_guide_28_never_roots(self):
+        libs = [{"path": I.fwd(self.tmp / "OneDrive - Example Org"), "kind": "onedrive-business", "label": "example-org"},
+                {"path": I.fwd(self.tmp / "Example Org" / "Shared Docs"), "kind": "sharepoint-sync", "label": "shared-docs"},
+                {"path": I.fwd(self.tmp / "Documents"), "kind": "documents", "label": "documents"}]
+        e = self.env()
+        (e.home / "Workbench" / "kb").mkdir(parents=True)
+        e.env["WB_FAKE_LIBS"] = json.dumps(libs)
+        r = e.run("run", code=0)
+        roots = sorted(a["argv"][a["argv"].index("--label") + 1] for a in e.calls("find") if a["argv"][0] == "add-root")
+        self.assertEqual(roots, ["captured", "howto", "kb"])
+        lines = setup_report_lines(e)
+        text = "\n".join(lines)
+        for lib in libs:
+            self.assertIn(lib["path"], text)
+            self.assertIn(lib["kind"], text)
+        self.assertIn("guide 28", text)
+        self.assertIn("docs/howto/28-add-a-library-to-find.md", text)
+        self.assertIn("never all of OneDrive", text)
+        self.assertEqual([x["kind"] for x in e.state()["suggestions"]], ["onedrive-business", "sharepoint-sync", "documents"])
+        self.assertEqual(lines[-1], S.RESTART, "the restart line is the last line of the report")
+        self.assertEqual(r.stdout.rstrip("\n").splitlines()[-1], S.RESTART, "and the last line the run prints")
+        self.assertIn(S.RESTART, e.run("status").stdout)
+
+    def test_report_has_no_suggestion_block_when_nothing_was_discovered_and_still_ends_with_the_restart_line(self):
+        e = self.env()
+        e.env["WB_FAKE_LIBS"] = "[]"
+        e.run("run", code=0)
+        lines = setup_report_lines(e)
+        self.assertNotIn("NOT indexed", "\n".join(lines))
+        self.assertEqual(lines[-1], S.RESTART)
+        self.assertIn("Close every Claude Code window", S.RESTART)
+        self.assertIn("fresh terminal", S.RESTART)
+
+    def user_path(self, e):
+        return {k.lower(): v for k, v in e.registry()["HKCU\\Environment"].items()}["path"]
+
+    def test_wb_bin_joins_the_user_path_once_keeping_the_expand_type_and_undo_removes_it(self):
+        e = self.env()
+        e.run("run", code=0)
+        data, typ = self.user_path(e)
+        parts = data.split(";")
+        self.assertEqual(typ, 2, "REG_EXPAND_SZ stays")
+        self.assertEqual(parts[0], r"%LOCALAPPDATA%\Tools", "what was there stays, unexpanded")
+        self.assertEqual([x for x in parts if x.lower() == str(e.wb / "bin").lower()], [str(e.wb / "bin")])
+        self.assertTrue((e.wb / "bin").is_dir())
+        e.run("run", code=0)
+        self.assertEqual(self.user_path(e)[0], data, "a second run changes nothing: no duplicate")
+        e.run("undo-config", "--apply", code=0)
+        self.assertNotIn(str(e.wb / "bin").lower(), [x.lower() for x in self.user_path(e)[0].split(";")])
+
+    def test_wb_bin_already_on_the_path_in_another_spelling_is_not_added_again(self):
+        e = self.env()
+        spelled = "%USERPROFILE%/.CLAUDE/workbench/bin/"                  # same folder: other case, slashes, %VAR% form, trailing slash
+        reg = e.registry()
+        reg["HKCU\\Environment"]["Path"] = [r"%LOCALAPPDATA%\Tools;" + spelled, 2]
+        e.reg.write_text(json.dumps(reg))
+        e.run("run", code=0)
+        parts = self.user_path(e)[0].split(";")
+        self.assertEqual(parts[:2], [r"%LOCALAPPDATA%\Tools", spelled], "the user's own spelling stays")
+        self.assertEqual([x for x in parts if "workbench" in x.lower() and x.lower().rstrip("\\/").endswith("bin")], [spelled])
+
+    def test_path_is_never_written_to_hklm_or_a_policies_key(self):
+        e = self.env()
+        e.run("run", code=0)
+        self.assertFalse([k for k in e.registry() if k.upper().startswith("HKLM") or "policies" in k.lower()])
+
+    # ── G4: tokensave is registered parked ──
+    def test_tokensave_is_registered_parked_the_healer_and_the_doctor_say_parked_and_undo_removes_it(self):
+        e = self.env()
+        e.add_tool("tokensave", exe=True)
+        cfg = e.ch / ".claude.json"
+        cfg.write_text(json.dumps({"mcpServers": {"mine": {"command": "x", "disabled": True}}}), encoding="utf-8")
+        e.run("run", "--with", "tokensave", code=0)
+        got = json.loads(cfg.read_text(encoding="utf-8"))
+        self.assertEqual(sorted(got["mcpServers"]), ["mine"], "nothing live: serve would exit until a repo is indexed")
+        parked = got["mcpServersParked"]["tokensave"]
+        self.assertTrue(parked["command"].lower().endswith("tokensave.cmd"), parked)
+        self.assertEqual(parked["args"], ["serve"])
+        self.assertTrue([n for n in e.state()["notes"] if "tokensave: registered PARKED" in n and "unpark tokensave" in n])
+        led = [x for x in json.loads((e.wb / "state" / "provision-ledger.json").read_text())["entries"] if x.get("key") == "mcp:tokensave"]
+        self.assertEqual(len(led), 1)
+        healer = self.kit / "tools" / "mcp-healer" / "mcp_healer.py"
+        chk = subprocess.run([sys.executable, str(healer), "--config", str(cfg), "check", "--json"], capture_output=True, text=True,
+                             env=e.env)
+        rows = {r["server"]: r for r in json.loads(chk.stdout)}
+        self.assertEqual(rows["tokensave"]["status"], "PARKED")
+        self.assertEqual(chk.returncode, 0, "a parked server is not DOWN")
+        self.healthy_doctor_state(e)
+        rc, drows = self.doctor_rows(e)
+        self.assertEqual((drows["MCP servers"]["status"], rc), ("OK", 0))
+        self.assertIn("PARKED", drows["MCP servers"]["detail"])
+        self.assertIn("tokensave init", drows["MCP servers"]["detail"])
+        e.run("run", "--with", "tokensave", code=0)
+        self.assertEqual(json.loads(cfg.read_text(encoding="utf-8"))["mcpServersParked"]["tokensave"], parked, "a second run is a no-op")
+        e.run("undo-config", "--apply", code=0)
+        left = json.loads(cfg.read_text(encoding="utf-8"))
+        self.assertNotIn("tokensave", left.get("mcpServers", {}))
+        self.assertNotIn("tokensave", left.get("mcpServersParked", {}))
+        self.assertEqual(left["mcpServers"], {"mine": {"command": "x", "disabled": True}})
+
+    def test_a_tokensave_entry_the_user_has_is_left_alone_and_without_the_opt_in_nothing_is_registered(self):
+        e = self.env()
+        e.add_tool("tokensave", exe=True)
+        cfg = e.ch / ".claude.json"
+        mine = {"mcpServers": {"tokensave": {"command": "my-own", "args": ["serve"]}}}
+        cfg.write_text(json.dumps(mine), encoding="utf-8")
+        e.run("run", "--with", "tokensave", code=0)
+        self.assertEqual(json.loads(cfg.read_text(encoding="utf-8")), mine)
+        cfg.write_text(json.dumps({"mcpServers": {}}), encoding="utf-8")
+        e2 = self.env()
+        e2.add_tool("tokensave", exe=True)
+        (e2.ch / ".claude.json").write_text(json.dumps({"mcpServers": {}}), encoding="utf-8")
+        e2.run("run", code=0)
+        self.assertNotIn("mcpServersParked", json.loads((e2.ch / ".claude.json").read_text(encoding="utf-8")))
+
+    def test_tokensave_waits_for_claude_code_to_have_written_its_config(self):
+        e = self.env()
+        e.add_tool("tokensave", exe=True)
+        e.run("run", "--with", "tokensave", code=0)
+        self.assertFalse((e.ch / ".claude.json").exists(), "setup does not create the file Claude Code owns")
+        self.assertTrue([n for n in e.state()["notes"] if "tokensave:" in n and "start Claude Code once" in n])
+
+    # ── G6: ctx's own config file ──
+    def ctx_env(self, **scenario):
+        import hashlib as h
+        body = "ctx-fixture-bytes"
+        kit = mini_kit(Path(tempfile.mkdtemp(prefix="wb-kit4-")) / "kit")
+        self.addCleanup(shutil.rmtree, kit.parent, True)
+        pk = json.loads((kit / "bootstrap" / "packages.json").read_text(encoding="utf-8"))
+        for row in pk["packages"]:
+            if row["id"] == "ctx":
+                row["sha256"] = h.sha256(body.encode()).hexdigest()
+        (kit / "bootstrap" / "packages.json").write_text(json.dumps(pk), encoding="utf-8")
+        e = FakeEnv(kit=kit, scenario={"wsl": "installed", "distros": ["Ubuntu-24.04"], "curl_body": body, "curl_shim": ["ctx"],
+                                       **scenario})
+        self.addCleanup(e.close)
+        return e
+
+    def ctx_cfg(self, e):
+        return e.home / ".ctx" / "config.toml"
+
+    def test_toml_set_edits_one_line_and_keeps_everything_else(self):
+        self.assertEqual(S.toml_set("", "analytics", "enabled", "false"), "[analytics]\nenabled = false\n")
+        t = "# mine\n[indexing]\nmode = \"manual\"\n"
+        out = S.toml_set(t, "analytics", "enabled", "false")
+        self.assertEqual(out, t + "\n[analytics]\nenabled = false\n")
+        t = "[analytics]\n# keep me\nenabled = true # why\nother = 1\n[sources]\nautomatic = true\n"
+        out = S.toml_set(S.toml_set(t, "analytics", "enabled", "false"), "sources", "automatic", "false")
+        self.assertEqual(out, "[analytics]\n# keep me\nenabled = false\nother = 1\n[sources]\nautomatic = false\n")
+        self.assertEqual(S.toml_set("[analytics]\nx = 1\n", "analytics", "enabled", "false"), "[analytics]\nenabled = false\nx = 1\n")
+        self.assertEqual(S.toml_set("[ analytics ]  # t\r\nx = 1\r\n", "analytics", "enabled", "false"),
+                         "[ analytics ]  # t\r\nenabled = false\r\nx = 1\r\n", "CRLF kept, a spaced header with a comment found")
+        t = "[" * 2 + "analytics" + "]" * 2 + "\nenabled = true\n"        # an array of tables is a different thing
+        self.assertTrue(S.toml_set(t, "analytics", "enabled", "false").endswith("\n[analytics]\nenabled = false\n"))
+        both = S.toml_set(S.toml_set("", "analytics", "enabled", "false"), "analytics", "enabled", "false")
+        self.assertEqual(both, "[analytics]\nenabled = false\n", "idempotent")
+
+    def test_ctx_gets_the_opt_out_and_only_the_claude_folder_and_a_second_run_changes_nothing(self):
+        e = self.ctx_env()
+        e.run("run", "--with", "ctx", code=0)
+        cfg = self.ctx_cfg(e)
+        text = cfg.read_text(encoding="utf-8")
+        try:
+            import tomllib
+            got = tomllib.loads(text)
+            self.assertIs(got["analytics"]["enabled"], False)
+            self.assertIs(got["sources"]["automatic"], False)
+            self.assertEqual(got["sources"]["roots"]["claude"], {"provider": "claude", "path": str(e.ch)})
+        except ImportError:
+            self.assertIn("[analytics]\nenabled = false", text)
+            self.assertIn("[sources]\nautomatic = false", text)
+        adds = [c["argv"][1:] for c in e.calls("exe:ctx") if c["argv"][1:3] == ["sources", "add"]]       # argv[0] is the exe path
+        want = ["sources", "add", "claude", "--provider", "claude", "--root", str(e.ch)]
+        self.assertEqual(adds, [want])
+        status = [c for c in e.calls("exe:ctx") if c["argv"][1:2] == ["status"]]
+        self.assertEqual(status[0]["argv"][1:], ["status", "--format", "json"], "setup asks ctx where its config file is")
+        self.assertEqual(status[0]["ctx_env"], S.CTX_ENV, "the env opt-outs are on for every ctx call, too")
+        before = cfg.read_bytes()
+        e.run("run", "--with", "ctx", code=0)
+        self.assertEqual(cfg.read_bytes(), before)
+
+    def test_the_nightly_ctx_action_is_the_last_one_and_is_not_wrapped_so_a_real_failure_still_shows(self):
+        e = self.ctx_env()
+        e.run("run", "--with", "ctx,nightly", code=0)
+        xml = (e.dir / "tasks" / "_claude-workbench_knowledge-refresh.xml").read_bytes().decode("utf-16")
+        execs = re.findall(r"<Exec><Command>(.*?)</Command><Arguments>(.*?)</Arguments></Exec>", xml)
+        cmd, args = execs[-1]
+        self.assertTrue(cmd.lower().endswith("ctx.exe"))
+        self.assertEqual(args, "import --all", "the source list comes from ctx's config, not from the task")
+        self.assertFalse(re.search(r"cmd(\.exe)?\s*/c|exit 0|\|\|", xml, re.I), "no wrapper turns a ctx failure into success")
+
+    def test_ctx_config_keeps_the_users_lines_comments_and_other_tables(self):
+        e = self.ctx_env()
+        cfg = self.ctx_cfg(e)
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text("# my ctx\n[analytics]\nenabled = true # on\n\n[indexing]\nmode = \"manual\"\n", encoding="utf-8")
+        e.run("run", "--with", "ctx", code=0)
+        text = cfg.read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("# my ctx\n[analytics]\nenabled = false\n"), text)
+        self.assertIn("[indexing]\nmode = \"manual\"\n", text)
+        self.assertIn("[sources]\nautomatic = false\n", text)
+
+    def test_a_claude_root_the_user_defined_differently_stays_and_a_note_says_so(self):
+        e = self.ctx_env()
+        cfg = self.ctx_cfg(e)
+        cfg.parent.mkdir(parents=True)
+        mine = "[sources.roots.claude]\nprovider = \"claude\"\npath = 'D:\\\\elsewhere\\\\claude'\n"
+        cfg.write_text(mine, encoding="utf-8")
+        e.run("run", "--with", "ctx", code=0)
+        text = cfg.read_text(encoding="utf-8")
+        self.assertIn(mine, text)
+        self.assertEqual(text.count("[sources.roots.claude]"), 1)
+        self.assertTrue([n for n in e.state()["notes"] if "named `claude` is already defined" in n])
+
+    def test_an_unreadable_ctx_config_is_left_unchanged_and_the_run_fails_loudly(self):
+        try:
+            import tomllib  # noqa: F401
+        except ImportError:
+            self.skipTest("Python 3.10 has no tomllib: the file is edited without validation there")
+        e = self.ctx_env()
+        cfg = self.ctx_cfg(e)
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text("[analytics\nenabled = = true\n", encoding="utf-8")
+        e.run("run", "--with", "ctx", code=4)
+        self.assertEqual(cfg.read_text(encoding="utf-8"), "[analytics\nenabled = = true\n")
+        self.assertIn("ctx-config", {x["item"] for x in e.state()["failed"]})
+        self.assertFalse([c for c in e.calls("exe:ctx") if c["argv"][1:3] == ["sources", "add"]])
+
+    def test_a_ctx_the_kit_did_not_install_keeps_its_config_untouched(self):
+        e = self.env()
+        e.run("run", code=0)
+        self.assertFalse(self.ctx_cfg(e).exists())
+        self.assertFalse([c for c in e.calls("exe:ctx") if c["argv"][1:2] in (["status"], ["sources"])])
 
 
 if __name__ == "__main__":

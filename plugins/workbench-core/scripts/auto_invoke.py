@@ -43,8 +43,10 @@ SKILLS = [
                  r"\b(?:ui|ux|frontend|front-end|css|layout|responsive|dark mode|design system|component|page|screen|"
                  r"landing page|dashboard|form|navbar|modal)s?\b|\b(?:ui|ux|frontend|front-end) (?:work|change|bug|review)\b",
      "find the design system, run locally, screenshot 1440/390 light+dark, a11y check, before/after pairs"),
-    ("brand-spec", r"\b(?:brand[- ](?:spec|interview|guide(?:lines)?|identity|voice)|brand_spec|style guide for (?:a |the |our )?(?:new )?"
-                        r"(?:product|brand|app))\b", "one question at a time, then BRAND_SPEC.md with locked tokens"),
+    ("brand-spec", r"\b(?:brand[- ](?:spec|interview|intake|guide(?:lines)?|identity|voice)|brand_spec|style guide for (?:a |the |our )?(?:new )?"
+                        r"(?:product|brand|app)|what should (?:this|it|the \w+|our \w+) look(?: and |-and-| & )feel like"
+                        r"|(?:new|this|our) (?:product|app)\b[^.?!\n]{0,40}\bno (?:brand|style) ?guide)\b",
+     "one question at a time, then BRAND_SPEC.md with locked tokens"),
     ("draft-reply", rf"\b(?:reply|respond|response|answer|write back|get back){_W}\b(?:e-?mail|mail|message|thread|chat|him|her|"
                     r"them|this|team)\b|\bdraft (?:a |an |the |my )?(?:reply|response|e-?mail|message|answer)\b|\.(?:eml|msg)\b",
      "answer first, then asks with owners and dates; drafts only, never sends"),
@@ -80,18 +82,26 @@ SKILLS = [
     ("find", r"\b(?:search|find|look up){_W}\b(?:our|my|the team'?s|shared) (?:docs|documents|files|sharepoint|onedrive|"
              r"library)\b|\bwhat do (?:our|the) docs say\b|\blatest version of\b".replace("{_W}", _W),
      "local file catalog and search, cited answers"),
-    ("plugin-factory", rf"\b(?:build|create|make|scaffold|write){_W}\b(?:a |an |my |new )?(?:claude )?(?:plugin|skill|marketplace)\b",
+    ("plugin-factory", rf"\b(?:build|create|make|scaffold|write){_W}\b(?:a |an |my |new )?(?:claude )?(?:plugin|skill|marketplace)\b"
+                       rf"|\bpackage (?:this|it|these|my|our) (?:skill|plugin|extension)s? for (?:the |my |our )?(?:team|colleagues|others|everyone)\b"
+                       rf"|\bpackage{_W}\bas an? (?:claude )?(?:plugin|skill)\b",
      "scaffold a plugin or skill that passes the review rules"),
     ("plugin-review", rf"\b(?:review|audit|vet|check|assess){_W}\b(?:plugin|skill|marketplace|\.skill)s?\b",
      "check a plugin against the kit's rules"),
     ("app-navigator", r"\b(?:in-app (?:assistant|help)|navigation assistant|help (?:users|people) find (?:pages|features)|"
                       r"ask (?:and|then) (?:get )?(?:navigated|taken) to)\b", "add an ask-and-navigate assistant to a web app"),
     ("web-packager", rf"\b(?:package|bundle|port|convert){_W}\b(?:web ?app|website|static site|html app)\b|\bportable (?:web|html)\b"
-                     r"|\bsingle[- ]file (?:web|html)\b", "check and package a web app as a portable artifact"),
-    ("mcp-builder", rf"\b(?:build|create|write|make|scaffold){_W}\bmcp (?:server|tool)s?\b|\bmcp server (?:for|that|to)\b",
+                     r"|\bsingle[- ]file (?:web|html)\b|\bcan (?:web|browser|claude\.ai) users (?:use|run|open)\b"
+                     rf"|\b(?:package|bundle|zip|upload){_W}\b(?:for|to|on) claude\.ai\b|\bclaude\.ai upload\b",
+     "check and package a web app, skill or plugin for upload to claude.ai"),
+    ("mcp-builder", rf"\b(?:build|create|write|make|scaffold){_W}\bmcp (?:server|tool)s?\b|\bmcp server (?:for|that|to)\b"
+                    rf"|\b(?:build|create|write|make|scaffold|need|want)\b{_W}\ban? (?:mcp |claude )?connector for\b|\b(?:mcp|claude) connector\b",
      "build a small, tested MCP server"),
     ("api-bridge", rf"\b(?:wrap|bridge|expose|connect){_W}\b(?:rest |http |internal |openapi )?api\b{_W}\b(?:as |into |to )?(?:an? )?"
-                   r"(?:mcp|tool|skill)\b|\bopenapi (?:spec|file)\b|\bapi bridge\b", "turn an HTTP API into a tool the agent can call"),
+                   r"(?:mcp|tool|skill)\b|\bopenapi (?:spec|file)\b|\bapi bridge\b"
+                   r"|\blet (?:claude|the agent|the model|ai) use (?:this|our|the|that) (?:rest |http |internal |openapi )?api\b"
+                   r"(?!\s*(?:keys?|tokens?|secrets?|calls?|version))",
+     "turn an HTTP API into a tool the agent can call"),
     ("setup", r"\bworkbench setup\b|\b(?:run|start|resume|finish|continue)(?: the)? (?:kit|workbench) setup\b|\bsetup\.py\b|\bsetup (?:status|doctor)\b",
      "guided install, probe and verification of the kit"),
     ("capture", rf"\b(?:capture|harvest|crawl|scrape){_W}\b(?:intranet|sharepoint|onedrive|shared files|wiki)\b",
@@ -107,7 +117,9 @@ SKILLS = [
      "read-only health check, ranked fix list"),
     ("skill-scan", r"\b(?:scan (?:a|this) (?:skill|plugin) before (?:installing|trusting)|skillspector)\b",
      "scan before trusting third-party skill code"),
-    ("mcp-heal", rf"\bmcp{_W}\b(?:broken|down|failed|failing|not (?:working|connecting|loading)|heal|check)\b|\bfailed to connect\b",
+    ("mcp-heal", rf"\bmcp{_W}\b(?:broken|down|failed|failing|not (?:working|connecting|loading)|heal|check)\b|\bfailed to connect\b"
+                 rf"|\bmcp (?:tools?|servers?)\b{_W}\b(?:missing|gone|disappeared|not (?:showing|available|found))\b"
+                 rf"|\b(?:check|probe|test|verify|heal){_W}\bmcp servers?\b",
      "probe every server, report OK/DEGRADED/DOWN"),
     ("linux-service-triage", r"\b(?:systemd|systemctl|journalctl|nginx|pm2|50[23] (?:error|bad gateway)|server (?:is )?down|"
                              r"service (?:is )?(?:down|failing|crashing)|container (?:keeps )?(?:crash|restart)\w*)\b",
@@ -123,12 +135,18 @@ SKILLS = [
      "read-only health check"),
     ("onboard", r"\b(?:onboard(?:ing)?|set me up|fill in (?:my )?user\.md|who i am|my work identity)\b",
      "a short interview that fills in USER.md"),
+    ("kit-update", r"\b(?:check (?:for )?(?:the )?new stuff|(?:update|upgrade) the (?:workbench )?kit|check for kit updates)\b",
+     "updates the kit from its latest release, then verifies it after the restart"),
     ("vdi-drive", r"\b(?:remote desktop|vdi|citrix|horizon client|virtual desktop|novnc|guacamole)\b",
      "needs the desktop owner's written authorisation and an authorisation note"),
 ]
 EXTERNAL = {"claude-api", "humanizer", "playwright-cli", "grilling"}   # not kit skills: the bare /name, no plugin prefix
 INSTALLED_ONLY = {"humanizer", "playwright-cli", "grilling"}          # named only when the skill is on this machine
-USER_ONLY = {"cleanup", "pc-checkup", "vdi-drive", "onboard", "setup", "capture", "ingest"}   # disable-model-invocation: mention, never start
+# disable-model-invocation: true (the model cannot start them): mention, never start. The first seven are typed on demand;
+# the nine after them are authoring and admin skills, hidden from the model to keep the skill listing short.
+USER_ONLY = {"cleanup", "pc-checkup", "vdi-drive", "onboard", "setup", "capture", "ingest",
+             "batch-review", "mcp-heal", "plugin-factory", "plugin-review", "web-packager", "mcp-builder", "api-bridge",
+             "app-navigator", "brand-spec"}
 MAX_HINTS = 3
 _COMPILED = [(n, re.compile(rx, re.I), why) for n, rx, why in SKILLS]
 

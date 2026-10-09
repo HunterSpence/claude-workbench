@@ -1,6 +1,7 @@
 ---
 name: plugin-review
-description: "Review plugins, skills and MCP servers built by someone else, safely: a deterministic rule pass over a folder, .zip, .skill or .plugin, then a read-only model pass, then one verdict. Use for 'review this plugin', 'check this skill before upload', or a batch of plugins from many authors."
+description: "Review someone else's plugin, skill or MCP server (folder, .zip, .skill, .plugin) and give one verdict."
+disable-model-invocation: true
 ---
 
 # plugin-review

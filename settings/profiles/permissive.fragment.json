@@ -1,6 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "cleanupPeriodDays": 30,
+  "skillListingBudgetFraction": 0.02,
   "env": {
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5-5",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5-5",
@@ -26,7 +27,8 @@
     "DISABLE_ERROR_REPORTING": "1",
     "HF_HUB_DISABLE_TELEMETRY": "1",
     "PIP_DISABLE_PIP_VERSION_CHECK": "1",
-    "NPM_CONFIG_UPDATE_NOTIFIER": "false"
+    "NPM_CONFIG_UPDATE_NOTIFIER": "false",
+    "MSYS2_ARG_CONV_EXCL": "origin/;upstream/;refs/"
   },
   "attribution": {
     "sessionUrl": false
@@ -38,8 +40,7 @@
       "Edit(*)",
       "Read(*)",
       "WebFetch(*)",
-      "WebSearch(*)",
-      "mcp__tokensave"
+      "WebSearch(*)"
     ],
     "ask": [
       "Bash(gh gist create *)",

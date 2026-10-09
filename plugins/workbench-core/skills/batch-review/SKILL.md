@@ -1,6 +1,7 @@
 ---
 name: batch-review
-description: "Run non-interactive Claude passes (reviews, judging, scoring, bulk document passes) through the Anthropic Message Batches API at half price, or fetch a msgbatch_ result. Needs a Console API key the organisation provides. Not for interactive work: batches take minutes to hours."
+description: "Reviews, judging or bulk passes via the Message Batches API at half price; needs an organisation API key."
+disable-model-invocation: true
 ---
 
 # batch-review

@@ -524,7 +524,17 @@ class KnowledgeVerifyTests(unittest.TestCase):
                "steps": [{"id": "D3", "name": "kb-machinery", "status": "FAIL", "detail": "x", "ms": 5, "ask_it": None}],
                "summary": {"pass": 12, "warn": 1, "fail": 1, "failing": ["D3"]}}
         v, notes = self.verify(json.dumps(doc))
-        self.assertEqual(v, {"pass": 12, "warn": 1, "fail": 1, "failing": ["D3"], "generated": "2026-10-08T01:02:03Z"})
+        self.assertEqual(v, {"pass": 12, "warn": 1, "fail": 1, "failing": ["D3"], "generated": "2026-10-08T01:02:03Z",
+                             "steps": {"D3": "FAIL"}, "tools": {}})
+        self.assertEqual(notes, [])
+
+    def test_each_optional_tool_status_of_d18_is_carried_apart(self):
+        doc = {"version": 1, "generated": "2026-10-08T01:02:03Z",
+               "steps": [{"id": "D18", "name": "opt-ins", "status": "WARN", "detail": "x", "ms": 5, "ask_it": None,
+                          "tools": {"ctx": "PASS", "tokensave": "WARN"}}],
+               "summary": {"pass": 0, "warn": 1, "fail": 0, "failing": []}}
+        v, notes = self.verify(json.dumps(doc))
+        self.assertEqual((v["steps"], v["tools"]), ({"D18": "WARN"}, {"ctx": "PASS", "tokensave": "WARN"}))
         self.assertEqual(notes, [])
 
     def test_a_broken_file_is_none_with_a_note(self):

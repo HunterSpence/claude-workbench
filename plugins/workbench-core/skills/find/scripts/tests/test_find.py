@@ -947,7 +947,8 @@ class Download(Env):
             with self.assertRaises(di.ModelUnavailable) as cm:
                 di.get_embedder(download=True)
         self.assertEqual(len(calls), 1)
-        self.assertIn("connection reset", str(cm.exception))
+        self.assertEqual((cm.exception.host, cm.exception.error), ("huggingface.co", "RuntimeError"))   # host and class, not the library's wording
+        self.assertNotIn("connection reset", str(cm.exception))
 
 
 class Lazy(Env):

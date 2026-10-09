@@ -4,9 +4,12 @@ import contextlib
 import io
 import json
 import os
+import re
 import shutil
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -310,6 +313,54 @@ class ClaudeRunner(Base):
         self.assertEqual(runner_claude.parse(json.dumps(ev))["usage"]["output_tokens"], 4)
 
 
+def alive(pid):
+    if os.name == "nt":
+        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH", "/FO", "CSV"], capture_output=True, text=True).stdout
+        return f'"{pid}"' in out
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+HANG_STUB = r'''
+import os, time
+open(os.environ["STUB_PID"], "w").write(str(os.getpid()))
+time.sleep(40)
+'''
+
+
+class HungClaude(Base):
+    """claude behind a shim (a .cmd file, how npm installs it) that never answers: the call times out, the whole process tree is
+    killed and the grandchild is gone. Killing only the shim left the call waiting on the pipes the grandchild held."""
+
+    def test_a_timed_out_call_kills_the_shim_and_the_child_behind_it(self):
+        stub = self.tmp / "hang_stub.py"
+        stub.write_text(HANG_STUB, encoding="utf-8", newline="\n")
+        pidfile = self.tmp / "hang.pid"
+        if os.name == "nt":
+            shim = self.tmp / "claude.cmd"
+            shim.write_text(f'@"{sys.executable}" "{stub}" %*\r\n', encoding="utf-8")
+        else:
+            shim = self.tmp / "claude"
+            shim.write_text(f'#!/bin/sh\n"{sys.executable}" "{stub}" "$@"\n', encoding="utf-8")   # no exec: the child stays a child
+            shim.chmod(0o755)
+        runner = runner_claude.ClaudeRunner(timeout=5)
+        self.addCleanup(runner.close)
+        t0 = time.time()
+        with mock.patch.dict(os.environ, {"SKILL_BENCH_CLAUDE": json.dumps([str(shim)]), "STUB_PID": str(pidfile)}):
+            res = runner.call("model-x", "system text", "the task")
+        self.assertEqual(res, {"is_error": True, "error": "timeout"})
+        self.assertLess(time.time() - t0, 20, "the timeout must stop the call, not wait for the child's own end")
+        pid = int(pidfile.read_text())
+        for _ in range(50):
+            if not alive(pid):
+                break
+            time.sleep(0.2)
+        self.assertFalse(alive(pid), "the stub claude behind the shim was left running")
+
+
 class NoLoginFiles(unittest.TestCase):
     """The kit never reads, copies or writes a login file: no file under tools/skill-bench names one. The needles are
     assembled at runtime so this file passes its own scan."""
@@ -325,8 +376,9 @@ class NoLoginFiles(unittest.TestCase):
 
     def test_the_runner_makes_no_file_calls_besides_its_own_temp_dir(self):
         src = (HERE / "runner_claude.py").read_text("utf-8")
-        for bad in ("copy2", "copyfile", "copy(", "open(", "read_bytes", "read_text", "write_text", "write_bytes"):
+        for bad in ("copy2", "copyfile", "copy(", "read_bytes", "read_text", "write_text", "write_bytes"):
             self.assertNotIn(bad, src, f"runner_claude.py uses {bad}")
+        self.assertIsNone(re.search(r"(?<![A-Za-z])open\(", src), "runner_claude.py opens a file (Popen is not that)")
 
 
 if __name__ == "__main__":

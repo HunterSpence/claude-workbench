@@ -1,7 +1,7 @@
 ---
 name: cleanup
+description: "Archive confirmed dead code into _archive/ with a restore manifest. Never hard-deletes; confirm-gated."
 disable-model-invocation: true
-description: Archive confirmed dead or legacy code. Re-verifies each candidate is unused (zero references on every live surface, scheduler check, build/typecheck/test gate), then git-mv's it into _archive/<date>/ with a restore manifest. Never hard-deletes; confirm-gated at every risky step; deploy-gated repos get a branch and PR, never a merge.
 ---
 
 # /workbench-core:cleanup: confirm-gated archival of dead code
@@ -26,6 +26,9 @@ description: Archive confirmed dead or legacy code. Re-verifies each candidate i
    - Linux: `crontab -l; ls /etc/cron.d; grep -rl <name> /etc/cron.d /etc/systemd/system ~/.config/systemd 2>/dev/null`
    - CI: `grep -rn <name> .github/ .gitlab-ci.yml azure-pipelines.yml 2>/dev/null`
    A hit, or an inconclusive check, means leave it.
+7. **Before removing a worktree or a scratch clone, list its junctions (`dir /AL` in cmd,
+   `Get-ChildItem -Force -Attributes ReparsePoint` in PowerShell) and remove each with `rmdir`, never `rm -rf` or
+   `git worktree remove --force`.** A delete that walks through a junction deletes the real files it points to.
 
 ## Step 1: candidates
 - **Named targets** (the user or an audit listed files): never skip verification.

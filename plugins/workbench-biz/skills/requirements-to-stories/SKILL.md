@@ -1,6 +1,6 @@
 ---
 name: requirements-to-stories
-description: Turn a requirements document, notes or an email thread into epics, INVEST user stories with Given/When/Then acceptance criteria, traceability IDs and open questions. Use for user stories, a backlog, acceptance criteria or a requirements breakdown.
+description: Turn a requirements document, notes or email thread into epics, INVEST user stories with Given/When/Then acceptance criteria, traceability IDs and open questions. Use for user stories, a backlog or a requirements breakdown.
 license: MIT
 ---
 

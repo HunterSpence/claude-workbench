@@ -4,9 +4,12 @@ transcripts you already have and counts, per skill, how often a prompt matching 
 list was followed by a `Skill` tool call for that skill.
 
   py -3 <KIT>/tools/skill-probe/skill_probe.py --spec probe.json [--transcripts DIR] [--json]
+  py -3 <KIT>/tools/skill-probe/skill_probe.py --kit [--transcripts DIR] [--json]     the kit's own cases (probe.kit.json)
   py -3 <KIT>/tools/skill-probe/skill_probe.py --self-test
 
 probe.json:  {"version": 1, "skills": {"<skill name>": {"should": ["<regex>", ...], "should_not": ["<regex>", ...]}}}
+--kit reads probe.kit.json next to this file: 5 should and 5 should_not patterns for every kit skill that carries a
+when_to_use line (other keys in the file, such as the example prompts the tests use, are ignored here).
 Patterns are Python regular expressions, matched case-insensitively against the text of each prompt. Write the near
 misses you want left alone under should_not. A plugin-qualified call (plugin:skill) counts for the bare skill name.
 
@@ -27,6 +30,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+KIT_SPEC = Path(__file__).with_name("probe.kit.json")
 MIN_N, FIRE_MIN, FIRE_MAX = 5, 0.8, 0.2     # prompts needed to judge; should-rate floor; should-not-rate ceiling
 ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 MAX_LINE = 2_000_000                        # a longer line is a tool result, not a prompt
@@ -196,6 +200,7 @@ def self_test():
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Count how often prompts that should and should not trigger a skill led to a Skill call.")
     ap.add_argument("--spec", help="probe.json with the should / should_not patterns per skill")
+    ap.add_argument("--kit", action="store_true", help="use the kit's own probe.kit.json instead of --spec")
     ap.add_argument("--transcripts", help="folder of *.jsonl transcripts (default <Claude config dir>/projects)")
     ap.add_argument("--max-files", type=int, default=500)
     ap.add_argument("--json", action="store_true")
@@ -204,8 +209,12 @@ def main(argv=None):
     if a.self_test:
         self_test()
         return 0
+    if a.kit and a.spec:
+        ap.error("use --kit or --spec, not both")
+    if a.kit:
+        a.spec = str(KIT_SPEC)
     if not a.spec:
-        ap.error("--spec is required")
+        ap.error("--spec or --kit is required")
     return run(a)
 
 

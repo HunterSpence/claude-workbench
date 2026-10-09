@@ -2,6 +2,7 @@
 a temp home that must leave the user's files byte-identical. Run: python -m unittest discover -s bootstrap -p "test_install*"
 Never touches the real Claude configuration (CLAUDE_CONFIG_DIR, USERPROFILE, HOME and LOCALAPPDATA point at a temp dir;
 registry reads come from a JSON file). WB_V020_ARCHIVE = a `git archive` tar of the 0.2.0 release for the upgrade test."""
+import argparse
 import hashlib
 import json
 import os
@@ -14,12 +15,13 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REQUIRE = os.environ.get("WB_REQUIRE_ALL") == "1"
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import install as I  # noqa: E402
-from test_setup import FakeEnv, WINDOWS_ONLY, installs  # noqa: E402
+from test_setup import FakeEnv, WINDOWS_ONLY, assert_sandboxed, installs  # noqa: E402
 
 
 class Merge(unittest.TestCase):
@@ -118,7 +120,7 @@ class RoundTrip(unittest.TestCase):
         out = self.run_install("--help")
         for gone in ("--mode", "--no-prompts"):
             self.assertNotIn(gone, out)
-        for kept in ("--profile", "permissive", "--upstream-plugins-optional", "--git-hosts", "--setup", "--with",
+        for kept in ("--profile", "permissive", "--upstream-plugins-optional", "--git-hosts", "--guard", "--setup", "--with",
                      "--no-nightly", "--no-update", "--data-root"):
             self.assertIn(kept, out)
 
@@ -137,6 +139,16 @@ class RoundTrip(unittest.TestCase):
         self.assertIn("DRY RUN", self.run_install())
         self.assertEqual(self.digest(), before)
         self.assertFalse((self.home / ".claude" / "workbench").exists())
+
+    def test_guard_level_is_written_kept_across_upgrades_and_switchable(self):
+        al = self.home / ".claude" / "workbench" / "corporate-allowlist.json"
+        self.run_install("--apply", "--guard", "strict")
+        self.assertEqual(json.loads(al.read_text(encoding="utf-8"))["guard_level"], "strict")
+        self.run_install("--apply")                                                # an upgrade without the flag keeps it
+        self.assertEqual(json.loads(al.read_text(encoding="utf-8"))["guard_level"], "strict")
+        self.run_install("--apply", "--guard", "standard")
+        self.assertEqual(json.loads(al.read_text(encoding="utf-8"))["guard_level"], "standard")
+        self.run_install("--guard", "loose", code=2)                              # argparse refuses another value
 
     def test_corporate_apply_then_uninstall_restores(self):
         before = self.digest()
@@ -283,6 +295,216 @@ class RoundTrip(unittest.TestCase):
             r"HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnce"])
 
 
+# A stand-in for the claude CLI, with the two behaviours the field showed: `plugin marketplace remove` wipes pluginConfigs, and
+# an install without --config leaves the plugin's userConfig unset (it prints the CLI's own hint and exits 0).
+# Modes (file "mode" in WB_FAKE_CLAUDE_DIR): honor (default) | ignore_config (accepts --config, stores nothing) |
+# reject_config (an older CLI: exit 1 on an unknown option) | default_value (ignores --config and stores the manifest's own
+# default, python3). A file "nowipe" there stops `marketplace remove` from clearing pluginConfigs.
+FAKE_CLAUDE = r"""
+import json, os, sys
+from pathlib import Path
+a = sys.argv[1:]
+d = Path(os.environ["WB_FAKE_CLAUDE_DIR"])
+mode = (d / "mode").read_text().strip() if (d / "mode").exists() else "honor"
+with open(d / "calls.jsonl", "a", encoding="utf-8") as f:
+    f.write(json.dumps(a) + "\n")
+sp = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "settings.json"
+load = lambda: json.loads(sp.read_text(encoding="utf-8")) if sp.exists() else {}
+save = lambda s: sp.write_text(json.dumps(s, indent=2), encoding="utf-8")
+if a[:3] == ["plugin", "marketplace", "remove"]:
+    if not (d / "nowipe").exists():
+        s = load(); s["pluginConfigs"] = {}; save(s)
+elif a[:3] == ["plugin", "marketplace", "add"]:
+    print("added")
+elif a[:2] == ["plugin", "install"]:
+    pid, s = a[2], load()
+    s.setdefault("enabledPlugins", {})[pid] = True
+    if mode == "default_value":
+        s.setdefault("pluginConfigs", {}).setdefault(pid, {}).setdefault("options", {})["python"] = "python3"
+    elif "--config" in a:
+        if mode == "reject_config":
+            print("error: unknown option '--config'", file=sys.stderr); sys.exit(1)
+        k, _, v = a[a.index("--config") + 1].partition("=")
+        if mode != "ignore_config":
+            s.setdefault("pluginConfigs", {}).setdefault(pid, {}).setdefault("options", {})[k] = v
+    elif pid.startswith(("workbench-core", "workbench-kb")):
+        print("1 userConfig option not yet set - run /plugin configure " + pid + " in Claude Code, or pass --config KEY=VALUE")
+    save(s)
+elif a[:2] == ["plugin", "uninstall"]:
+    s = load(); s.get("enabledPlugins", {}).pop(a[2], None); s.get("pluginConfigs", {}).pop(a[2], None); save(s)
+sys.exit(0)
+"""
+
+
+def fake_claude_bin(folder, calls_dir):
+    """A folder with claude.cmd and claude (sh) that run FAKE_CLAUDE; returns the folder."""
+    folder, calls_dir = Path(folder), Path(calls_dir)
+    folder.mkdir(parents=True, exist_ok=True)
+    calls_dir.mkdir(parents=True, exist_ok=True)
+    (calls_dir / "fake_claude.py").write_text(FAKE_CLAUDE, encoding="utf-8")
+    (folder / "claude.cmd").write_text(f'@"{sys.executable}" "{calls_dir / "fake_claude.py"}" %*\r\n', encoding="utf-8")
+    sh = folder / "claude"
+    sh.write_text(f"#!/bin/sh\nexec '{sys.executable}' '{calls_dir / 'fake_claude.py'}' \"$@\"\n", encoding="utf-8", newline="\n")
+    os.chmod(sh, 0o755)
+    return folder
+
+
+class PluginPython(unittest.TestCase):
+    """G1: the plugin options survive the plugin step. The kit's own python is the value; the CLI is a fake."""
+    def setUp(self):
+        self.home = Path(tempfile.mkdtemp(prefix="wb-pypin-"))
+        self.addCleanup(shutil.rmtree, self.home, True)
+        (self.home / "cfg-dir").mkdir()
+        self.settings = self.home / "cfg-dir" / "settings.json"       # NOT <home>/.claude: a call-time ~/.claude lookup shows
+        self.settings.write_text('{\n    "model": "mine"\n}\n', encoding="utf-8")
+        (self.home / "registry.json").write_text("{}", encoding="utf-8")
+        self.calls_dir = self.home / "fake-claude"
+        fake_claude_bin(self.home / "bin", self.calls_dir)
+        self.env = {k: v for k, v in os.environ.items() if not k.startswith(("OneDrive", "WORKBENCH_", "WB_"))}
+        self.env.update(USERPROFILE=str(self.home), HOME=str(self.home), CLAUDE_CONFIG_DIR=str(self.home / "cfg-dir"),
+                        LOCALAPPDATA=str(self.home / "lad"), WORKBENCH_FAKE_REGISTRY=str(self.home / "registry.json"),
+                        WORKBENCH_FAKE_BIN=str(self.home / "nobin"), WB_FAKE_CLAUDE_DIR=str(self.calls_dir),
+                        PATH=str(self.home / "bin") + os.pathsep + os.environ.get("PATH", ""))
+        p = mock.patch.dict(os.environ, self.env, clear=True)      # the WHOLE test: pin_python and self_test run in-process too
+        p.start()
+        self.addCleanup(p.stop)
+        assert_sandboxed()
+
+    def mode(self, m):
+        (self.calls_dir / "mode").write_text(m, encoding="utf-8")
+
+    def install(self, *args, code=0):
+        r = subprocess.run([sys.executable, str(HERE / "install.py"), *args], capture_output=True, text=True,
+                           encoding="utf-8", env=self.env, timeout=300)
+        self.assertEqual(r.returncode, code, r.stdout[-2500:] + r.stderr[-800:])
+        return r.stdout
+
+    def calls(self):
+        f = self.calls_dir / "calls.jsonl"
+        return [json.loads(x) for x in f.read_text(encoding="utf-8").splitlines()] if f.exists() else []
+
+    def options(self):
+        s = json.loads(self.settings.read_text(encoding="utf-8"))
+        return {pid: (((s.get("pluginConfigs") or {}).get(pid) or {}).get("options") or {}).get("python")
+                for pid in I.PLUGIN_IDS}
+
+    def want(self):
+        return {pid: I.fwd(sys.executable) for pid in I.PLUGIN_IDS}
+
+    def test_the_plugins_that_need_the_option_are_the_ones_whose_manifest_says_so(self):
+        self.assertEqual(I.python_plugin_ids(), sorted(I.PLUGIN_IDS))
+        for other in ("workbench-biz", "workbench-capture"):
+            manifest = json.loads((HERE.parent / "plugins" / other / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+            self.assertNotIn("python", manifest.get("userConfig") or {}, other)
+
+    def test_the_install_argv_carries_config_python_and_the_option_survives_a_cli_that_wipes_it(self):
+        out = self.install("--apply")
+        installs = [c for c in self.calls() if c[:2] == ["plugin", "install"]]
+        by_id = {c[2]: c for c in installs}
+        for pid in I.PLUGIN_IDS:
+            self.assertEqual(by_id[pid], ["plugin", "install", pid, "--config", "python=" + I.fwd(sys.executable)], pid)
+        self.assertEqual(by_id["workbench-biz@workbench"], ["plugin", "install", "workbench-biz@workbench"], "no option, no flag")
+        self.assertEqual(self.options(), self.want(), "settings.json holds the interpreter after marketplace remove cleared it")
+        self.assertNotIn("left the python option unset", out, "the flag did the work; no fallback write was needed")
+        self.assertEqual(json.loads(self.settings.read_text(encoding="utf-8"))["model"], "mine")
+
+    def test_a_cli_that_accepts_but_ignores_config_gets_the_option_written_after_the_plugin_step(self):
+        self.mode("ignore_config")
+        out = self.install("--apply")
+        self.assertIn("left the python option unset for", out)
+        self.assertEqual(self.options(), self.want())
+
+    def test_an_older_cli_that_rejects_config_is_retried_without_it_and_the_option_is_written(self):
+        self.mode("reject_config")
+        out = self.install("--apply")
+        core = [c for c in self.calls() if c[:3] == ["plugin", "install", "workbench-core@workbench"]]
+        self.assertEqual([("--config" in c) for c in core], [True, False], "tried with --config, then without")
+        self.assertIn("workbench-core@workbench", out)
+        self.assertEqual(self.options(), self.want())
+        s = json.loads(self.settings.read_text(encoding="utf-8"))
+        self.assertTrue(s["enabledPlugins"]["workbench-core@workbench"], "the plugin did get installed")
+
+    def test_the_dry_run_and_the_no_cli_commands_show_the_flag(self):
+        self.assertIn("--config python=" + I.fwd(sys.executable), self.install())
+        out = self.install("--apply", "--no-cli")
+        self.assertIn("--config python=", out)
+        self.assertFalse(self.calls(), "--no-cli never calls the CLI")
+
+    def new_installer(self):
+        ns = argparse.Namespace(apply=True, profile="corporate", upstream_plugins=False, upstream_plugins_optional=False,
+                                kb_root=None, data_root=None, git_hosts=None, setup=None, with_=None, no_nightly=False,
+                                no_update=False, force=False, no_cli=True, uninstall=False, purge_backups=False)
+        inst = I.Installer(ns)
+        inst.build()
+        inst.backup.mkdir(parents=True, exist_ok=True)
+        return inst
+
+    def test_the_whole_test_runs_under_the_temp_profile_and_a_call_time_home_lookup_stays_inside_it(self):
+        assert_sandboxed()
+        self.assertTrue(I.under(Path.home(), self.home))
+        self.assertTrue(I.under(I.claude_home(), self.home))
+        self.assertNotEqual(I.claude_home(), Path.home() / ".claude", "so a lookup that ignores CLAUDE_CONFIG_DIR is visible")
+        inst = self.new_installer()
+        self.settings.write_text("{}", encoding="utf-8")
+        inst.pin_python(list(I.PLUGIN_IDS))
+        self.assertEqual(self.options(), self.want())
+        self.assertTrue(I.under(inst.claude_home, self.home))
+
+    def test_a_stale_value_the_cli_leaves_or_fills_in_is_replaced_by_the_detected_python(self):
+        self.mode("default_value")                               # the CLI stores the manifest default, python3, ignoring --config
+        (self.calls_dir / "nowipe").write_text("x", encoding="utf-8")
+        stale = I.fwd(self.home / "old-python" / "python.exe")
+        self.settings.write_text(json.dumps({"model": "mine", "pluginConfigs": {
+            pid: {"options": {"python": stale}} for pid in I.PLUGIN_IDS}}), encoding="utf-8")
+        out = self.install("--apply")
+        self.assertEqual(self.options(), self.want(), "any other value, set or not, is not the detected python")
+        self.assertIn("the plugin step left the python option unset", out)
+        self.assertIn("changes from \"python3\" to", out)
+
+    def test_a_write_that_does_not_land_is_a_recorded_failure_not_a_silent_pass(self):
+        inst = self.new_installer()
+        self.settings.write_text("{}", encoding="utf-8")
+        with mock.patch.object(I.Installer, "write_file", lambda self, path, text: None):
+            inst.pin_python(list(I.PLUGIN_IDS))
+        self.assertEqual(len(inst.failures), 2, inst.failures)
+        self.assertIn("plugin option python is not set for workbench-core@workbench", inst.failures[0])
+        self.assertIn("claude plugin install workbench-core@workbench --config python=", inst.failures[0])
+
+    def test_pin_python_writes_where_missing_leaves_a_right_value_and_respects_a_managed_one(self):
+        inst = self.new_installer()
+        good = {"pluginConfigs": {"workbench-core@workbench": {"options": {"python": inst.python}}}}
+        self.settings.write_text(json.dumps(good), encoding="utf-8")
+        inst.pin_python(list(I.PLUGIN_IDS))
+        self.assertEqual(inst.failures, [])
+        self.assertEqual(self.options(), self.want(), "core was right, kb was written")
+        inst2 = self.new_installer()
+        inst2.managed = {"pluginConfigs": {"workbench-kb@workbench": {"options": {"python": "managed-python"}}}}
+        self.settings.write_text("{}", encoding="utf-8")
+        inst2.pin_python(["workbench-kb@workbench"])
+        self.assertEqual(inst2.failures, [], "a value a managed source owns is not ours to write or to fail on")
+
+    def test_uninstall_after_a_cli_install_leaves_no_option_behind(self):
+        self.install("--apply")
+        self.install("--uninstall", "--apply")
+        s = json.loads(self.settings.read_text(encoding="utf-8"))
+        self.assertNotIn("python", json.dumps(s.get("pluginConfigs", {})))
+        self.assertEqual(s["model"], "mine")
+
+    def test_the_installer_self_test_marks_its_call_so_the_heartbeat_can_tell_it_from_a_session(self):
+        inst = self.new_installer()
+        seen = []
+
+        def fake_run(argv, **kw):
+            seen.append(kw.get("env", {}))
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(
+                {"hookSpecificOutput": {"permissionDecision": "deny"}}).encode(), stderr=b"")
+        with mock.patch.object(I.subprocess, "run", fake_run):
+            self.assertTrue(inst.self_test())
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0].get("WB_SELF_TEST"), "1")
+
+
+
 class Upgrade(unittest.TestCase):
     """0.2.0 -> 0.3.0: user values kept, kit values updated, new KB files seeded with hashes (MAJ12), uninstall."""
     def setUp(self):
@@ -363,6 +585,115 @@ class Upgrade(unittest.TestCase):
         self.inst(self.kit, "--uninstall", "--apply")
         self.assertEqual({p.name: p.read_bytes() for p in (self.settings, self.claude_md)}, self.before)
         self.assertFalse((self.home / ".claude" / "workbench" / "kit").exists())
+
+
+class RetirePermissions(unittest.TestCase):
+    """An upgrade removes the permission entries an EARLIER kit install added and the profile now applied dropped (0.3.1's permissive
+    profile allowed mcp__tokensave server-wide; 0.3.2's does not), and never an entry the user added. Two kit copies stand in for
+    the two releases: they differ only in that one entry of the permissive profile."""
+    def setUp(self):
+        self.t = Path(tempfile.mkdtemp(prefix="wb-retire-"))
+        self.addCleanup(shutil.rmtree, self.t, True)
+        self.old = self.kit("old", with_entry=True)
+        self.new = self.kit("new", with_entry=False)
+        self.home = self.t / "home"
+        (self.home / ".claude").mkdir(parents=True)
+        self.settings = self.home / ".claude" / "settings.json"
+        (self.t / "reg.json").write_text("{}", encoding="utf-8")
+        self.env = {k: v for k, v in os.environ.items() if not k.startswith(("OneDrive", "WORKBENCH_", "WB_"))}
+        self.env.update(USERPROFILE=str(self.home), HOME=str(self.home), CLAUDE_CONFIG_DIR=str(self.home / ".claude"),
+                        LOCALAPPDATA=str(self.t / "lad"), WORKBENCH_FAKE_REGISTRY=str(self.t / "reg.json"),
+                        WORKBENCH_FAKE_BIN=str(self.t / "nobin"))
+
+    def kit(self, name, with_entry, deny=(), ask=()):
+        k = self.t / name
+        shutil.copytree(HERE.parent, k, ignore=I.KIT_IGNORE)
+        f = k / "settings" / "profiles" / "permissive.fragment.json"
+        d = json.loads(f.read_text(encoding="utf-8"))
+        d["permissions"]["allow"] = [x for x in d["permissions"]["allow"] if x != "mcp__tokensave"] + \
+            (["mcp__tokensave"] if with_entry else [])
+        for key, extra in (("deny", deny), ("ask", ask)):
+            d["permissions"][key] = list(d["permissions"].get(key) or []) + list(extra)
+        f.write_text(json.dumps(d, indent=2), encoding="utf-8")
+        return k
+
+    def inst(self, kit, *args):
+        time.sleep(1.1)                                   # a new backup folder per install
+        r = subprocess.run([sys.executable, str(kit / "bootstrap" / "install.py"), "--no-cli", "--profile", "permissive", *args],
+                           capture_output=True, text=True, encoding="utf-8", env=self.env, timeout=300)
+        self.assertEqual(r.returncode, 0, r.stdout[-2000:] + r.stderr[-1000:])
+        return r.stdout
+
+    def allow(self):
+        return json.loads(self.settings.read_text(encoding="utf-8"))["permissions"]["allow"]
+
+    def test_the_upgrade_drops_the_entry_the_old_kit_added_keeps_the_users_own_and_uninstall_still_works(self):
+        self.inst(self.old, "--apply")
+        self.assertIn("mcp__tokensave", self.allow(), "the 0.3.1-style install added it")
+        s = json.loads(self.settings.read_text(encoding="utf-8"))
+        s["permissions"]["allow"].append("Bash(my-own-tool:*)")           # the person's own entry, added afterwards
+        self.settings.write_text(json.dumps(s, indent=2), encoding="utf-8")
+        out = self.inst(self.new, "--apply")
+        allow = self.allow()
+        self.assertNotIn("mcp__tokensave", allow)
+        self.assertIn("Bash(my-own-tool:*)", allow)
+        self.assertIn("Bash(*)", allow, "the entries the new profile still has stay")
+        self.assertIn('permissions.allow: removed "mcp__tokensave"', out)
+        again = self.inst(self.new, "--apply")                              # a third install changes nothing more
+        self.assertEqual(self.allow(), allow)
+        self.assertNotIn("removed", again)
+        self.inst(self.new, "--uninstall", "--apply")                       # the upgrade is reversible: its backup is restored
+        self.assertIn("mcp__tokensave", self.allow())
+        self.assertIn("Bash(my-own-tool:*)", self.allow())
+
+    def test_uninstall_after_the_upgrade_puts_the_file_back_as_it_was_before_any_kit_install(self):
+        self.settings.write_text('{\n    "model": "mine"\n}\n', encoding="utf-8")
+        before = self.settings.read_bytes()
+        self.inst(self.old, "--apply")
+        self.inst(self.new, "--apply")
+        self.assertNotIn("mcp__tokensave", self.allow())
+        self.inst(self.new, "--uninstall", "--apply")
+        self.assertEqual(self.settings.read_bytes(), before)
+
+    def test_an_entry_the_user_had_before_any_kit_install_is_never_removed(self):
+        self.settings.write_text(json.dumps({"permissions": {"allow": ["mcp__tokensave"]}}), encoding="utf-8")   # theirs
+        self.inst(self.old, "--apply")
+        self.inst(self.new, "--apply")
+        self.assertIn("mcp__tokensave", self.allow())
+
+    def test_an_entry_the_new_profile_still_has_stays(self):
+        self.inst(self.old, "--apply")
+        self.inst(self.old, "--apply")                                      # same profile again
+        self.assertIn("mcp__tokensave", self.allow())
+
+    DENY, ASK = "Read(//**/zebrafish-secret)", "Bash(zebrafish-tool:*)"
+
+    def test_a_deny_or_ask_entry_a_profile_dropped_STAYS_and_additional_directories_are_not_touched(self):
+        """Removing a deny or an ask would loosen policy (on a managed laptop most of all), so only allow entries are retired."""
+        old = self.kit("old-da", with_entry=True, deny=[self.DENY], ask=[self.ASK])
+        self.inst(old, "--apply")
+        s = json.loads(self.settings.read_text(encoding="utf-8"))["permissions"]
+        self.assertIn(self.DENY, s["deny"])
+        self.assertIn(self.ASK, s["ask"])
+        kb = s["additionalDirectories"]
+        self.assertTrue(kb, "the install added the KB root there")
+        out = self.inst(self.new, "--apply")                                # the new profile has neither entry
+        got = json.loads(self.settings.read_text(encoding="utf-8"))["permissions"]
+        self.assertIn(self.DENY, got["deny"])
+        self.assertIn(self.ASK, got["ask"])
+        self.assertNotIn("mcp__tokensave", got["allow"], "the allow entry is still retired")
+        self.assertEqual(got["additionalDirectories"], kb)
+        self.assertNotIn("permissions.deny: removed", out)
+        self.assertNotIn("permissions.ask: removed", out)
+
+    def test_a_downgrade_keeps_the_deny_the_newer_kit_added(self):
+        newer = self.kit("newer", with_entry=False, deny=[self.DENY])
+        older = self.kit("older", with_entry=False)
+        self.inst(newer, "--apply")
+        self.assertIn(self.DENY, json.loads(self.settings.read_text(encoding="utf-8"))["permissions"]["deny"])
+        out = self.inst(older, "--apply")                                   # an older kit runs after the newer one
+        self.assertIn(self.DENY, json.loads(self.settings.read_text(encoding="utf-8"))["permissions"]["deny"])
+        self.assertNotIn("removed", out)
 
 
 class KbPair(unittest.TestCase):

@@ -19,6 +19,7 @@ REPO = HERE.parent
 sys.path.insert(0, str(HERE))
 import knowledge_verify as KV  # noqa: E402
 import setup as S  # noqa: E402
+from test_setup import assert_sandboxed  # noqa: E402
 
 QUESTIONS = json.loads((REPO / "docs" / "howto" / "questions.json").read_text(encoding="utf-8"))["questions"]
 
@@ -129,6 +130,11 @@ elif TOOL == "setup":
 elif TOOL.startswith("selftest:"):
     rc = sc.get("selftest_rc", {}).get(TOOL[9:], 0)
     print("self-test ok" if rc == 0 else "self-test failed")
+elif TOOL == "node":
+    print("capture 0.3.0")
+elif TOOL in ("ctx", "tokensave"):
+    print(TOOL + " 2.2.8")
+    rc = sc.get("tool_rc", {}).get(TOOL, 0)
 elif TOOL == "playwright-cli":
     print("0.1.22") if a == ["--version"] else None
     rc = sc.get("cli_open_rc", 0) if "open" in a else 0
@@ -256,11 +262,13 @@ class Env:
 
     def run(self, mode="doctor"):
         with mock.patch.dict(os.environ, self.env, clear=True):
+            assert_sandboxed()
             return KV.run(S.Ctx(), mode, self.kit)
 
     def step(self, fn, mode="doctor", prep=None):
         """One step on a fresh verifier: (status, detail, ask)."""
         with mock.patch.dict(os.environ, self.env, clear=True):
+            assert_sandboxed()
             v = KV.Verifier(S.Ctx(), mode, self.kit)
             try:
                 for p in prep or ():
@@ -689,6 +697,68 @@ class Steps(Base):
         st, detail, _ = e.step(KV.d8_find_roots)
         self.assertEqual((st, "kb" in detail), (KV.WARN, True))
         self.assertEqual(e.step(KV.d19_full_refresh, mode="setup")[0], KV.SKIP, "setup starts it after the phase")
+
+    def test_opt_ins_record_each_tools_own_status_so_ctx_and_tokensave_can_be_told_apart(self):
+        e = self.env()
+        e.program("ctx")
+        e.program("tokensave")
+        e.scenario["tool_rc"] = {"tokensave": 1}                  # tokensave answers with a failing exit code: it "does not answer"
+        e.save()
+        with mock.patch.dict(os.environ, e.env, clear=True):
+            assert_sandboxed()
+            v = KV.Verifier(S.Ctx(), "doctor", e.kit)
+            try:
+                res = KV.d18_opt_ins(v)
+                row = KV.step_row("D18", "opt-ins", res, 0)
+            finally:
+                shutil.rmtree(v.sb, ignore_errors=True)
+        self.assertEqual(row["status"], KV.WARN)
+        self.assertEqual(row["tools"], {"tokensave": KV.WARN, "ctx": KV.PASS})
+        self.assertIn("ctx 2.2.8", row["detail"])
+        self.assertIn("tokensave does not answer", row["detail"])
+        e2 = self.env()
+        e2.program("ctx")
+        with mock.patch.dict(os.environ, e2.env, clear=True):
+            v = KV.Verifier(S.Ctx(), "doctor", e2.kit)
+            try:
+                row = KV.step_row("D18", "opt-ins", KV.d18_opt_ins(v), 0)
+            finally:
+                shutil.rmtree(v.sb, ignore_errors=True)
+        self.assertEqual((row["status"], row["tools"]), (KV.PASS, {"ctx": KV.PASS}), "an absent tool is not listed")
+        self.assertNotIn("tools", KV.step_row("D3", "kb-machinery", (KV.PASS, "ok"), 0), "other steps keep the IK2 shape")
+
+    def capture_env(self, ack=None):
+        """A profile with capture on, a fake node, and the kit's real ingest scripts: the sandbox ingest is not a stand-in."""
+        e = self.env()
+        shutil.copytree(REPO / "plugins/workbench-capture/skills/ingest/scripts",
+                        e.kit / "plugins/workbench-capture/skills/ingest/scripts", ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copyfile(REPO / "bootstrap/infosec-note.txt", e.kit / "bootstrap/infosec-note.txt")
+        (e.wb / "state" / "setup-state.json").write_text(json.dumps({"options": {"with": ["capture"]}}), encoding="utf-8")
+        e.program("node")
+        if ack:
+            (e.wb / "capture").mkdir(parents=True, exist_ok=True)
+            (e.wb / "capture" / "ingest.json").write_text(json.dumps({"infosec_ack": ack}), encoding="utf-8")
+        return e
+
+    def test_capture_exit_5_says_the_acknowledgement_is_not_recorded_and_what_to_do_next(self):
+        e = self.capture_env()
+        st, detail, _ = e.step(KV.d17_capture)
+        self.assertEqual(st, KV.WARN)
+        self.assertIn("InfoSec acknowledgement is not recorded", detail)
+        self.assertIn("exit 5", detail)
+        self.assertIn("ingest.py ack-infosec", detail)
+        self.assertIn("security team", detail)
+        self.assertIn("the install is fine", detail)
+        self.assertNotIn("0 meeting file", detail, "no more bare counts")
+        self.assertFalse((e.wb / "capture" / "ingest.json").exists(), "the check never records an acknowledgement for the person")
+
+    def test_capture_check_passes_once_the_person_has_recorded_the_acknowledgement_in_the_live_profile(self):
+        e = self.capture_env(ack="2026-01-01T00:00:00Z")
+        st, detail, _ = e.step(KV.d17_capture)
+        self.assertEqual(st, KV.PASS, detail)
+        self.assertIn("a fixture transcript became one meeting file", detail)
+        live = json.loads((e.wb / "capture" / "ingest.json").read_text(encoding="utf-8"))
+        self.assertEqual(live, {"infosec_ack": "2026-01-01T00:00:00Z"}, "the live profile is read, never written")
 
     def test_opt_ins_and_capture_off(self):
         e = self.env()

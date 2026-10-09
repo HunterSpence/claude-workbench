@@ -1,7 +1,7 @@
 ---
 name: ui-build
-description: Build, review or change a web UI the careful way - find the design system first, make the change with it, run the app locally, screenshot at 1440px and 390px in light and dark, run an accessibility check, look at every screenshot, fix, re-shoot, keep before/after pairs. Use for "build this page", "review this UI", "fix the layout", "make it responsive", "add dark mode", "polish the UI".
-when_to_use: ALWAYS load before changing or reviewing any page, component or style.
+description: "Build, review or change a web UI the careful way: find the design system first, run the app locally, screenshot at 1440px and 390px in light and dark, run an accessibility check, fix. Use for \"build this page\", \"review this UI\", \"fix the layout\", \"make it responsive\", \"add dark mode\", \"polish the UI\"."
+when_to_use: "ALWAYS load before changing or reviewing any page, component or style."
 ---
 
 # ui-build
@@ -18,7 +18,7 @@ Search the repo, in this order, and write down what you find:
 - **Patterns:** a page that already does something similar; copy its structure.
 - **Dark mode:** how it is switched (`prefers-color-scheme`, a `data-theme` or `.dark` class).
 - **Brand spec:** a `BRAND_SPEC.md` (from `brand-spec`) is the design system when the repo has no
-  tokens. A product with neither and a look still to decide: run `brand-spec` first.
+  tokens. A product with neither and a look still to decide: suggest the user run `/workbench-core:brand-spec` first.
 
 Use tokens and existing components. Never hard-code a colour, spacing value, radius or font that a
 token covers, and never add a UI library the project does not already use without asking. If the

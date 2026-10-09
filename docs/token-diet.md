@@ -35,6 +35,7 @@ and `/context` to see your own split before you change anything.
   the vendor's per-message effort beta header, with adaptive thinking (with thinking off, a per-message change returns an
   error), and not on Bedrock for Sonnet 5.5 or Haiku 5.5.
 - Keep `CLAUDE.md` and everything it imports short: it is re-read on every call of every session.
+- Keep the skill listing inside its budget; a listing over budget silently loses skill descriptions (section 7).
 - Leave MCP servers you aren't using disconnected, and leave MCP tool search on (it is on by
   default; don't set `ENABLE_TOOL_SEARCH=false`) so unused tool definitions stay out of context.
 
@@ -110,3 +111,43 @@ Two things to recheck when you move work to Haiku 5.5. It counts about 30 percen
 previous small model did, so a token cap, budget or cost estimate tuned on that model needs recomputing. Its minimum
 cacheable prompt is 512 tokens, against 4,096 on the previous small model, so short prompts that never cached before can
 now be cached.
+
+## 7. The skill listing
+
+Every turn, Claude Code puts a listing of your skills in front of the model: each skill's name, its `description` and its
+`when_to_use` text. That text is how the model decides to start a skill on its own, so it is both a context cost and the routing
+signal.
+
+- **Budget.** The listing may use 1 percent of the model's context window (the setting `skillListingBudgetFraction`, default
+  `0.01`; the environment variable `SLASH_COMMAND_TOOL_CHAR_BUDGET` sets a fixed character count instead). One skill's text is
+  cut at 1,536 characters whatever the budget (`skillListingMaxDescChars`).
+- **Overflow drops descriptions, not skills.** Over budget, Claude Code keeps every skill name but drops the descriptions of the
+  least-used skills first. The skill still works when you type it, but the model is much less likely to choose it unprompted.
+  Nothing fails and nothing is shown; `--debug` writes a warning to the debug log. A machine with organisation-synced skills and
+  other plugins can pass the 30,000-character default: in 0.3.1 the kit's own skills were about half of it, and the rest is
+  bundled, organisation-synced and other plugins' skills the kit cannot touch.
+- **Measure it.** `/doctor` prints an estimate of the listing's context cost and its biggest contributors; the Skills row of
+  `/context` shows its size after the budget is applied; `/skill-doctor` points at skills you never use.
+- **A ceiling, not a cost.** Both kit profiles set `skillListingBudgetFraction` to `0.02`. The listing still grows only to the text
+  that exists, so the setting costs nothing until the listing is bigger than the default budget, and then it keeps descriptions
+  that would otherwise be dropped (`settings/SETTINGS.md`). A managed value wins.
+- **Who can tier what.** `skillOverrides` (`on`, `name-only`, `user-invocable-only`, `off`) covers your own and project skills
+  and never plugin skills: the vendor documents that plugin skills are not affected by it, and every kit skill is a plugin skill.
+  (Skills synced from a claude.ai account land in `skills/synced/`; the vendor does not say whether `skillOverrides` reaches
+  them, so check the state in `/skills`.) A plugin skill is managed through `/plugin`, or through its own frontmatter.
+- **What the kit does about its own skills.** It tiers them in frontmatter. The authoring and admin skills (`batch-review`,
+  `mcp-heal`, `plugin-factory`, `plugin-review`, `web-packager`, `mcp-builder`, `api-bridge`, `app-navigator`, `brand-spec`) join
+  the skills you only ever type (`setup`, `onboard`, `cleanup`, `pc-checkup`, `vdi-drive`, capture, ingest) with
+  `disable-model-invocation: true`, which keeps their descriptions out of the listing; the auto-invoke hint then tells you the
+  skill exists instead of starting it. Every other description is short and leads with the words you would say. A test
+  (`py -3 <KIT>/tools/test_docs.py --budget`) caps the kit's own text, prints an estimate of the whole listing (the kit, the
+  enabled upstream plugins, and an allowance for bundled and organisation skills) and fails when the kit's part passes half of
+  30,000 characters.
+- **What setup does for the rest.** For skills that are not plugin skills, `setup` measures the whole listing and, when the part
+  the kit can control would pass 80 percent of the limit, writes `name-only` tiers for the biggest ones. It keeps the skills the
+  kit routes to on, never writes `user-invocable-only` or `off` by itself, never overwrites a value you set, and takes a backup
+  first. The kit's guard refuses most agent edits of your `settings.json` (a change to `skillOverrides` alone asks you first,
+  `settings/SETTINGS.md`), so the tiers are applied by the setup step you run, not by a session on its own.
+- **Check a skill still gets chosen.** After you shorten a description, measure it: `py -3 <KIT>/tools/skill-probe/skill_probe.py
+  --kit` (guide 51) counts how often the kit's skills start on the prompts they should catch.
+

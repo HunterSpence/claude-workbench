@@ -16,11 +16,13 @@ Guard ids (each deny names one):
   rm-rf-root          recursive delete of /, a drive root, a home directory or the Claude config directory
   xargs-python-repl   `xargs ... python -` (every input line becomes a looping REPL)
   runaway-output      a background task's output log past 1 GB and growing
+  tokensave-rewrite   `tokensave install`, `upgrade` or `doctor`: each rewrites Claude Code settings, hooks or rules
   agent-fork          a forked subagent (fresh subagents only: a fork inherits the whole context and fails inside
                       workflow workers)
   webfetch-secret     a WebFetch URL that carries a credential-shaped value (it would leave in the request)
   encoded-command     a pwsh / powershell -EncodedCommand (any prefix, -ec, with - -- or /) whose value cannot be
-                      decoded
+                      decoded, on the command line or inside a payload it carries (the engine decodes up to three
+                      levels, judges the text like any command, and denies a fourth level as nest-cap)
   msys-path           on Windows, a Write/Edit/NotebookEdit path written the MSYS or WSL way (/c/..., /mnt/c/...):
                       the file tools take C:/...
   browser-url         a browser MCP tool (playwright, chrome-devtools, ...) sent to a URL with a credential-shaped
@@ -92,10 +94,15 @@ def _secret_rx():
 
 
 def _secret_hit(text, rx=None):
+    """The first credential-file pattern that matches the text as written, or with $HOME, $env:USERPROFILE, %USERPROFILE% and the like
+    expanded (a pattern for an absolute folder meets the path the shell would build)."""
+    text = text or ""
+    spellings = list(dict.fromkeys([text, E.expand_env(text)]))
     for r in rx or _secret_rx():
-        m = r.search(text or "")
-        if m:
-            return m.group(0).strip("\"'=: ")
+        for s in spellings:
+            m = r.search(s)
+            if m:
+                return m.group(0).strip("\"'=: ")
     return None
 
 
@@ -136,7 +143,7 @@ PROTECTED = (
 # ── shell rules ──────────────────────────────────────────────────────────────────────────────────────────────
 def protected(c):
     rx = _secret_rx()
-    for t0, _before, rem in E.write_targets(c.cmd, c.ps):
+    for t0, rem in E.write_targets(c.cmd, c.ps):
         for t in E._win_forms(t0):
             for gid, hit, msg in PROTECTED:
                 if hit(t, "" if rem else c.cwd):
@@ -213,6 +220,18 @@ def _push_dest(spec, cwd):
     return re.sub(r"^refs/heads/", "", spec)
 
 
+_GIT_WORD, _PUSH_WORD = re.compile(r"\bgit\b"), re.compile(r"\bpush\b")
+
+
+def _git_push_segs(text):
+    """From its first `git` to its end, each statement (split at newline ; | &) that has a `push` word after that `git`: the strings
+    `\\bgit\\b[^\\n;|&]*\\bpush\\b[^\\n;|&]*` finds, in linear time (that regex is quadratic on a statement that repeats `git`)."""
+    for part in re.split(r"[\n;|&]", text):
+        g = _GIT_WORD.search(part)
+        if g and _PUSH_WORD.search(part, g.end()):
+            yield part[g.start():]
+
+
 def push(c):
     """Force-push / +refspec / remote delete of main or master, and any push whose destination is the default
     branch, judged per push statement on the prose-blanked statements (commit messages, echo/grep arguments and
@@ -221,10 +240,8 @@ def push(c):
     # Both views (see engine.raw_view): a push hidden in python -c / node -e / a written-then-run file is judged too.
     live = E.expand_vars("\n".join(seg for seg, _ in E.statements(c)) + "\n" + E.raw_view(c))
     if None in E.live_encoded(c):
-        E.block("This runs a PowerShell -EncodedCommand (or a prefix of it) whose payload the guard cannot decode. "
-                "Run the command as plain text so it can be checked.", "encoded-command", c.cmd[:120])
-    for m in re.finditer(r"\bgit\b[^\n;|&]*\bpush\b[^\n;|&]*", live):
-        seg = m.group(0)
+        E.block(E.ENC_MSG, "encoded-command", c.cmd[:120])
+    for seg in _git_push_segs(live):
         forced = re.search(r"(--force(?:-with-lease|-if-includes)?\b|\s-(?!-)[a-eg-z]*f[a-z]*\b)", seg)
         to_main = re.search(MAIN, seg)
         if forced and to_main:
@@ -275,9 +292,22 @@ def push(c):
             E.block("Deleting remote main/master through the API is blocked.", "delete-main", g[:120])
 
 
+_COMMIT, _DATE_OPT = re.compile(r"git\s+commit"), re.compile(r"\s--date[= ]")
+
+
+def _commit_date(text):
+    """True when a line of text has `git commit` and, after it, a --date option. One search each: a single regex that reads
+    to the end of the line after `git commit` is quadratic on a line that repeats `git commit` thousands of times."""
+    for line in text.split("\n"):
+        a = _COMMIT.search(line)
+        if a and _DATE_OPT.search(line, a.end()):
+            return True
+    return False
+
+
 def backdate(c):
     if re.search(r"GIT_(AUTHOR|COMMITTER)_DATE\s*=", E.blank_data(c.live, c.ps)) or \
-            any(re.search(r"git\s+commit[^\n]*\s--date[= ]", f) for f, _ in E._prose_texts(c.live, c.ps)):
+            any(_commit_date(f) for f, _ in E._prose_texts(c.live, c.ps)):
         E.block("Never backdate a commit. A commit timestamp is a record, not a statement: a forged one corrupts every "
                 "'what changed when' audit. Commit with the real time and explain the history in the message.",
                 "backdate")
@@ -291,25 +321,26 @@ def no_verify(c):
         if k.lower() == "core.hookspath" and v.strip().lower() in ("", "/dev/null", "nul", "/dev/null/"):
             E.block("Pointing core.hooksPath at nothing skips the repository's git hooks. Fix what the hook "
                     "reports instead.", "no-verify", f"{k}={v}")
-    for flat, _ in E._prose_texts(E.blank_data(c.live, c.ps), c.ps):
-        for seg in E._walk(flat, c.ps).segs:
-            if E._head(seg) != "git":
-                continue
-            toks, k = E.git_sub(seg)
-            if k is None:
-                continue
-            if any(re.fullmatch(r"--no-verify", t.strip("\"'")) for t in toks[k + 1:]):
-                E.block("--no-verify skips the repository's git hooks (lint, tests, secret scans). Fix what the hook "
-                        "reports instead.", "no-verify", seg[:120])
-            if toks[k] == "commit":
-                for t in toks[k + 1:]:
-                    if re.fullmatch(r"-[A-Za-z]+", t):
-                        for ch in t[1:]:
-                            if ch in _VALUE_FLAGS:
-                                break
-                            if ch == "n":
-                                E.block("git commit -n is --no-verify: it skips the repository's git hooks. Fix what "
-                                        "the hook reports instead.", "no-verify", seg[:120])
+    texts = [(f, c.ps) for f, _ in E._prose_texts(E.blank_data(c.live, c.ps), c.ps)]
+    texts += [(f, True) for d in E.decoded_payloads(c) for f, _ in E._prose_texts(d, True)]   # powershell -EncodedCommand <base64> ...
+    for flat, ps in texts:
+        for seg0 in E._walk(flat, ps).segs:
+            for seg in E.cmd_starts(seg0, {"git"}):   # also `out=$(git commit -n)` and `try { git commit -n } catch {}`
+                toks, k = E.git_sub(seg)
+                if k is None:
+                    continue
+                if any(re.fullmatch(r"--no-verify", t.strip("\"'()")) for t in toks[k + 1:]):
+                    E.block("--no-verify skips the repository's git hooks (lint, tests, secret scans). Fix what the hook "
+                            "reports instead.", "no-verify", seg[:120])
+                if toks[k] == "commit":
+                    for t in toks[k + 1:]:
+                        if re.fullmatch(r"-[A-Za-z]+", t):
+                            for ch in t[1:]:
+                                if ch in _VALUE_FLAGS:
+                                    break
+                                if ch == "n":
+                                    E.block("git commit -n is --no-verify: it skips the repository's git hooks. Fix what "
+                                            "the hook reports instead.", "no-verify", seg[:120])
 
 
 _RM_HEADS = {"rm", "rmdir", "remove-item", "ri", "rd", "del", "erase"}
@@ -337,18 +368,17 @@ def _danger_target(tok):
 
 
 def rm_root(c):
-    for seg, _ in E.statements(c):
-        if E._head(seg) not in _RM_HEADS:
-            continue
-        rest = E._HEAD_SKIP.sub("", seg, 1).split()[1:]
-        if "--no-preserve-root" in rest:
-            E.block("rm --no-preserve-root is blocked: it exists only to delete /.", "rm-rf-root", seg[:120])
-        if not _RECURSIVE.search(" ".join(rest)):
-            continue
-        for t in rest:
-            if (not t.startswith("-") or t in ("-",)) and not re.fullmatch(r"(?i)/[sq]", t) and _danger_target(t):
-                E.block(f"Recursive delete of {t} is blocked: it targets a filesystem root, a home directory or the "
-                        "Claude config directory. Delete the specific subdirectory you mean.", "rm-rf-root", seg[:120])
+    for seg0, _ in E.statements(c):
+        for seg in E.cmd_starts(seg0, _RM_HEADS):   # also `x=$(rm -rf ~)` and `try { Remove-Item -Recurse ~ } catch {}`
+            rest = seg.split()[1:]
+            if "--no-preserve-root" in rest:
+                E.block("rm --no-preserve-root is blocked: it exists only to delete /.", "rm-rf-root", seg[:120])
+            if not _RECURSIVE.search(" ".join(rest)):
+                continue
+            for t in rest:
+                if (not t.startswith("-") or t in ("-",)) and not re.fullmatch(r"(?i)/[sq]", t) and _danger_target(t):
+                    E.block(f"Recursive delete of {t} is blocked: it targets a filesystem root, a home directory or the "
+                            "Claude config directory. Delete the specific subdirectory you mean.", "rm-rf-root", seg[:120])
 
 
 def xargs_python(c):
@@ -381,12 +411,34 @@ def runaway(c):
                     "delete that file.", "runaway-output")
 
 
-SHELL = (git_config, protected, secret_read, push, backdate, no_verify, rm_root, xargs_python, runaway)
+# tokensave's own `install`, `reinstall`, `upgrade`, `doctor`, `uninstall`, `claude-install` and `claude-uninstall` rewrite
+# ~/.claude settings, permissions, hooks and rules files ("doctor" auto-repairs hooks it believes are missing; tokensave itself
+# says "Run `tokensave reinstall` to update permissions"). init, sync, serve, --version and the search commands are fine.
+_TOKENSAVE_RISKY = {"install", "reinstall", "upgrade", "doctor", "uninstall", "claude-install", "claude-uninstall"}
+TOKENSAVE_MSG = ("tokensave {sub} rewrites Claude Code's settings, permissions, hooks and rules files (doctor included: it "
+                 "'repairs' hooks it thinks are missing), and the kit keeps those under its own control. Use `tokensave "
+                 "init`, `sync`, `serve`, `--version` or a search instead. If the user asked for this, tell them this hook "
+                 "blocked it and give them the exact command so they can run it themselves.")
+
+
+def tokensave(c):
+    for seg, _ in E.statements(c, prose="words"):
+        for start in E.cmd_starts(seg, {"tokensave"}):
+            prev_dash = False
+            for t in [x.strip("\"'(){};") for x in start.split()[1:]]:
+                if t.lower() in _TOKENSAVE_RISKY:
+                    E.block(TOKENSAVE_MSG.format(sub=t.lower()), "tokensave-rewrite", seg[:120])
+                if not t.startswith("-") and not prev_dash:
+                    break   # the subcommand; later words are its arguments (a search term "install" is no install)
+                prev_dash = t.startswith("-")
+
+
+SHELL = (git_config, protected, secret_read, push, backdate, no_verify, rm_root, xargs_python, tokensave, runaway)
 
 
 # ── file tools ───────────────────────────────────────────────────────────────────────────────────────────────
 def write_tool(c):
-    raw = str(c.ti.get("file_path") or c.ti.get("notebook_path") or "")
+    raw = str(c.ti.get("file_path") or c.ti.get("notebook_path") or c.ti.get("path") or "")
     m = re.match(r"^/(?:mnt/)?([A-Za-z])(/.*)?$", raw)
     if os.name == "nt" and m:
         E.block(f"{raw} is an MSYS/WSL-style path; on Windows the file tools need the drive form: use "

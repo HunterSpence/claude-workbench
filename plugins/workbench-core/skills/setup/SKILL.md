@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Provision this machine for the workbench and keep it healthy - capability report, background install with status polling, WSL reboot resume, doctor, backup and restore, per-client profiles. User-invoked; stops only for a UAC prompt, a reboot or an IT ask.
+description: "Provision this machine for the workbench and keep it healthy: install, doctor, backup, profiles."
 disable-model-invocation: true
 ---
 

@@ -12,6 +12,8 @@
   --data-root PATH              workbench data folder (default: the last install's, else <work OneDrive>/Workbench
                                 when exactly one verified work OneDrive exists, else ~/Workbench)
   --git-hosts h1,h2             the git hosts company code may be pushed to (written to the corporate allowlist)
+  --guard standard|strict       guard level (default standard: a push or upload to an unlisted host and --no-verify ask
+                                instead of being refused; strict refuses them). Kept across upgrades
   --force                       replace settings keys you already set to something else
   --no-cli                      never call the claude CLI; print its commands instead
   --setup auto|plan             after --apply: show the capability report, then provision this machine in the
@@ -53,7 +55,7 @@ import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 MARKETPLACE = "workbench"
 PLUGIN_IDS = ("workbench-core@workbench", "workbench-kb@workbench")    # pluginConfigs.<id>.options.python: these only
 DEFAULT_PLUGINS = PLUGIN_IDS + ("workbench-biz@workbench",)
@@ -68,6 +70,19 @@ KIT_IGNORE = shutil.ignore_patterns(".git", "__pycache__", "*.pyc", ".venv", "ve
                                     "*.bak*", "installed-config.json")
 RECORD = Path("plugins") / "workbench-core" / "scripts" / "installed-config.json"   # read by _wb.config_redirected()
 ABSENT = {"__absent__": True}
+
+
+def python_plugin_ids(repo=REPO):
+    """Ids (name@workbench) of the kit's plugins whose manifest declares userConfig.python: the plugins whose hooks and
+    scripts fail with `Plugin option "python" isn't set` until pluginConfigs.<id>.options.python holds an interpreter."""
+    out = []
+    for m in sorted(Path(repo, "plugins").glob("*/.claude-plugin/plugin.json")):
+        try:
+            if "python" in (read_json(m).get("userConfig") or {}):
+                out.append(f"{m.parent.parent.name}@{MARKETPLACE}")
+        except (OSError, ValueError):
+            continue
+    return out
 
 
 class Stop(Exception):
@@ -713,25 +728,36 @@ class Installer:
         bad = [h for h in hosts if not re.fullmatch(r"[A-Za-z0-9._-]+(?::\d+)?", h)]
         if bad:
             raise Stop(2, f"--git-hosts: not a host name: {', '.join(bad)}")
+        level = getattr(self.a, "guard", None)
         if al.exists():
-            if not hosts:
+            if not hosts and not level:
                 self.todo(f"[guards] keep your {fwd(al)}")
                 return
             try:
                 conf = read_json(al)
             except (OSError, ValueError) as e:
                 raise Stop(2, f"{fwd(al)} is not valid JSON ({e}); fix it by hand first")
-            conf["git_remote_hosts"] = hosts
-            self.todo(f"[guards] set git_remote_hosts in {fwd(al)} to {hosts}",
+            changed = []
+            if hosts:
+                conf["git_remote_hosts"] = hosts
+                changed.append(f"git_remote_hosts to {hosts}")
+            if level:
+                conf["guard_level"] = level
+                changed.append(f"guard_level to {level}")
+            self.todo(f"[guards] set {' and '.join(changed)} in {fwd(al)}",
                       lambda: self.write_file(al, json.dumps(conf, indent=2) + "\n"))
             return
         conf = read_json(tpl)
         conf["git_remote_hosts"] = hosts
-        self.todo(f"[guards] create {fwd(al)}: corporate pack ON, approved git hosts {hosts or 'none yet'}",
+        if level:
+            conf["guard_level"] = level
+        self.todo(f"[guards] create {fwd(al)}: corporate pack ON, guard level {conf.get('guard_level', 'standard')}, "
+                  f"approved git hosts {hosts or 'none yet'}",
                   lambda: self.create_file(al, json.dumps(conf, indent=2) + "\n"))
         if not hosts:
-            self.warnings.append("No git hosts approved yet: every push to a remote host will be refused. Re-run with "
-                                 "--git-hosts <your company's git hosts>, or edit corporate-allowlist.json by hand.")
+            self.warnings.append("No git hosts approved yet: a push to a remote host asks you first (the strict guard "
+                                 "level refuses it). Re-run with --git-hosts <your company's git hosts>, or edit "
+                                 "corporate-allowlist.json by hand.")
 
     def plan_kb(self):
         if in_onedrive(self.kb) or "onedrive" in fwd(self.kb).lower():
@@ -859,11 +885,45 @@ class Installer:
         prev = {tuple(op["path"]): op["value"] for m in self.prior for op in m.get("settings_ops") or []
                 if op.get("op") == "set" and not op.get("container")}
         merge_settings(settings, frag, self.managed, self.a.force, ops, notes, prev=prev)
+        self.retire_permissions(settings, frag, ops)
         self.plan.append(f"[settings] profile {self.a.profile} ({fwd(src.relative_to(REPO))}); upstream plugins: "
                          f"{'yes' if self.upstream else 'no'}; optional upstream plugins: "
                          f"{'yes' if self.a.upstream_plugins_optional else 'no'}")
         self.manifest["settings_ops"] = ops
         return settings, ops, notes
+
+    def retire_permissions(self, settings, frag, ops):
+        """merge_settings only ever adds to a list, so an entry a newer profile dropped would stay for ever (0.3.1's permissive
+        profile allowed `mcp__tokensave` server-wide; later ones do not). On an upgrade, remove the permission entries an EARLIER
+        kit install added (its manifest records them: a list-add of the missing entries, or the whole list it created; an entry the user
+        already had is in neither) and the profile now being applied no longer carries. A user's own entry is never touched.
+        Only the ALLOW list: dropping an allow can only tighten what Claude may do, while dropping a deny or an ask would loosen
+        policy (on a managed laptop, and when an older kit runs after a newer one). Recorded as list-remove, so uninstall puts
+        them back before it undoes the earlier install."""
+        added = {}
+        for m in self.prior:
+            for op in m.get("settings_ops") or []:
+                path = tuple(op.get("path") or ())
+                if len(path) != 2 or path[0] != "permissions" or path[1] != "allow":     # removing an allow only tightens
+                    continue
+                if op.get("op") == "list-add":                      # the user had the list: only the missing entries were added
+                    added.setdefault(path, []).extend(op.get("items") or [])
+                elif op.get("op") == "set" and op.get("old") == ABSENT and isinstance(op.get("value"), list):
+                    added.setdefault(path, []).extend(op["value"])   # the user had no such list: the install wrote all of it
+        for path, items in added.items():
+            cur = (settings.get("permissions") or {}).get(path[1])
+            want = ((frag.get("permissions") or {}).get(path[1])) or []
+            if not isinstance(cur, list) or managed_has(self.managed, path, []):
+                continue
+            gone = []
+            for x in items:
+                if x in cur and x not in want and x not in gone:
+                    gone.append(x)
+            if gone:
+                cur[:] = [x for x in cur if x not in gone]
+                ops.append({"op": "list-remove", "path": list(path), "items": gone})
+                self.warnings.append(f"{'.'.join(path)}: removed {', '.join(json.dumps(x) for x in gone)}. An earlier kit install "
+                                     "added it and the profile now applied no longer has it (an entry you added yourself is kept).")
 
     def statusline(self):
         """Computed after statusline.py is written: a Windows short path exists only for an existing file."""
@@ -905,29 +965,70 @@ class Installer:
                 ids.append(i)
             else:
                 self.warnings.append(f"plugin {i} is not in this copy of the kit: skipped")
+        pyids = [i for i in ids if i in python_plugin_ids()]     # their manifests declare userConfig.python
+        config = ["--config", f"python={self.python}"]
         cmds = [["claude", "plugin", "marketplace", "remove", MARKETPLACE],
                 ["claude", "plugin", "marketplace", "add", fwd(src)]] + \
-               [["claude", "plugin", "install", i] for i in ids]
+               [["claude", "plugin", "install", i] + (config if i in pyids else []) for i in ids]
         shown = "\n".join(f"      {show(c)}" for c in cmds[1:])
         if not self.claude:
             self.todo("[plugins] the claude CLI is not on PATH (or --no-cli was given): after --apply, run:\n" + shown)
             self.manifest["cli_pending"] = ids
             return
 
+        def call(c):
+            r = subprocess.run([self.claude, *c[1:]], capture_output=True, timeout=600)
+            out = ((r.stdout or b"") + (r.stderr or b"")).decode("utf-8", "replace").strip()
+            print(f"  {show(c)} -> exit {r.returncode}\n" + "\n".join("    " + ln for ln in out.splitlines()))
+            return r
+
         def run():
             for i, c in enumerate(cmds):
-                r = subprocess.run([self.claude, *c[1:]], capture_output=True, timeout=600)
-                out = ((r.stdout or b"") + (r.stderr or b"")).decode("utf-8", "replace").strip()
                 if i == 0:     # removing an older registration of the same name; "not found" is fine
+                    subprocess.run([self.claude, *c[1:]], capture_output=True, timeout=600)
                     continue
-                print(f"  {show(c)} -> exit {r.returncode}\n" + "\n".join("    " + ln for ln in out.splitlines()))
+                r = call(c)
+                if r.returncode != 0 and "--config" in c:
+                    # an older CLI may not know --config: install without it; pin_python writes the setting afterwards
+                    c = c[:-len(config)]
+                    r = call(c)
                 if r.returncode != 0:
                     self.failures.append(show(c))
                 elif c[2] == "install":
                     self.manifest["cli"].append(c[3])
                 else:
                     self.manifest["marketplace_added"] = True
+            self.pin_python([i for i in pyids if i in self.manifest["cli"]])
         self.todo("[plugins] register the kit copy as the local marketplace `workbench` and install:\n" + shown, run)
+
+    def pin_python(self, ids):
+        """`marketplace remove` clears pluginConfigs, and an install without --config leaves userConfig unset; an unset
+        python makes every hook fail (`Plugin option "python" isn't set`), so the guards silently fail open. After the
+        plugin step: write the interpreter where it is missing, read settings.json back, and fail loudly if it is still
+        absent."""
+        sp = self.claude_home / "settings.json"
+        path = lambda i: ("pluginConfigs", i, "options", "python")  # noqa: E731
+
+        def have():
+            try:
+                s = read_json(sp)
+            except (OSError, ValueError):
+                return None, {}
+            return s, {i: (((s.get("pluginConfigs") or {}).get(i) or {}).get("options") or {}).get("python") for i in ids}
+        s, now = have()
+        if s is None:
+            return self.failures.append(f"{fwd(sp)} cannot be read back after the plugin step")
+        missing = [i for i in ids if now[i] != self.python and not managed_has(self.managed, path(i))]
+        if missing:
+            for i in missing:
+                own(s, list(path(i)), self.python, self.managed, self.manifest["settings_ops"], [], self.warnings)
+            self.write_file(sp, json.dumps(s, indent=2, ensure_ascii=False) + "\n")
+            print("  the plugin step left the python option unset for " + ", ".join(missing) + ": wrote it to settings.json")
+            s, now = have()
+        for i in ids:
+            if now.get(i) != self.python and not managed_has(self.managed, path(i)):
+                self.failures.append(f"plugin option python is not set for {i} in {fwd(sp)}, so its hooks fail: run "
+                                     f"claude plugin install {i} --config python={self.python}")
 
     # ── run ──
     def report(self):
@@ -963,7 +1064,8 @@ class Installer:
         guard = root / "plugins" / "workbench-core" / "scripts" / "guards" / "pretooluse.py"
         ok = False
         with tempfile.TemporaryDirectory() as logs:   # keep the probe out of the real guard log
-            env = {**os.environ, "GUARDS_LOG_DIR": logs, "CLAUDE_CONFIG_DIR": str(self.claude_home)}
+            # WB_SELF_TEST: the guard's heartbeat files this call as a self-test, never as the guard firing in a session
+            env = {**os.environ, "GUARDS_LOG_DIR": logs, "CLAUDE_CONFIG_DIR": str(self.claude_home), "WB_SELF_TEST": "1"}
             try:
                 ev = {"tool_name": "Bash", "tool_input": {"command": "git push --force origin main"}, "cwd": logs}
                 r = subprocess.run([sys.executable, "-S", str(guard)], input=json.dumps(ev).encode(),
@@ -1214,6 +1316,7 @@ def main(argv=None):
     ap.add_argument("--data-root", help="workbench data folder (default: the last install's, else <work OneDrive>/"
                                         "Workbench when exactly one verified work OneDrive exists, else ~/Workbench)")
     ap.add_argument("--git-hosts", help="comma-separated git hosts company code may be pushed to")
+    ap.add_argument("--guard", choices=["standard", "strict"], help="guard level (default standard; kept across upgrades)")
     ap.add_argument("--setup", choices=["auto", "plan"], help="after --apply: capability report, then provision "
                                                                "(auto, in the background) or only plan")
     ap.add_argument("--with", dest="with_", help="opt-ins, comma-separated: " + ", ".join(EXTRAS))

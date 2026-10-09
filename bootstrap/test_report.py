@@ -22,6 +22,7 @@ sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+import asks  # noqa: E402
 import devbench  # noqa: E402
 import probe  # noqa: E402
 import report  # noqa: E402
@@ -392,6 +393,128 @@ class AddendumRuleTests(Base):
         self.assertNotIn(ASK_DIGESTS, [x["ask"] for x in report.roadmap(report.evaluate(p, self.kit, tp.fixture_file()))])
 
 
+class Agreement(Base):
+    """G12: the quick report agrees with doctor --deep (a Day-1 check that passes proves its feature: never INSTALLABLE; UNKNOWN
+    only when nothing can be measured). G13: one IT ask is one line wherever it is shown."""
+    REAL = os.path.join(tp.KIT, "bootstrap", "packages.json")
+    ASK = ("Please allow downloads from huggingface.co (a one-time embedding model), or provide an approved internal mirror of "
+           "the model files.")
+    PROVED = ("find-keyword", "find-hybrid", "find-mcp", "mcp-find", "knowledge-refresh-task", "scheduled-tasks", "hooks-guards",
+              "plugin-core", "plugin-kb", "skill-find", "skill-save")
+
+    def machine(self, steps=None, quick=True, tools=None, **fs_kw):
+        fs = tp.FakeSystem(os.path.join(self.tmp, "a%d" % len(os.listdir(self.tmp))), **fs_kw)
+        p = tp.collect(fs, packages=self.REAL, kit=tp.KIT, quick=quick, network=not quick)
+        if steps is not None:
+            p["sections"]["knowledge"]["data"]["verify"] = {"pass": 22, "warn": 0, "fail": 0, "failing": [], "steps": steps,
+                                                            "tools": tools or {}}
+        return fs, p, {r["id"]: r for r in report.evaluate(p, tp.KIT, self.REAL)}
+
+    def test_the_package_table_names_the_embedding_model_host_so_the_probe_measures_it(self):
+        table = rj(self.REAL)
+        self.assertEqual([e["host"] for e in table["endpoints"]], ["huggingface.co"])
+        self.assertTrue(all("huggingface" not in h for p in table["packages"] for h in p["hosts"]), "it is not a package download")
+        _, p, rows = self.machine()
+        urls = [e["url"] for e in p["sections"]["network"]["data"]["endpoints"]]
+        self.assertIn("https://huggingface.co/", urls)
+        self.assertNotIn("not in the package table", rows["find-hybrid"]["note"])
+
+    def test_a_blocked_model_host_reads_needs_it_with_the_ask_and_a_reachable_one_installable(self):
+        fs = tp.FakeSystem(os.path.join(self.tmp, "blocked"))
+        fs.fetch = lambda url, timeout=4: {"method": "HEAD", "result": "blocked" if "huggingface" in url else "ok", "category": "connect",
+                                           "http_status": None, "bytes": 0, "ms": 1}
+        p = tp.collect(fs, packages=self.REAL, kit=tp.KIT)
+        row = {r["id"]: r for r in report.evaluate(p, tp.KIT, self.REAL)}["find-hybrid"]
+        self.assertEqual((row["status"], row["ask_it"]), (report.N, self.ASK))
+        fs.fetch = lambda url, timeout=4: {"method": "HEAD", "result": "ok", "category": None, "http_status": 200, "bytes": 0, "ms": 1}
+        p = tp.collect(fs, packages=self.REAL, kit=tp.KIT)
+        self.assertEqual({r["id"]: r for r in report.evaluate(p, tp.KIT, self.REAL)}["find-hybrid"]["status"], report.I)
+
+    def test_nothing_a_passing_day_one_check_proves_is_installable_or_unknown(self):
+        _, _, bare = self.machine()
+        self.assertEqual(bare["find-keyword"]["status"], report.I, "without the record the quick report cannot know")
+        _, _, rows = self.machine({"D%d" % i: "PASS" for i in range(1, 24)})
+        for rid in self.PROVED:
+            self.assertEqual(rows[rid]["status"], report.R, (rid, rows[rid]["note"]))
+        self.assertEqual(rows["mcp-postgres"]["status"], report.R, "uvx is measured through the uv in the package table")
+
+    def test_playwright_cli_follows_d23_and_ctx_and_tokensave_follow_their_own_d18_status(self):
+        _, _, bare = self.machine()
+        for rid in ("pkg-playwright-cli", "pkg-ctx", "pkg-tokensave"):
+            self.assertEqual(bare[rid]["status"], report.I, rid)
+        _, _, rows = self.machine({"D23": "PASS", "D18": "WARN"}, tools={"ctx": "PASS", "tokensave": "WARN"})
+        self.assertEqual(rows["pkg-playwright-cli"]["status"], report.R)
+        self.assertIn("D23", rows["pkg-playwright-cli"]["note"])
+        self.assertEqual(rows["pkg-ctx"]["status"], report.R)
+        self.assertIn("D18", rows["pkg-ctx"]["note"])
+        self.assertEqual(rows["pkg-tokensave"]["status"], report.I, "tokensave did not answer: not READY because ctx did")
+        _, _, rows = self.machine({"D23": "WARN"}, tools={})
+        self.assertEqual(rows["pkg-playwright-cli"]["status"], report.I)
+        _, _, rows = self.machine({"D23": "PASS"}, tools={"tokensave": "PASS"})
+        self.assertEqual((rows["pkg-tokensave"]["status"], rows["pkg-ctx"]["status"]), (report.R, report.I))
+
+    def test_a_failed_keyword_check_is_never_ready_even_when_the_probes_own_find_call_answers(self):
+        _, p, _ = self.machine({"D10": "FAIL"})
+        p["sections"]["knowledge"]["data"]["find"] = {"available": True, "mode": "keyword", "vectors": 0}
+        row = {r["id"]: r for r in report.evaluate(p, tp.KIT, self.REAL)}["find-keyword"]
+        self.assertEqual(row["status"], report.I)
+        self.assertIn("D10", row["note"])
+
+    def test_each_row_follows_only_its_own_check(self):
+        _, _, rows = self.machine({"D10": "PASS", "D13": "WARN", "D14": "WARN", "D15": "FAIL", "D9": "PASS"})
+        self.assertEqual(rows["find-keyword"]["status"], report.R)
+        self.assertEqual(rows["find-hybrid"]["status"], report.R, "D9 passed: the index has vectors")
+        for rid in ("find-mcp", "mcp-find", "knowledge-refresh-task", "hooks-guards", "plugin-core"):
+            self.assertEqual(rows[rid]["status"], report.I, rid)
+
+    def test_a_keyword_only_index_is_needs_it_with_the_ask_doctor_attaches_and_nothing_measurable_is_unknown_with_a_reason(self):
+        _, _, rows = self.machine({"D9": "WARN", "D11": "WARN", "D10": "PASS"})
+        self.assertEqual((rows["find-hybrid"]["status"], rows["find-hybrid"]["ask_it"]), (report.N, self.ASK))
+        feats = json.loads(rd(os.path.join(tp.KIT, "bootstrap", "features.json")))["rows"]
+        self.assertEqual(self.ASK, next(f["ask_it"] for f in feats if f["id"] == "find-hybrid"), "the ask D9 and D11 carry")
+        _, _, rows = self.machine()
+        self.assertEqual(rows["find-hybrid"]["status"], report.U)
+        self.assertIn("not tested", rows["find-hybrid"]["note"])
+        self.assertIn("quick report", rows["find-hybrid"]["note"])
+
+    def test_one_blocked_host_is_one_ask_in_the_roadmap_the_shared_list_and_the_written_report(self):
+        fs = tp.FakeSystem(os.path.join(self.tmp, "g13"))
+        state = os.path.join(fs.environ["CLAUDE_CONFIG_DIR"], "workbench", "state")
+        os.makedirs(state)
+        loud = self.ASK.upper().replace(" ", "  ")                     # the same ask in other case and spacing
+        steps = [{"id": "D9", "status": "WARN", "ask_it": self.ASK}, {"id": "D11", "status": "WARN", "ask_it": loud},
+                 {"id": "D10", "status": "PASS", "ask_it": None}]
+        with open(os.path.join(state, "knowledge-verify.json"), "w", encoding="utf-8") as f:
+            json.dump({"summary": {"pass": 1, "warn": 2, "fail": 0, "failing": []}, "steps": steps}, f)
+        with open(os.path.join(state, "setup-state.json"), "w", encoding="utf-8") as f:
+            json.dump({"ask_it": [{"item": "knowledge:find-build", "text": self.ASK}, {"item": "widget", "text": "Please unlock the widget."}]}, f)
+        c = report.run_report("refresh", state, quick=True, packages=self.REAL, probe_kw=fs.kw())
+        self.assertEqual(c["features"][[r["id"] for r in c["features"]].index("find-hybrid")]["status"], report.N)
+        same = lambda lst: [x for x in lst if asks.key(x["ask"]) == asks.key(self.ASK)]  # noqa: E731
+        self.assertEqual(len(same(c["roadmap"])), 1, "the report lists it once")
+        self.assertEqual(len(same(rj(os.path.join(state, "capability-refresh.json"))["roadmap"])), 1, "and so does the written file")
+        shared = asks.gather(state)
+        self.assertEqual(len(same(shared)), 1, "the list setup, doctor and report share has it once")
+        self.assertEqual(sorted(same(shared)[0]["sources"]), ["day-1 check D11", "day-1 check D9", "report find-hybrid", "setup"])
+        widget = [r for r in c["roadmap"] if r["ask"] == "Please unlock the widget."]
+        self.assertEqual((len(widget), widget[0]["unlocks"]), (1, []), "an ask only setup raised joins the same list")
+        self.assertEqual(sorted(a["ask"] for a in shared), sorted(r["ask"] for r in c["roadmap"]), "one list, three views")
+
+    def test_a_check_that_passed_or_a_row_that_is_ready_raises_no_ask(self):
+        _, p, rows = self.machine({"D9": "PASS"})
+        d = tempfile.mkdtemp(prefix="wb-asks-")
+        self.addCleanup(shutil.rmtree, d, True)
+        with open(os.path.join(d, "knowledge-verify.json"), "w", encoding="utf-8") as f:
+            json.dump({"steps": [{"id": "D9", "status": "PASS", "ask_it": self.ASK}]}, f)
+        c = report.build(p, "refresh", None, True, tp.KIT, self.REAL)
+        self.assertEqual([a for a in asks.gather(d, report=c) if asks.key(a["ask"]) == asks.key(self.ASK)], [])
+
+    def test_merge_keeps_the_first_wording_and_every_source_once(self):
+        got = asks.merge([("Please allow  X.", "a"), ("please allow x.", "b"), ("Please allow Y.", "a"), (None, "c"), ("", "c"),
+                          ("PLEASE ALLOW X.", "a")])
+        self.assertEqual(got, [{"ask": "Please allow X.", "sources": ["a", "b"]}, {"ask": "Please allow Y.", "sources": ["a"]}])
+
+
 class BootRowsTests(Base):
     """A3: the Day-1 verify row (IK2), the find MCP row, the Playwright CLI rows."""
     NPM_PACKAGES = {"version": 1, "packages": [
@@ -439,6 +562,42 @@ class BootRowsTests(Base):
         self.assertEqual(r["ask_it"], "Please allow the local stdio MCP server `find` (a local search index; no network egress) in the managed MCP allow list.")
         reg = {r"HKLM\SOFTWARE\Policies\ClaudeCode": {"Settings": json.dumps({"allowManagedMcpServersOnly": True, "allowedMcpServers": [{"serverName": "other"}]})}}
         self.assertEqual(self.rows(self.probe(registry=reg))["find-mcp"]["status"], report.B, "an allow list that omits find")
+
+    def day_one_rows(self, steps, available=False):
+        p = self.probe()
+        data = p["sections"]["knowledge"]["data"]
+        data["find"]["available"] = available
+        data["verify"] = None if steps is None else {"pass": 21, "warn": 1, "fail": 0, "failing": [], "steps": steps}
+        return self.rows(p, kit=tp.KIT)        # the real kit: its MCP template carries find and github-local
+
+    FOUR = ("find-keyword", "find-mcp", "mcp-find", "mcp-github-local")
+
+    def test_the_four_find_rows_are_ready_when_the_day_one_checks_d10_and_d13_passed(self):
+        rows = self.day_one_rows({"D10": "PASS", "D13": "PASS"})
+        for rid in self.FOUR:
+            self.assertEqual(rows[rid]["status"], report.R, (rid, rows[rid]["note"]))
+        self.assertIn("D10", rows["find-keyword"]["note"])
+        self.assertIn("D13", rows["find-mcp"]["note"])
+
+    def test_they_stay_installable_when_those_checks_did_not_pass_or_never_ran(self):
+        for steps in ({"D10": "FAIL", "D13": "WARN"}, {}, None):
+            rows = self.day_one_rows(steps)
+            for rid in ("find-keyword", "find-mcp", "mcp-find"):
+                self.assertEqual(rows[rid]["status"], report.I, (steps, rid))
+        rows = self.day_one_rows({"D10": "PASS", "D13": "WARN"})
+        self.assertEqual((rows["find-keyword"]["status"], rows["find-mcp"]["status"], rows["mcp-find"]["status"]),
+                         (report.R, report.I, report.I), "each row follows its own check")
+
+    def test_find_keyword_is_still_ready_when_the_probes_own_find_call_answers(self):
+        rows = self.day_one_rows(None, available=True)
+        self.assertEqual(rows["find-keyword"]["status"], report.R)
+
+    def test_a_managed_policy_still_blocks_the_find_server_even_when_d13_passed(self):
+        reg = {r"HKLM\SOFTWARE\Policies\ClaudeCode": {"Settings": json.dumps({"deniedMcpServers": [{"serverName": "find"}]})}}
+        p = self.probe(registry=reg)
+        p["sections"]["knowledge"]["data"]["verify"] = {"pass": 22, "warn": 0, "fail": 0, "failing": [], "steps": {"D13": "PASS"}}
+        rows = self.rows(p, kit=tp.KIT)
+        self.assertEqual((rows["find-mcp"]["status"], rows["mcp-find"]["status"]), (report.B, report.B))
 
     def test_the_transcripts_ask_names_the_copilot_permission_and_the_tenant_check(self):
         r = self.rows(self.probe())["capture-meeting-transcripts"]

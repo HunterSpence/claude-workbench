@@ -1,6 +1,6 @@
 ---
 name: meeting-to-actions
-description: Write up a meeting from a transcript, dialogue or notes. Gives decisions, action items with owner and due date, risks, open questions and a follow-up email draft. Use for weekly syncs, calls and standups, or to write up or minute a meeting.
+description: Write up a meeting from a transcript, dialogue or notes, with decisions, action items (owner, due date), risks, open questions and a follow-up email draft. Use for syncs, calls, standups, or to minute a meeting.
 license: MIT
 ---
 

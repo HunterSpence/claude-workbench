@@ -21,8 +21,11 @@ on every call, so the lever is context size, not shorter answers.
    uncached, and Claude Code asks you to confirm (`docs/token-diet.md`).
 6. Keep always-loaded files short: your `CLAUDE.md` and everything it imports are re-read every call. Check the kit's
    budget with `py -3 <KIT>/tools/test_docs.py --budget`.
-7. Leave MCP servers you are not using disconnected and keep tool search on (do not set `ENABLE_TOOL_SEARCH=false`).
-8. Measure again after a normal week, with comparable work. `docs/token-diet.md` explains what was measured, what to skip,
+7. Check what a session costs before you type anything: run `py -3 <KIT>/tools/token-split/token_split.py startup`. A long skill
+   listing is part of it, and a listing over budget silently drops skill descriptions; `/doctor` shows the listing's estimate
+   and its biggest contributors (`docs/token-diet.md`, "The skill listing").
+8. Leave MCP servers you are not using disconnected and keep tool search on (do not set `ENABLE_TOOL_SEARCH=false`).
+9. Measure again after a normal week, with comparable work. `docs/token-diet.md` explains what was measured, what to skip,
    and which popular tricks cost more than they save. `<KIT>` is the kit folder (guide 01).
 
 ## Verify

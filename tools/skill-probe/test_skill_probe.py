@@ -184,5 +184,97 @@ class Probe(unittest.TestCase):
         self.assertEqual((r.returncode, r.stdout.strip()), (0, "skill_probe self-test ok"), r.stderr)
 
 
+KIT = HERE.parents[1]
+KIT_SPEC = HERE / "probe.kit.json"
+
+
+def when_to_use_skills():
+    """Names of the kit skills whose SKILL.md frontmatter carries a when_to_use line."""
+    out = set()
+    for f in KIT.glob("plugins/*/skills/*/SKILL.md"):
+        head = f.read_text(encoding="utf-8").split("---")[1]
+        if any(line.startswith("when_to_use:") for line in head.splitlines()):
+            out.add(f.parent.name)
+    return out
+
+
+class KitSpec(Probe):
+    """The shipped probe.kit.json and the --kit shortcut. The 'model' is a fake runner that writes transcripts; no Claude call."""
+
+    def kit(self):
+        return json.loads(KIT_SPEC.read_text(encoding="utf-8"))["skills"]
+
+    def fake_runner(self, decide, name="kit.jsonl"):
+        """Write one transcript holding every example prompt; decide(prompt, skills) -> the skills the fake model starts."""
+        spec, lines, n = self.kit(), [], 0
+        for skill, row in spec.items():
+            for kind in ("should", "should_not"):
+                for prompt in row["examples"][kind]:
+                    n += 1
+                    lines.append(user(f"{skill}-{kind}-{n}", prompt))
+                    for s in decide(prompt, spec):
+                        lines.append(call("Skill", {"skill": f"workbench-core:{s}"}))
+        self.transcript(*lines, name=name)
+
+    def kit_json(self):
+        r = self.cli("--kit", "--transcripts", str(self.tmp / "tr"), "--json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)["skills"]
+
+    def test_the_kit_spec_covers_every_when_to_use_skill_with_five_and_five(self):
+        spec = self.kit()
+        self.assertEqual(set(spec), when_to_use_skills(), "a skill with a when_to_use line needs probe cases, and only those")
+        for skill, row in spec.items():
+            for kind in ("should", "should_not"):
+                self.assertEqual(len(row[kind]), 5, f"{skill} {kind}")
+                self.assertEqual(len(row["examples"][kind]), 5, f"{skill} {kind} examples")
+                self.assertEqual(len(set(row[kind])), 5, f"{skill} {kind}: patterns repeat")
+
+    def test_every_example_matches_its_own_pattern_and_nothing_on_the_other_side(self):
+        sp.load_spec(KIT_SPEC)                       # every pattern compiles
+        for skill, row in self.kit().items():
+            should, not_ = [sp.re.compile(x, sp.re.I) for x in row["should"]], [sp.re.compile(x, sp.re.I) for x in row["should_not"]]
+            for i, ex in enumerate(row["examples"]["should"]):
+                self.assertTrue(should[i].search(ex), f"{skill}: should[{i}] does not match its example")
+                self.assertFalse(any(r.search(ex) for r in not_), f"{skill}: should example {i} also matches a should_not pattern")
+            for i, ex in enumerate(row["examples"]["should_not"]):
+                self.assertTrue(not_[i].search(ex), f"{skill}: should_not[{i}] does not match its example")
+                self.assertFalse(any(r.search(ex) for r in should), f"{skill}: should_not example {i} also matches a should pattern")
+
+    def test_kit_flag_runs_the_shipped_spec_and_never_prints_prompt_text(self):
+        self.fake_runner(lambda prompt, spec: [s for s, row in spec.items() if any(sp.re.search(x, prompt, sp.re.I) for x in row["should"])])
+        r = self.cli("--kit", "--transcripts", str(self.tmp / "tr"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.count("verdict: ok"), len(self.kit()), r.stdout)
+        for row in self.kit().values():
+            for ex in row["examples"]["should"] + row["examples"]["should_not"]:
+                self.assertNotIn(ex, r.stdout)
+
+    def test_a_model_that_follows_the_patterns_passes_every_skill(self):
+        self.fake_runner(lambda prompt, spec: [s for s, row in spec.items() if any(sp.re.search(x, prompt, sp.re.I) for x in row["should"])])
+        for skill, row in self.kit_json().items():
+            self.assertEqual((row["should"]["rate"], row["should_not"]["rate"], row["verdict"]), (1.0, 0.0, "ok"), skill)
+            self.assertGreaterEqual(row["should"]["prompts"], 5, skill)
+            self.assertGreaterEqual(row["should_not"]["prompts"], 5, skill)
+
+    def test_a_model_that_never_starts_a_skill_is_told_to_reword_every_description(self):
+        self.fake_runner(lambda prompt, spec: [])
+        for skill, row in self.kit_json().items():
+            self.assertEqual(row["should"]["rate"], 0.0, skill)
+            self.assertIn("reword the description", row["verdict"], skill)
+
+    def test_a_model_that_starts_everything_is_told_to_narrow_every_description(self):
+        self.fake_runner(lambda prompt, spec: list(spec))
+        for skill, row in self.kit_json().items():
+            self.assertEqual(row["should_not"]["rate"], 1.0, skill)
+            self.assertIn("narrow the description", row["verdict"], skill)
+
+    def test_kit_and_spec_together_or_neither_is_exit_2(self):
+        self.transcript(user("u1", "x"))
+        self.assertEqual(self.cli("--kit", "--spec", str(self.spec()), "--transcripts", str(self.tmp / "tr")).returncode, 2)
+        self.assertEqual(self.cli("--transcripts", str(self.tmp / "tr")).returncode, 2)
+        self.assertEqual(self.cli("--kit", "--transcripts", str(self.tmp / "none")).returncode, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

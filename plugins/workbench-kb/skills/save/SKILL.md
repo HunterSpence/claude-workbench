@@ -1,6 +1,6 @@
 ---
 name: save
-description: "Save this session's knowledge to the Markdown knowledge base (<domain>/ notes, active-context.md, a daily log line), then reindex. Use before /compact, when the user wraps up, when a session-start notice says a precompact save is pending, or any time work worth keeping happened. A driver does the mechanics (journal folding, caps, credential scan, locked merge, reindex, optional local git commit); you do the judgment writes. Never pushes anywhere unless the user configured a remote and asks for --push."
+description: "Save this session's knowledge to the Markdown knowledge base (domain notes, active-context.md, a daily log line), then reindex. Use before /compact, when the user wraps up, when a precompact save is pending, or when work worth keeping happened."
 ---
 
 # save

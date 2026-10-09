@@ -71,7 +71,7 @@ class Hooks(unittest.TestCase):
         self.assertIn("proxy cert rollout", ctx)
         self.assertIn("PINS (user settings; managed policy may override", ctx)
         self.assertIn("main=opus/high", ctx)
-        self.assertIn("every push to a remote host is refused until the user adds hosts", ctx)
+        self.assertIn("a push to a remote host is refused or asked about until the user adds hosts", ctx)
         self.kstate().mkdir(parents=True, exist_ok=True)
         (self.kstate() / "precompact-s1.flag").write_text("x")
         ctx = self.hook("session_start.py", {"session_id": "s1"})["hookSpecificOutput"]["additionalContext"]
@@ -177,6 +177,30 @@ class Hooks(unittest.TestCase):
         self.assertEqual((d["sessions_since_fire"], d["note_from_setup"]), (1, "keep me"))
         self.hook("precompact.py", {"session_id": "s2"})
         self.assertEqual((read()["sessions_since_fire"], read()["note_from_setup"], "last_precompact" in read()), (1, "keep me", True))
+
+    def test_self_test_marks_only_self_test_at(self):
+        """H2: the installer's self-test (env WB_SELF_TEST=1) must not look like a real guard fire."""
+        old = "2000-01-01T00:00:00Z"
+        seed = {"version": 1, "last_fired": old, "sessions_since_fire": 5, "fired_total": 7, "last_start": old,
+                "note_from_setup": "keep me"}
+        self.state("guard-heartbeat.json", seed)
+        beat = self.wb / "state" / "guard-heartbeat.json"
+        read = lambda: json.loads(beat.read_text())  # noqa: E731
+        call = {"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": str(self.tmp)}
+        self.hook("guards/pretooluse.py", call, env={"WB_SELF_TEST": "1"})
+        d = read()
+        self.assertRegex(d["self_test_at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+        self.assertEqual((d["last_fired"], d["fired_total"], d["sessions_since_fire"], d["note_from_setup"]),
+                         (old, 7, 5, "keep me"))
+        self.hook("session_start.py", {"session_id": "s1", "source": "startup"}, env={"WB_SELF_TEST": "1"})   # stamps held back too
+        d = read()
+        self.assertEqual((d["last_start"], d["sessions_since_fire"]), (old, 5))
+        for other in ("0", "", "true"):                                      # only the exact value 1 counts
+            self.hook("guards/pretooluse.py", call, env={"WB_SELF_TEST": other})
+        d = read()
+        self.assertEqual((d["fired_total"], d["sessions_since_fire"]), (10, 0))
+        self.assertNotEqual(d["last_fired"], old)
+        self.assertEqual(self.hook("guards/pretooluse.py", call, env={"WB_SELF_TEST": "1"}), None)   # and the call still goes through
 
     def test_statusline(self):
         r = subprocess.run([sys.executable, str(SCRIPTS / "statusline.py")], capture_output=True, text=True,
@@ -619,6 +643,18 @@ class Wiring(unittest.TestCase):
         for ev, s in (("Stop", "cred_check.py"), ("PreCompact", "precompact.py"), ("ConfigChange", "config_change_log.py"),
                       ("InstructionsLoaded", "instructions_loaded.py"), ("SessionStart", "session_start.py")):
             self.assertIn(s, scripts(ev), ev)
+
+    def test_tokensave_edit_tools_are_wired_to_the_guard(self):
+        h = json.loads((PLUGIN / "hooks" / "hooks.json").read_text())["hooks"]
+        def scripts(tool):
+            return {Path(x["args"][-1]).name for g in h["PreToolUse"] if re.fullmatch(g.get("matcher", ".*"), tool)
+                    for x in g["hooks"]}
+        for verb in ("str_replace", "multi_str_replace", "insert_at", "insert_at_symbol", "replace_symbol", "ast_grep_rewrite",
+                     "replace_lines", "delete_symbol"):
+            self.assertEqual(scripts("mcp__tokensave__tokensave_" + verb), {"pretooluse.py"}, verb)
+        for tool in ("search", "callers", "callees", "impact", "context", "status"):
+            self.assertEqual(scripts("mcp__tokensave__tokensave_" + tool), set(), tool)      # read-only: no hook
+        self.assertNotIn("tokensave", (PLUGIN / "hooks" / "hooks.json").read_text().lower())   # the matcher names verbs only
 
     def test_database_tools_and_the_failure_hook_are_wired(self):
         h = json.loads((PLUGIN / "hooks" / "hooks.json").read_text())["hooks"]

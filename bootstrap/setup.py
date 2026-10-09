@@ -17,6 +17,9 @@
   setup.py doctor [--deep] [--json] [--bundle OUT.zip]   --deep adds the Day-1 knowledge checks (D1-D23, written to
                                         <state>/knowledge-verify.json) to every doctor row; its exit is nonzero only
                                         for a FAIL in any row (a WARN exits 0)
+  setup.py skills [--dry-run] [--force]  measure the whole skill listing; over 80% of Claude Code's limit, list the user's own skills
+                                        by name only (skillOverrides, settings.json backed up first, values you set kept unless
+                                        --force, plugin skills never touched). `run` does this too; the doctor has a row for it
   setup.py backup [--out ZIP] [--if-older-days N]   KB notes, journal + curated config -> <data root>/backup/ unless
                                         --out; with --if-older-days nothing is written while the newest backup is younger
   setup.py restore ZIP [--to DIR] [--apply] [--force] [--restore-settings]   hashes and paths checked first;
@@ -51,8 +54,10 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 KIT = HERE.parent
 sys.path.insert(0, str(HERE))
+import asks as ASKS  # noqa: E402
 import install as I  # noqa: E402
 import knowledge_verify as KV  # noqa: E402
+import skill_tiers as ST  # noqa: E402
 
 fwd, show, sha = I.fwd, I.show, I.sha
 PY = I.console_python()       # never pythonw for a child whose output is read (detached runs start under pythonw)
@@ -93,6 +98,12 @@ IN_USE = {0x8A150101, 0x8A150103, 0x8A150111}                       # the progra
 DOWNGRADE = 0x8A15010E                                              # a higher version is already installed
 # ctx (packages.json id "ctx"): everything that runs in the background or calls out is off before its first use.
 CTX_ENV = {"CTX_ANALYTICS_ENABLED": "false", "CTX_DAEMON_ENABLED": "false", "CTX_UPGRADE_AUTO": "off"}
+# ctx's own config file (<data root>/config.toml): the keys were verified against the pinned ctx 2.2.8 itself
+# (build-notes/v032-fetch.md): ctx rejects unknown keys and wrong types, and `ctx docs show storage` documents these two.
+CTX_CONFIG = (("analytics", "enabled", "false"),     # telemetry off; the CTX_ANALYTICS_ENABLED variable stays set too
+              ("sources", "automatic", "false"))     # only named roots are read: no sweep of 30 other agents' folders
+RESTART = ("Close every Claude Code window and start a new one from a fresh terminal: the new PATH and the plugin "
+           "options only reach programs started after this run.")
 CLI_CONFIG_ENV = "PLAYWRIGHT_MCP_CONFIG"                            # path to the Playwright CLI's configuration file
 NPM_ENV = {"PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "1"}                 # Edge is the browser: the CLI downloads none
 UPDATE_ACTIONS = ("upgraded", "current", "deferred", "it-managed", "skipped-policy", "denied", "failed")
@@ -378,15 +389,18 @@ class Ctx:
         self.kb = Path(self.cfg.get("kb_root") or self.data / "kb")
         st = jload(self.state_dir / "setup-state.json", {}) or {}
         opts = st.get("options") or {}
+        self.prev_version = st.get("kit_version")                              # the release this machine ran before this run
         self.with_ = set(with_) if with_ else set(opts.get("with") or [])     # resume reuses the run's options
         self.no_nightly = bool(no_nightly or opts.get("no_nightly"))
         self.no_update = bool(no_update or opts.get("no_update"))
-        self.st = {"version": 1, "kit_version": I.VERSION, "phase": None, "running": False, "pid": None,
+        self.st = {"version": 1, "phase": None, "running": False, "pid": None,
                    "exit_code": None, "next": None, "updated": None, "reboot_pending": False, "infosec_shown": False,
-                   "ask_it": [], "failed": [], **st}
+                   "ask_it": [], "failed": [], **st, "kit_version": I.VERSION}      # the running kit decides, never the old file
         self.st["options"] = {"with": sorted(self.with_), "no_nightly": self.no_nightly, "no_update": self.no_update}
         self.probe = {}
         self.notes = []
+        self.suggestions = []                     # libraries find discovered but setup did not register (guide 28)
+        self.roots_read = False                   # True once `find roots` was read, so "indexed or not" is known
         self.extra_env = {}                       # added to every program setup starts (ctx: its opt-outs, before first use)
 
     # state
@@ -399,7 +413,21 @@ class Ctx:
         self.save(phase=name)
 
     def ask(self, item, text):
-        self.st["ask_it"] = [x for x in self.st["ask_it"] if x["item"] != item] + [{"item": item, "text": text}]
+        """One entry per distinct ask: a second item that needs the same thing (two checks, one blocked download) is listed
+        under the first as `also`, never as a second ask."""
+        pairs = {}                                   # item -> text, from the deduplicated list the state holds
+        for x in self.st["ask_it"]:
+            pairs[x["item"]] = x["text"]
+            pairs.update({a: x["text"] for a in x.get("also") or []})
+        pairs[item] = text
+        out = []
+        for it, tx in pairs.items():
+            same = next((o for o in out if ASKS.key(o["text"]) == ASKS.key(tx)), None)
+            if same:
+                same["also"] = [*(same.get("also") or []), it]
+            else:
+                out.append({"item": it, "text": tx})
+        self.st["ask_it"] = out
         self.log(f"ASK IT [{item}]: {text}")
 
     def fail(self, item, error):
@@ -867,7 +895,8 @@ def path_append(ctx, entry):
     """Append to HKCU Path through the registry API, keeping REG_EXPAND_SZ (never setx: it truncates at 1024)."""
     cur = I.reg_get(ENV_KEY, "Path") or ("", 2)
     data = str(cur[0] or "")
-    if any(x.strip().rstrip("\\").lower() == entry.rstrip("\\").lower() for x in data.split(";")):
+    norm = lambda x: os.path.normcase(os.path.normpath(os.path.expandvars(x.strip()))) if x.strip() else ""  # noqa: E731
+    if norm(entry) in {norm(x) for x in data.split(";")}:        # same folder, whatever the case, slashes or %VAR% form
         return
     reg_set(ENV_KEY, "Path", (data.rstrip(";") + ";" + entry) if data else entry, cur[1] or 2)
     ctx.record({"kind": "path-append", "entry": entry}, f"path:{entry.lower()}")
@@ -1379,8 +1408,12 @@ def do_knowledge(ctx):
                fwd(ctx.lad / "doc-index" / "knowledge" / "index.sqlite"))
     rc, out = ctx.py_tool(find, "discover", "--json")
     libs = (jparse(out).get("libraries") or []) if rc == 0 else []
+    # A discovered library (a work OneDrive, a SharePoint sync, Documents) is a suggestion, never a root setup registers:
+    # it can contain the KB and captured roots (one run indexed 24 notes twice), and guide 28 says to index a scoped folder.
+    ctx.suggestions = [{"path": fwd(lib["path"]), "kind": lib.get("kind"), "label": lib.get("label"), "root": None}
+                       for lib in libs if isinstance(lib, dict) and lib.get("path")]
     (ctx.data / "captured").mkdir(parents=True, exist_ok=True)
-    roots = [(lib["path"], lib.get("label")) for lib in libs] + [(str(ctx.data / "captured"), "captured")]
+    roots = [(str(ctx.data / "captured"), "captured")]
     if (KIT / "docs" / "howto").is_dir():
         roots.append((str(KIT / "docs" / "howto"), "howto"))
     if ctx.kb.is_dir():
@@ -1389,6 +1422,16 @@ def do_knowledge(ctx):
         rc, _ = ctx.py_tool(find, "add-root", path, *(["--label", label] if label else []), "--json")
         if rc != 0:
             ctx.fail("knowledge", f"add-root {label or path} exit {hx(rc)}")
+    # Which discovered libraries are ALREADY search roots (a 0.3.1 setup registered them, and the nightly refresh keeps indexing
+    # them)? Read the index's root list; never remove one here, that is the person's data choice.
+    rc, out = ctx.py_tool(find, "roots", "--json")
+    reg = json_in(out).get("roots") if rc == 0 else None
+    if isinstance(reg, list):
+        key = lambda p: fwd(p).lower().rstrip("/")  # noqa: E731
+        have = {key(r["path"]): r.get("label") for r in reg if isinstance(r, dict) and r.get("path")}
+        for sug in ctx.suggestions:
+            sug["root"] = have.get(key(sug["path"]))
+        ctx.roots_read = True
 
 
 RELAY_KEY = "settings:stopfailure-relay"
@@ -1455,6 +1498,132 @@ def do_knowledge_verify(ctx):
     else:
         ctx.clear("knowledge-verify")
     return doc
+
+
+def do_path(ctx):
+    """<WB>/bin on the user Path, so the bare commands the guides use (ctx, tokensave, node, playwright-cli) resolve in a
+    new terminal. Idempotent (path_append) and undone by undo-config; Windows only."""
+    if not WIN:
+        return
+    b = ctx.wb / "bin"
+    b.mkdir(parents=True, exist_ok=True)
+    path_append(ctx, str(b))
+
+
+def toml_set(text, table, key, literal):
+    """text with `key = literal` set inside [table]: the key's line is replaced, a missing key goes right under the
+    header, a missing table is appended. Every other line (comments, other tables) is kept as written."""
+    nl = "\r\n" if "\r\n" in text else "\n"
+    lines = text.splitlines(keepends=True)
+    head = re.compile(r"^\s*\[\s*([^\[\]]+?)\s*\]\s*(#.*)?$")
+    start = next((i for i, ln in enumerate(lines) if (m := head.match(ln.rstrip("\r\n"))) and m.group(1) == table), None)
+    if start is None:
+        return text + ("" if not text or text.endswith("\n") else nl) + (nl if text.strip() else "") + \
+            f"[{table}]{nl}{key} = {literal}{nl}"
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].lstrip().startswith("[")), len(lines))
+    for i in range(start + 1, end):
+        if re.match(rf"^\s*{re.escape(key)}\s*=", lines[i]):
+            lines[i] = f"{key} = {literal}{nl}"
+            return "".join(lines)
+    lines.insert(start + 1, f"{key} = {literal}{nl}")
+    return "".join(lines)
+
+
+def json_in(raw):
+    """The first JSON object in a program's combined output (a warning line may come before or after it), else {}."""
+    t = decode(raw)
+    a, b = t.find("{"), t.rfind("}")
+    try:
+        d = json.loads(t[a:b + 1]) if 0 <= a < b else {}
+    except ValueError:
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def ctx_config_path(ctx, exe):
+    """The file ctx itself reads: `ctx status --format json` names it (config_path, checked on 2.2.8); else the documented
+    default <CTX_DATA_ROOT or ~/.ctx>/config.toml. Only the JSON is read, never the exit code."""
+    _, out = ctx.run([str(exe), "status", "--format", "json"], alias="ctx", timeout=120)
+    p = json_in(out).get("config_path")
+    return Path(p) if p else Path(os.environ.get("CTX_DATA_ROOT") or ctx.home / ".ctx") / "config.toml"
+
+
+def do_ctx_config(ctx):
+    """ctx 2.2.8 sends analytics by default and reads every agent's history folder it can find (34 absent ones failed the
+    nightly import, Last Result 1). For the ctx THIS kit installed: write the opt-out and `automatic = false` into ctx's own
+    config.toml (line edits, nothing else touched, validated with tomllib when the interpreter has it), then register the
+    Claude Code folder as the one named root through ctx's own editor. A `claude` root the user defined differently stays."""
+    if not ledger_pkgs(ctx).get("ctx"):
+        return                                              # IT's or the user's own ctx: its config stays theirs
+    exe = ctx.wb / "bin" / ("ctx.exe" if WIN else "ctx")
+    if not exe.is_file():
+        return
+    ctx.extra_env.update(CTX_ENV)                           # off before any further ctx call, even in a shell that predates them
+    try:
+        import tomllib
+    except ImportError:                                     # Python 3.10: the edit could not be checked, so it is not made
+        return ctx.notes.append(
+            "ctx: this Python (3.10) cannot validate TOML, so setup did not edit ctx's config.toml; its analytics and "
+            "daemon opt-outs stay on through the user environment variables. To limit it to Claude Code by hand, add to ctx's "
+            "config.toml: [analytics] enabled = false, and [sources] automatic = false, then run: ctx sources add claude "
+            f"--provider claude --root {ctx.ch}. Or run setup with Python 3.11 or newer.")
+    cfg = ctx_config_path(ctx, exe)
+    try:
+        old = cfg.read_text(encoding="utf-8-sig") if cfg.is_file() else ""
+        tomllib.loads(old)
+        new = old
+        for table, key, lit in CTX_CONFIG:
+            new = toml_set(new, table, key, lit)
+        got = tomllib.loads(new)
+        if any(got.get(t, {}).get(k) is not (lit == "true") for t, k, lit in CTX_CONFIG):
+            raise ValueError("the edited file does not read back with the wanted values")
+    except (OSError, ValueError) as e:                      # tomllib.TOMLDecodeError is a ValueError
+        return ctx.fail("ctx-config", f"{fwd(cfg)} was left unchanged ({e}); fix or move that file, then run setup again")
+    ctx.clear("ctx-config")
+    if new != old:
+        atomic_write(cfg, new)
+    rc, _ = ctx.run([str(exe), "sources", "add", "claude", "--provider", "claude", "--root", str(ctx.ch)], alias="ctx",
+                    timeout=120)
+    if rc != 0:
+        ctx.notes.append(f"ctx: a source named `claude` is already defined with other settings in {fwd(cfg)}; kept as it "
+                         "is. With automatic discovery off, ctx reads only the roots listed there.")
+
+
+def do_tokensave_mcp(ctx):
+    """tokensave's `serve` exits while no repository is indexed, so a live entry shows DOWN and warns in every doctor run.
+    Register it PARKED instead (mcpServersParked, which Claude Code ignores) through the healer; `unpark` turns it on after
+    `tokensave init`. Only with --with tokensave, only when the user has no entry of that name, and a managed MCP policy wins."""
+    if "tokensave" not in ctx.with_:
+        return
+    exe, cfgp = ctx.which("tokensave"), KV.user_mcp_config(ctx)
+    if not exe:
+        return
+    if not cfgp.is_file():
+        return ctx.notes.append(f"tokensave: {fwd(cfgp)} does not exist yet; start Claude Code once, then run setup.py run "
+                                "again to register the code-graph server (parked)")
+    cur = jload(cfgp, {}) or {}
+    tpl = ((jload(KIT / "mcp" / "golden-config.template.json", {}) or {}).get("servers") or {}).get("tokensave")
+    if not tpl:
+        return
+    spec = {**tpl, "action": "park", "command": fwd(exe),
+            "reason": "Registered parked by setup: serve exits until a repository is indexed (tokensave init)."}
+    g = ctx.state_dir / "tokensave-mcp.golden.json"
+    jwrite(g, {"_readme": "Written by setup.py: the tokensave MCP server only, parked.", "servers": {"tokensave": spec}})
+    if "tokensave" in (cur.get("mcpServers") or {}):        # the user's live entry stays; say what it costs and the one command
+        park = show([PY, fwd(KIT / "tools" / "mcp-healer" / "mcp_healer.py"), "--config", fwd(cfgp), "apply", "--golden", fwd(g)])
+        return ctx.notes.append(
+            f"tokensave: it is registered LIVE in {fwd(cfgp)}, and its serve exits until a repository is indexed, so the MCP check "
+            f"shows it DOWN. Setup did not change it. To park it: {park}  (after tokensave init: mcp_healer.py unpark tokensave).")
+    if "tokensave" in (cur.get("mcpServersParked") or {}):
+        return                                              # already parked, by an earlier run or by the user
+    rc, _ = ctx.py_tool(KIT / "tools" / "mcp-healer" / "mcp_healer.py", "--config", cfgp, "apply", "--golden", g, timeout=120)
+    if rc == 3:
+        return ctx.notes.append("tokensave: a managed MCP policy is in force, so the code-graph server was not registered")
+    if rc != 0:
+        return ctx.notes.append(f"tokensave: mcp_healer.py apply exit {rc}; the code-graph server was not registered")
+    ctx.record({"kind": "mcp", "name": "tokensave", "config": fwd(cfgp)}, "mcp:tokensave")
+    ctx.notes.append("tokensave: registered PARKED (it exits until a repository is indexed). After `tokensave init` in a repo "
+                     "run `mcp_healer.py unpark tokensave` and restart Claude Code.")
 
 
 def do_nightly(ctx):
@@ -1550,17 +1719,53 @@ def do_report_post(ctx):
         ctx.log(decode(out).strip())
 
 
+def setup_report(ctx, code):
+    """The text a person reads when setup ends (also <state>/setup-report.md): what failed, what IT must allow, the notes, the
+    libraries find found but setup did not register, and, as its LAST line, the restart every new PATH and plugin option needs."""
+    L = [f"# Setup report ({now()})", "",
+         f"Result: {'done' if code == 0 else 'done, with requests for IT' if code == 3 else 'a step failed'} (exit {code})."]
+    for x in ctx.st["failed"]:
+        L.append(f"- FAILED {x['item']}: {x['error']}")
+    L += [f"- {n}" for n in ctx.notes]
+    wanted = ASKS.gather(str(ctx.state_dir))     # the ONE list: setup's asks, the Day-1 checks' and the post report's, each once
+    if wanted:
+        L += ["", f"IT asks ({len(wanted)}, each listed once; send them together):"]
+        L += [f"{i}. {a['ask']}  [{', '.join(a['sources'])}]" for i, a in enumerate(wanted, 1)]
+    name = lambda x: f"{x['label'] or Path(x['path']).name} ({x['kind']}): {x['path']}"  # noqa: E731
+    known = [x for x in ctx.suggestions if x.get("root")]
+    fresh = [x for x in ctx.suggestions if not x.get("root")]
+    if known:
+        L += ["", "Libraries an earlier setup registered as search roots: they can overlap kb and captured, and the nightly "
+              "refresh keeps indexing them. Guide 28 (docs/howto/28-add-a-library-to-find.md in the kit) says to index a scoped "
+              "folder, never all of OneDrive. Setup does not remove a root (that is your data choice); to follow the guide run "
+              f"`{fwd(ctx.find_cli())} remove-root <label>` (add --purge to drop what it indexed)."]
+        L += [f"- {name(x)} - indexed by an earlier setup: remove-root {x['root']}" for x in known]
+    if fresh:
+        L += ["", ("Libraries found on this machine but NOT indexed" if ctx.roots_read else
+                   "Libraries found on this machine (the registered roots could not be read, so whether they are indexed is not "
+                   "known)") + " (setup registers only kb, howto and captured). Index a scoped folder, never all of OneDrive: "
+              "see guide 28, docs/howto/28-add-a-library-to-find.md in the kit."]
+        L += [f"- {name(x)}" for x in fresh]
+    return "\n".join(L + ["", RESTART]) + "\n"
+
+
 def finish(ctx):
     code = 4 if ctx.st["failed"] else 3 if ctx.st["ask_it"] else 0
     nxt = next((n for n in ctx.notes if n.startswith("onboarding")), None)
-    ctx.save(phase="done", exit_code=code, reboot_pending=False, notes=ctx.notes,
+    ctx.save(phase="done", exit_code=code, reboot_pending=False, notes=ctx.notes, suggestions=ctx.suggestions,
              next="/workbench-core:onboard" if nxt else "nothing; check health any time with: setup.py doctor")
+    text = setup_report(ctx, code)
+    atomic_write(ctx.state_dir / "setup-report.md", text)
+    write_marker(ctx, exit_code=code)
+    print(text, end="")
     return code
 
 
 def after_wsl(ctx, plan):
     ctx.phase("verify")
     do_verify(ctx, plan)
+    do_path(ctx)
+    do_ctx_config(ctx)
     if not ctx.no_update:
         ctx.phase("update")
         do_update(ctx)
@@ -1569,10 +1774,12 @@ def after_wsl(ctx, plan):
     ctx.phase("knowledge")
     do_knowledge(ctx)
     relay_hooks(ctx)
+    do_skill_tiers(ctx)
     ctx.phase("capture-runtime")
     do_capture(ctx, plan)
     ctx.phase("knowledge-verify")
     do_knowledge_verify(ctx)
+    do_tokensave_mcp(ctx)
     do_nightly(ctx)
     ctx.phase("routing")
     do_routing(ctx)
@@ -1692,6 +1899,13 @@ def cmd_verify(ctx):
     return 4 if bad else 0
 
 
+def read_report(state_file):
+    try:
+        return (Path(state_file).parent / "setup-report.md").read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
 def cmd_status(ctx, as_json, wait):
     path = ctx.state_dir / "setup-state.json"
     st = jload(path, {}) or {}
@@ -1707,10 +1921,102 @@ def cmd_status(ctx, as_json, wait):
         print(json.dumps(st, indent=2, ensure_ascii=False))
     else:
         print(f"phase {st.get('phase')} · running {st['running']} · exit {st.get('exit_code')} · next: {st.get('next')}")
-        for x in st.get("ask_it") or []:
-            print(f"  ask IT [{x['item']}]: {x['text']}")
-        for x in st.get("failed") or []:
-            print(f"  failed [{x['item']}]: {x['error']}")
+        rep = read_report(path) if st.get("phase") == "done" else ""
+        if rep:                                      # the report already lists every failure, ask and note once
+            print("\n" + rep, end="")
+        else:
+            for x in st.get("ask_it") or []:
+                print(f"  ask IT [{x['item']}]: {x['text']}")
+            for x in st.get("failed") or []:
+                print(f"  failed [{x['item']}]: {x['error']}")
+    return 0
+
+
+# ── K2 skill tiers and the K1 post-update marker ─────────────────────────────────────────────────────────────
+TIERS_KEY = "settings:skill-tiers"
+MARKER = "post-update-verify.json"      # written by setup and kit_update.py; session_start.py reads it; kit_update.py verify clears it
+
+
+def write_marker(ctx, **extra):
+    """A verify is pending: the first session after the restart tells Claude to run `kit_update.py verify` once."""
+    jwrite(ctx.state_dir / MARKER, {"version": I.VERSION, "time": now(), "from_version": ctx.prev_version, **extra})
+
+
+def managed_settings():
+    m = {}
+    for _src, d in I.managed_sources():
+        I.deep_merge(m, d)
+    return m
+
+
+def do_skill_tiers(ctx, force=False, dry=False, log=True):
+    """K2. Measure the whole skill listing (skill_tiers.measure) and, when it is over 80% of the 30,000-character default limit
+    (a raised skillListingBudgetFraction does not raise this aim; the doctor row still warns against the real limit), list the
+    user's OWN skills by name only through skillOverrides in settings.json: skills the kit's instructions route to stay on, pack
+    skills go name-only, then the largest others until under 80%. A plugin's skills are never touched (skillOverrides does not
+    apply to them), a value the user set is never overwritten (force: it is), the file is backed up first and the change is
+    recorded for undo-config. Returns the lines to show; the full list goes to <state>/skill-tiers.md. Skill names stay here."""
+    sp = ctx.ch / "settings.json"
+    try:
+        user = I.read_json(sp) if sp.exists() else {}
+    except (OSError, ValueError) as e:
+        ctx.notes.append(f"skill tiers: {fwd(sp)} is not valid JSON ({e}); nothing was changed")
+        return []
+    managed = managed_settings()
+    info = ST.measure(ctx.ch, KIT, Path.cwd(), managed=managed)
+    plan = ST.plan(info, KIT, force)
+    ch, goal = plan["changes"], plan["goal"]
+    lines = [f"skill listing: about {info['total']:,} of {info['limit']:,} characters ({info['pct']}%); limit from {info['limit_from']}"]
+    backup, skipped = None, []
+    if ch and not dry:
+        backup = ctx.wb / "backups" / (time.strftime("%Y%m%d-%H%M%S") + "-skill-tiers") / "settings.json"
+        if sp.exists():
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(sp, backup)
+        ops, notes = [], []
+        I.merge_settings(user, {"skillOverrides": ch}, managed, force, ops, notes)
+        skipped = [k.rsplit(".", 1)[-1] for k, _why in notes]
+        if ops:
+            atomic_write(sp, json.dumps(user, indent=2, ensure_ascii=False) + "\n")
+            old = next((e for e in ctx.ledger()["entries"] if e.get("key") == TIERS_KEY), None)
+            ctx.record({"kind": "settings", "what": "skill tiers (skillOverrides)", "path": fwd(sp),
+                        "ops": ((old or {}).get("ops") or []) + ops}, TIERS_KEY)
+    if not ch:
+        lines.append(f"no tiers needed: at or under {goal:,} characters (80% of the default limit)" if plan["reached"] else
+                     "nothing to tier: every skill that could change is on by your choice, routed to by the kit, or already name-only")
+    else:
+        by = {s["name"]: s for s in info["skills"] if not s["plugin"]}
+        lines.append(f"{'would set' if dry else 'set'} {len(ch)} of your own skill(s) to name-only in {fwd(sp)}; the listing falls "
+                     f"from about {plan['before']:,} to about {plan['after']:,} characters")
+        lines += [f"  {n}  ({by[n]['group']}, saves {by[n]['size'] - len(by[n]['key']):,})" for n in sorted(ch, key=lambda n: -by[n]["size"])]
+        if any(by[n]["group"] == "org-synced skills" for n in ch):
+            lines.append("org-synced skills: Claude Code's documentation does not say whether skillOverrides applies to them; if the "
+                         "listing stays full, ask your Claude admin to tier them")
+    if plan["kept_on"]:
+        lines.append("kept on (the kit's instructions route to them): " + ", ".join(plan["kept_on"]))
+    if plan["user_set"] or skipped:
+        lines.append("left as set (yours, or a managed value): " + ", ".join(sorted({*plan["user_set"], *skipped})))
+    if not plan["reached"]:
+        lines.append(f"still over the 80% target ({plan['after']:,} of {goal:,}): the rest is plugin skills, which skillOverrides cannot "
+                     "change, and the bundled-skill allowance")
+    if backup and backup.exists():
+        lines.append(f"backup of settings.json: {fwd(backup)}")
+    body = "\n".join(x if x.startswith("  ") else f"- {x}" for x in lines)
+    atomic_write(ctx.state_dir / "skill-tiers.md", f"# Skill tiers ({now()})\n\n{body}\n")
+    if ch and not dry or not plan["reached"]:
+        ctx.notes.append(f"skill tiers: {len(ch)} skill(s) set to name-only, listing about {plan['before']:,} -> {plan['after']:,} of "
+                         f"{info['limit']:,} characters" + ("" if plan["reached"] else "; still over 80%, only plugin skills are left to cut")
+                         + f"; details in {fwd(ctx.state_dir / 'skill-tiers.md')}")
+    for x in lines if log else ():
+        ctx.log(x)
+    return lines
+
+
+def cmd_skills(ctx, force, dry):
+    if lock_holder(ctx):
+        print(f"setup is running (pid {lock_holder(ctx)}); run this when it has finished")
+        return 2
+    print("\n".join(do_skill_tiers(ctx, force, dry, log=False)))      # the lines go to stdout once, not to stderr again
     return 0
 
 
@@ -1908,6 +2214,52 @@ def claude_sweep(ctx):
     return "OK", f"{len(text.splitlines())} line(s) read; none matches a known bug card"
 
 
+def plugin_option_row(ctx):
+    """(status, detail): every enabled workbench plugin whose manifest declares userConfig.python has pluginConfigs.<id>.options.
+    python set to an interpreter that runs. Unset means every hook of that plugin fails with `Plugin option "python" isn't set`
+    and the guards fail open, while the heartbeat can still read OK (the installer self-test calls the guard itself)."""
+    sp = ctx.ch / "settings.json"
+    try:
+        user = I.read_json(sp) if sp.exists() else {}
+    except (OSError, ValueError) as e:
+        return "WARN", f"{fwd(sp)} is not valid JSON ({e}): the plugin options cannot be checked"
+    on = [i for i in I.python_plugin_ids(KIT) or I.PLUGIN_IDS if (user.get("enabledPlugins") or {}).get(i) is True]
+    if not on:
+        return "INFO", "no workbench plugin that needs a python option is enabled in settings.json yet"
+    bad = []
+    for i in on:
+        py = (((user.get("pluginConfigs") or {}).get(i) or {}).get("options") or {}).get("python")
+        if not py or not isinstance(py, str):
+            bad.append(f"{i}: python is not set")
+        elif ctx.run([py, "--version"], timeout=30)[0] != 0:
+            bad.append(f"{i}: {py} does not run")
+    if bad:
+        fix = ctx.cfg.get("python") or fwd(PY)
+        return "FAIL", ("; ".join(bad) + ". Every hook of that plugin fails with `Plugin option \"python\" isn't set` and the "
+                        f"guards do not run. Fix, for each: claude plugin install <id> --config python={fix}")
+    return "OK", f"{len(on)} plugin(s) have a python option that runs"
+
+
+def mcp_row(ctx, rc, out):
+    """(status, detail) from `mcp_healer.py check --json` (exit code and output): DOWN warns, PARKED never does. The healer exits
+    0 or 1 and prints a JSON list; anything else (a traceback on a malformed .claude.json) is not "healthy"."""
+    try:
+        rows = json.loads(decode(out))
+    except ValueError:
+        rows = None
+    if rc not in (0, 1) or not isinstance(rows, list):
+        return "WARN", f"mcp_healer.py check exit {rc} gave no readable result: run it by hand"
+    rows = [r for r in rows if isinstance(r, dict)]
+    down = [r["server"] for r in rows if r.get("status") == "DOWN"]
+    parked = [r["server"] for r in rows if r.get("status") == "PARKED"]
+    tail = ("; PARKED (not loaded at startup, not an error): " + ", ".join(parked)
+            + "; turn one on with: mcp_healer.py unpark <name>"
+            + ("; tokensave needs `tokensave init` in a repository first" if "tokensave" in parked else "")) if parked else ""
+    if down:
+        return "WARN", "DOWN: " + ", ".join(down) + " (run mcp_healer.py check)" + tail
+    return "OK", "healthy" + tail
+
+
 KV_SHOWN = {"PASS": "OK", "WARN": "WARN", "FAIL": "FAIL", "SKIP": "INFO", "OPT-IN-OFF": "INFO"}
 
 
@@ -1946,18 +2298,20 @@ def cmd_doctor(ctx, as_json=False, bundle=None, deep=False):
             ", ".join([f"TLS fails: {', '.join(bad_rt)}"] * bool(bad_rt) + [f"blocked: {', '.join(blocked_ep)}"] * bool(blocked_ep)
                       + rev) or "every runtime verifies TLS; every endpoint answers")
     hb = jload(ctx.state_dir / "guard-heartbeat.json")
-    if not hb:
-        add("guard heartbeat", "WARN", "no heartbeat yet: start Claude Code and run any tool once")
+    if not hb or not hb.get("last_fired"):        # only a real fire counts: the installer's self-test is filed as self_test_at
+        add("guard heartbeat", "WARN", "the guard has not fired in a Claude Code session yet (the installer's self-test does "
+                                       "not count): start Claude Code and run any tool once")
     else:
         n = int(hb.get("sessions_since_fire") or 0)
         add("guard heartbeat", "FAIL" if n >= 3 else "OK", f"last fired {hb.get('last_fired')}; {n} session(s) since")
+    add("plugin python option", *plugin_option_row(ctx))
+    add("skill listing", *ST.row(ST.measure(ctx.ch, KIT, Path.cwd(), managed=managed_settings()))[:2])
     user_mcp = (ctx.ch / ".claude.json") if os.environ.get("CLAUDE_CONFIG_DIR") else ctx.home / ".claude.json"
     if not user_mcp.is_file():
         add("MCP servers", "OK", "no user-scope MCP configuration yet")
     else:
         rc, out = ctx.py_tool(KIT / "tools" / "mcp-healer" / "mcp_healer.py", "check", "--json", timeout=300)
-        add("MCP servers", "OK" if rc == 0 else "WARN", "healthy" if rc == 0 else
-            ("mcp_healer.py is not in this kit" if rc is None else "at least one server is DOWN (run mcp_healer.py check)"))
+        add("MCP servers", *(("WARN", "mcp_healer.py is not in this kit") if rc is None else mcp_row(ctx, rc, out)))
     kdb = Path(os.environ.get("WORKBENCH_KNOWLEDGE_DB") or ctx.cfg.get("knowledge_db")
                or ctx.lad / "doc-index" / "knowledge" / "index.sqlite")
     # `find status` opens the index, and opening a missing one creates it: the doctor only reads, so look first
@@ -1996,6 +2350,10 @@ def cmd_doctor(ctx, as_json=False, bundle=None, deep=False):
         add("setup", "WARN", f"{len(st.get('ask_it') or [])} ask-IT item(s)" + (", reboot pending" if st.get("reboot_pending") else ""))
     else:
         add("setup", "OK", f"phase {st.get('phase') or 'not run'}")
+    wanted = ASKS.gather(str(ctx.state_dir))      # the same list setup and the capability report show: one line per distinct ask
+    outputs["it-asks.json"] = {"asks": wanted}
+    add("IT asks", "INFO" if wanted else "OK", (f"{len(wanted)} distinct ask(s), each listed once: " + " | ".join(
+        f"{i}. {a['ask'][:110]}" for i, a in enumerate(wanted, 1))) if wanted else "none outstanding")
     up = jload(ctx.state_dir / "update.json")
     if up:
         outputs["update.json"] = up
@@ -2214,6 +2572,9 @@ def main(argv=None):
     p.add_argument("--json", action="store_true")
     p.add_argument("--deep", action="store_true")
     p.add_argument("--bundle")
+    p = sub.add_parser("skills")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--force", action="store_true")
     p = sub.add_parser("backup")
     p.add_argument("--out")
     p.add_argument("--if-older-days", type=float, dest="if_older_days")
@@ -2264,6 +2625,8 @@ def main(argv=None):
         return 0 if eff else 4
     if a.cmd == "doctor":
         return cmd_doctor(ctx, a.json, a.bundle, a.deep)
+    if a.cmd == "skills":
+        return cmd_skills(ctx, a.force, a.dry_run)
     if a.cmd == "backup":
         return cmd_backup(ctx, a.out, a.if_older_days)
     if a.cmd == "restore":

@@ -115,11 +115,13 @@ def loaded_set(home, project):
 
 
 def personal_names(home, project=None):
-    """Skills and commands that skillOverrides can change: the user's and the project's own."""
+    """Skills and commands that skillOverrides can change: the user's and the project's own, and the skills the organisation syncs
+    into skills/synced/<organisation>_<user>/<skill>/ (Claude Code puts them two folders down)."""
     roots = [home] + ([os.path.join(project, ".claude")] if project else [])
     names = set()
     for r in roots:
         names |= {os.path.basename(os.path.dirname(p)) for p in glob.glob(os.path.join(r, "skills", "*", "SKILL.md"))}
+        names |= {os.path.basename(os.path.dirname(p)) for p in glob.glob(os.path.join(r, "skills", "synced", "*", "*", "SKILL.md"))}
         names |= {os.path.splitext(os.path.basename(p))[0] for p in glob.glob(os.path.join(r, "commands", "**", "*.md"), recursive=True)}
     return names
 

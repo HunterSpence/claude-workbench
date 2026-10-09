@@ -37,6 +37,8 @@ class Replay(unittest.TestCase):
         self.live = self.home / "workbench" / "logs"                   # what a real session would be writing
         self.live.mkdir(parents=True)
         (self.live / "guards.log").write_text("earlier line\n", encoding="utf-8")
+        # the expected verdicts below are the strict level's (the default is standard: no-verify asks there)
+        (self.home / "workbench" / "corporate-allowlist.json").write_text('{"guard_level": "strict"}\n', encoding="utf-8")
         self.scratch = self.tmp / "scratch"
         self.scratch.mkdir()
         self.env = {k: v for k, v in os.environ.items() if k != "GUARDS_LOG_DIR"}

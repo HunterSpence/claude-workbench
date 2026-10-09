@@ -2,8 +2,8 @@
 
   py -3 tools/test_docs.py --deny PATH...    shape and privacy rules P1-P5 over the doc scope (exit 1 on a finding)
   py -3 tools/test_docs.py --paths MD...     backticked kit paths that do not exist (G8)
-  py -3 tools/test_docs.py --budget          always-loaded bytes (G9), the skill description + when_to_use total, and
-                                             each when_to_use line (at most WHEN_MAX characters)
+  py -3 tools/test_docs.py --budget          always-loaded bytes (G9), the skill description + when_to_use total, each
+                                             when_to_use line (at most WHEN_MAX characters) and the estimated whole listing
   py -3 tools/test_docs.py --render-routing  rewrite docs/model-routing.md from settings/model-*.json
 Tests: python -m unittest discover -s tools -p "test_docs.py"   (WB_REQUIRE_ALL=1 makes a missing dependency fail)
 
@@ -32,8 +32,22 @@ KIT = Path(__file__).resolve().parent.parent
 ALLOW_FILE = "tools/publish-allow.json"
 ALWAYS_LOADED_LIMIT = 36000
 ALWAYS_LOADED_MARGIN = 500   # the real set stays this far under the limit, so the next rule costs a demotion
-SKILL_DESC_LIMIT = 15800   # every skill's description plus its when_to_use, together
+SKILL_DESC_LIMIT = 11000   # every kit skill's description plus its when_to_use, together (K3; was 15,511 in v0.3.1)
 WHEN_MAX = 90              # one when_to_use line: it is appended to the description in the skill listing
+# The whole skill listing (what Claude Code puts in front of the model each turn), estimated. The kit controls only its own part.
+LISTING_BUDGET = 30000     # characters: Claude Code's skill-listing budget at the default listing fraction
+KIT_SHARE_MAX = 0.4        # the kit may take at most this share; the rest is other plugins, bundled and organisation skills
+                           # (40, not 50: the v0.3.1 kit's share was 49 percent and would not have tripped 50)
+LISTING_ENTRY = 4          # "- " and ": " around each entry
+# Allowances, not measurements: room for bundled Claude Code skills plus organisation-synced skills.
+BUNDLED_ORG_ALLOWANCE = 12400
+# Opt-in text the kit puts next to its own: the opt-in skill pack and the standalone skills its hints
+# name, such as humanizer and playwright-cli (about 417).
+OPTIN_PACKS = 2679
+# Listing text of the upstream plugins the kit enables (settings/upstream-plugins*.fragment.json), rounded up; an enabled plugin
+# that is not named here counts UPSTREAM_DEFAULT. Refresh when an upstream plugin changes its skills.
+UPSTREAM_CHARS = {"frontend-design": 250, "adamsreview": 1100}
+UPSTREAM_DEFAULT = 600
 MIN_CARDS = 40
 
 # ---- P1-P5: shape and privacy rules -----------------------------------------------------------------------------
@@ -239,6 +253,51 @@ def check_descriptions(descs, limit=SKILL_DESC_LIMIT, when=None, when_max=WHEN_M
     return errs
 
 
+def skill_entries(kit_root=KIT):
+    """[(plugin:skill, description, when_to_use, user_only)] for every kit skill. user_only = disable-model-invocation: true,
+    which keeps the description out of the model's context (Claude Code skills reference, 'Control who invokes a skill')."""
+    out = []
+    for p in _skill_files(kit_root):
+        text = p.read_text(encoding="utf-8")
+        out.append((f"{p.parents[2].name}:{p.parent.name}", front_description(text), front_field(text, "when_to_use"),
+                    front_field(text, "disable-model-invocation").lower() == "true"))
+    return out
+
+
+def listing_estimate(kit_root=KIT):
+    """Estimated characters in the skill listing: the kit's listed skills (name + description + when_to_use), the names of its
+    user-only skills (counted as a margin), the enabled upstream plugins, and a stated allowance for bundled and
+    organisation skills. {"kit", "user_only", "upstream", "plugins", "optin", "allowance", "total", "listed", "hidden"}."""
+    listed = hidden = kit = names = 0
+    for name, desc, when, user_only in skill_entries(kit_root):
+        if user_only:
+            hidden += 1
+            names += len(name) + LISTING_ENTRY
+        else:
+            listed += 1
+            kit += len(name) + LISTING_ENTRY + len(desc) + (len(when) + 1 if when else 0)
+    plugins = set()
+    for f in sorted(Path(kit_root).glob("settings/upstream-plugins*.fragment.json")):
+        plugins |= {k.split("@")[0] for k, v in json.loads(f.read_text(encoding="utf-8")).get("enabledPlugins", {}).items() if v is True}
+    upstream = sum(UPSTREAM_CHARS.get(k, UPSTREAM_DEFAULT) for k in plugins)
+    return {"kit": kit + names, "user_only": names, "upstream": upstream, "plugins": len(plugins), "optin": OPTIN_PACKS,
+            "allowance": BUNDLED_ORG_ALLOWANCE, "total": kit + names + upstream + OPTIN_PACKS + BUNDLED_ORG_ALLOWANCE,
+            "listed": listed, "hidden": hidden}
+
+
+def check_listing(est, budget=LISTING_BUDGET, share=KIT_SHARE_MAX):
+    """An error when the kit's own part of the estimated listing is over its share of the budget."""
+    return [f"the kit's part of the skill listing is about {est['kit']} characters; its share of {budget} is {int(budget * share)}"] \
+        if est["kit"] > budget * share else []
+
+
+def listing_line(est, budget=LISTING_BUDGET):
+    return (f"estimated listing: about {est['total']} of {budget} characters = kit {est['kit']} ({est['listed']} listed skills, "
+            f"{est['hidden']} user-only names) + {est['plugins']} upstream plugins {est['upstream']} + opt-in packs {est['optin']} "
+            f"+ bundled and organisation allowance {est['allowance']}; the kit's share is {round(100 * est['kit'] / budget)} percent "
+            f"(limit {round(100 * KIT_SHARE_MAX)})")
+
+
 # ---- G13: routing and evidence data -----------------------------------------------------------------------------
 KINDS = {"vendor", "independent", "kit-bench", "internal-run"}
 TIERS = {"R0", "R1", "R2"}
@@ -353,6 +412,10 @@ def check_cards(md, detectors, minimum=MIN_CARDS, unrelated=UNRELATED):
             errs.append(f"{tag}: no such card")
         if not str(d.get("title", "")).strip():
             errs.append(f"{tag}: no title")
+        else:
+            heading = next((c["title"] for c in cards if c["n"] == d.get("card")), None)
+            if heading is not None and str(d["title"]).strip() != heading:
+                errs.append(f"{tag}: title differs from the heading of card {d.get('card')} (a swapped card number?)")
         if not str(d.get("repro", "")).strip():
             errs.append(f"{tag}: no repro")
             continue
@@ -450,10 +513,12 @@ def main(argv=None):
     if a.budget:
         sizes = {p.relative_to(root.resolve()).as_posix(): lf_bytes(p) for p in always_loaded(root)}
         descs, when = skill_descriptions(root), skill_when(root)
-        errs = check_budget(sizes) + check_descriptions(descs, when=when)
+        est = listing_estimate(root)
+        errs = check_budget(sizes) + check_descriptions(descs, when=when) + check_listing(est)
         print(f"always-loaded: {sum(sizes.values())} bytes in {len(sizes)} files (limit {ALWAYS_LOADED_LIMIT})")
         print(f"skill descriptions + when_to_use: {sum(map(len, descs.values())) + sum(map(len, when.values()))} characters "
               f"in {len(descs)} skills, {len(when)} with when_to_use (limit {SKILL_DESC_LIMIT}, each line {WHEN_MAX})")
+        print(listing_line(est))
         print("\n".join(errs))
         return 1 if errs else 0
     out = root / "docs" / "model-routing.md"
@@ -588,8 +653,11 @@ class Budget(Fixture):
         self.assertLessEqual(total, ALWAYS_LOADED_LIMIT - ALWAYS_LOADED_MARGIN)
 
     def test_description_budget(self):
-        self.assertEqual(check_descriptions({"a": "x" * 7900, "b": "y" * 7900}), [])
-        self.assertEqual(len(check_descriptions({"a": "x" * 7900, "b": "y" * 7901})), 1)
+        """The cap is 11,000 (K3: the kit's own skill text was 15,511); literal numbers, so raising the constant fails here."""
+        self.assertEqual(check_descriptions({"a": "x" * 5500, "b": "y" * 5500}), [])
+        self.assertEqual(len(check_descriptions({"a": "x" * 5500, "b": "y" * 5501})), 1)
+        self.assertEqual(len(check_descriptions({"a": "x" * 11332})), 1, "11,332 characters (the 10,932 text plus kit-update and more) must fail")
+        self.assertEqual(len(check_descriptions({"a": "x" * 12000})), 1, "the old 15,800 cap no longer applies")
 
     def test_description_parsing(self):
         for fm, want in (('description: "a \\"b\\" c"', 'a "b" c'), ("description: plain text: yes", "plain text: yes"),
@@ -605,8 +673,8 @@ class Budget(Fixture):
         self.assertEqual((front_description(both), front_field(both, "when_to_use")), ("d1", "w1"))
 
     def test_when_to_use_counts_toward_the_total(self):
-        d = {"a": "x" * 15750}
-        self.assertEqual(check_descriptions(d, when={"a": "y" * 50}), [], "15,800 exactly is inside the limit")
+        d = {"a": "x" * 10950}
+        self.assertEqual(check_descriptions(d, when={"a": "y" * 50}), [], "11,000 exactly is inside the limit")
         self.assertEqual(len(check_descriptions(d, when={"a": "y" * 51})), 1, "the when_to_use text is part of the sum")
         self.assertEqual(check_descriptions(d), [], "no when_to_use, no extra characters")
 
@@ -644,13 +712,91 @@ class Budget(Fixture):
         self.assertEqual(sorted(set(bad) - excused), [])
         self.assertEqual(sorted(excused - set(bad)), [], "a fixed file must leave the excuse list")
 
-    def test_the_nine_frozen_when_to_use_lines_are_in_place(self):
-        """IW1: A4 writes these in the skills' frontmatter; the line text is frozen, so a drift fails here."""
+    def test_the_frozen_when_to_use_lines_are_in_place(self):
+        """IW1: A4 writes these in the skills' frontmatter; the line text is frozen, so a drift fails here. IW2 are the seven
+        'memory is enough' skills of v0.3.2 (calibration audit row 7): their text is fixed too."""
         when = skill_when(KIT)
-        for name, line in IW1.items():
+        for name, line in {**IW1, **IW2}.items():
             plugin_skill = f"plugins/workbench-core/skills/{name}/SKILL.md"
             self.assertEqual(when.get(plugin_skill), line, name)
             self.assertLessEqual(len(line), WHEN_MAX, name)
+        for name, line in IW2.items():
+            self.assertTrue(line.startswith("ALWAYS load before "), name)
+
+    def test_user_only_skills_carry_no_when_to_use_and_the_authoring_nine_are_user_only(self):
+        """A skill with disable-model-invocation: true is not in the model's listing, so a when_to_use line on it is dead text."""
+        entries = {n.split(":")[1]: (w, u) for n, _, w, u in skill_entries(KIT)}
+        for name, (w, user_only) in entries.items():
+            if user_only:
+                self.assertEqual(w, "", f"{name}: user-only, so when_to_use is never shown")
+        for name in ("batch-review", "mcp-heal", "plugin-factory", "plugin-review", "web-packager", "mcp-builder", "api-bridge",
+                     "app-navigator", "brand-spec", "cleanup", "onboard", "pc-checkup", "setup", "vdi-drive", "capture", "ingest"):
+            self.assertTrue(entries[name][1], f"{name} must carry disable-model-invocation: true")
+
+    def test_cleanup_and_cascade_carry_the_data_loss_lines_of_audit_row_35(self):
+        """Removing a worktree through a Windows junction deleted real files; a bulk replace hit binaries; a restart kept old env."""
+        skills = KIT / "plugins" / "workbench-core" / "skills"
+        cleanup = (skills / "cleanup" / "SKILL.md").read_text(encoding="utf-8")
+        cascade = (skills / "cascade" / "SKILL.md").read_text(encoding="utf-8")
+        for name, text in (("cleanup", cleanup), ("cascade", cascade)):
+            for want in ("dir /AL", "rmdir", "rm -rf"):
+                self.assertIn(want, text, f"{name}: junction line")
+        self.assertIn("Filter to text files before any bulk replace", cascade)
+        self.assertIn("A container restart keeps its old environment", cascade)
+
+    def put_skill(self, plugin, name, desc, when="", user_only=False):
+        extra = (f"when_to_use: {when}\n" if when else "") + ("disable-model-invocation: true\n" if user_only else "")
+        self.put(f"plugins/{plugin}/skills/{name}/SKILL.md", f"---\nname: {name}\ndescription: {desc}\n{extra}---\nbody\n")
+
+    def test_listing_estimate_counts_listed_text_user_only_names_upstream_and_the_allowance(self):
+        self.put("instructions/CLAUDE.md", "core\n")
+        self.put_skill("p", "alpha", "d" * 100, when="w" * 10)
+        self.put_skill("p", "beta", "e" * 500, user_only=True)           # not listed: only its name counts
+        self.put("settings/upstream-plugins.fragment.json", json.dumps({"enabledPlugins": {
+            "frontend-design@m": True, "unknown-one@m": True, "off-one@m": False}}))
+        self.put("settings/upstream-plugins.optional.fragment.json", json.dumps({"enabledPlugins": {"x@m": False}}))
+        est = listing_estimate(self.tmp)
+        self.assertEqual(est["kit"], (len("p:alpha") + LISTING_ENTRY + 100 + 11) + (len("p:beta") + LISTING_ENTRY))
+        self.assertEqual((est["listed"], est["hidden"], est["plugins"]), (1, 1, 2))
+        self.assertEqual(est["upstream"], UPSTREAM_CHARS["frontend-design"] + UPSTREAM_DEFAULT)
+        self.assertEqual(est["optin"], 2679, "the opt-in skill pack (about 2,262) and humanizer/playwright-cli (about 417)")
+        self.assertEqual(est["total"], est["kit"] + est["upstream"] + est["optin"] + BUNDLED_ORG_ALLOWANCE)
+        self.assertEqual(listing_estimate(self.tmp / "nowhere")["plugins"], 0, "no settings folder, no upstream plugins")
+
+    def test_the_kit_share_of_the_listing_fails_above_40_percent_of_30000(self):
+        self.assertEqual(check_listing({"kit": 12000}), [])
+        self.assertEqual(len(check_listing({"kit": 12001})), 1)
+        self.assertEqual(len(check_listing({"kit": 14700})), 1, "49 percent, the v0.3.1 kit share, must trip")
+        self.assertEqual(len(check_listing({"kit": 6500}, budget=16000)), 1, "40 percent of a smaller budget")
+        self.put_skill("p", "huge", "h" * 12100)
+        self.assertEqual(len(check_listing(listing_estimate(self.tmp))), 1, "a kit that lists over half the budget fails")
+        self.put_skill("p", "huge", "h" * 100)
+        self.assertEqual(check_listing(listing_estimate(self.tmp)), [])
+
+    def test_budget_prints_the_estimated_listing_line(self):
+        import contextlib
+        import io
+        self.put("instructions/CLAUDE.md", "core\n")
+        self.put_skill("p", "alpha", "d" * 100)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = main(["--budget", "--root", str(self.tmp)])
+        self.assertEqual(code, 0)
+        self.assertIn("estimated listing: about ", buf.getvalue())
+        self.assertIn("bundled and organisation allowance", buf.getvalue())
+        self.assertIn("opt-in packs 2679", buf.getvalue())
+
+    def test_user_only_text_is_not_in_the_listing_but_still_in_the_cap(self):
+        self.put("instructions/CLAUDE.md", "core\n")
+        self.put_skill("p", "only", "u" * 11100, user_only=True)
+        self.assertEqual(main(["--budget", "--root", str(self.tmp)]), 1, "the 11,000 cap counts every kit skill, as 15,511 did")
+        self.assertEqual(check_listing(listing_estimate(self.tmp)), [], "but the model never sees that text")
+
+    def test_the_real_listing_estimate_is_within_the_kit_share(self):
+        est = listing_estimate(KIT)
+        print(f"\n{listing_line(est)}", file=sys.stderr)
+        self.assertEqual(check_listing(est), [])
+        self.assertGreaterEqual(est["hidden"], 16, "the authoring nine plus the user-typed skills are hidden from the model")
 
 
 # IW1 (the frozen table): skill -> when_to_use
@@ -663,7 +809,16 @@ IW1 = {
     "handoff": "ALWAYS load when a session nears its limit or work must continue elsewhere.",
     "brain-audit": "ALWAYS load when instructions, hooks or the KB seem stale, ignored or contradictory.",
     "diagram": "ALWAYS load when a diagram, flowchart or architecture sketch is requested.",
-    "brand-spec": "Load before the first UI or deck work for a product with no brand spec yet.",
+}
+# IW2: the seven skills a model skips because it believes memory is enough (calibration audit row 7)
+IW2 = {
+    "github": "ALWAYS load before any gh command, issue or CI task; review a foreign PR with repo-review.",
+    "linux-service-triage": "ALWAYS load before debugging a server, service or site that is down or erroring.",
+    "deep-research": "ALWAYS load before answering a vendor, tool or \"should we adopt\" question from memory.",
+    "office-docx": "ALWAYS load before creating or editing a Word document, even a short memo.",
+    "office-pptx": "ALWAYS load before creating or editing a PowerPoint deck, even a small one.",
+    "office-xlsx": "ALWAYS load before creating or editing an Excel workbook, even a small one.",
+    "repo-fix": "ALWAYS load before reviewing or fixing a whole repository, even if the steps seem clear.",
 }
 
 
@@ -802,7 +957,7 @@ class Cards(Fixture):
 
     def test_bad_detectors_fail(self):
         md = self.card(1)
-        ok = {"card": 1, "title": "t", "pattern": "boom", "repro": "a boom happened"}
+        ok = {"card": 1, "title": "Title 1", "pattern": "boom", "repro": "a boom happened"}
         run = lambda **kw: check_cards(md, {"version": 1, "detectors": [{**ok, **kw}]}, minimum=1)  # noqa: E731
         self.assertEqual(run(), [])
         self.assertTrue(run(repro=""))
@@ -810,6 +965,7 @@ class Cards(Fixture):
         self.assertTrue(run(pattern="("))
         self.assertTrue(run(pattern=".*"))
         self.assertTrue(run(card=9))
+        self.assertTrue(run(title="Another card's title"))   # a detector whose card number was swapped no longer matches its heading
 
     def test_a_seen_line_in_a_card_file_fails_the_deny_scan(self):
         self.put("kb-template/_shared/bug-cards.md", self.card(1) + "- " + "Seen" + ": private evidence\n")

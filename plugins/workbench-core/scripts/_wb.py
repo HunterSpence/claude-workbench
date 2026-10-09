@@ -15,6 +15,7 @@ Path resolution (every hook uses these, so a value is decided in one place):
                     in installed-config.json next to this file (a changed env var must not point the guards at a
                     different, absent allowlist: the corporate pack then fails closed). A config dir registered in the
                     main install's profiles.json (per-client profiles) is not "redirected".
+  redact(text)      text with credential-shaped spans replaced by [REDACTED] (the guard log and the issues log use it)
   heartbeat(fired, stamp)  the guard heartbeat <workbench home>/state/guard-heartbeat.json (best-effort, atomic, never
                     raises); stamp names a timestamp key to set (last_start, last_precompact)
 """
@@ -76,7 +77,8 @@ def config_redirected():
 def heartbeat(fired, stamp=None):
     """Guard heartbeat. fired=True (the PreToolUse guard ran): last_fired now, sessions_since_fire 0, fired_total + 1.
     fired=False (a session started): sessions_since_fire + 1. fired=None: counters untouched. stamp="last_start" or
-    "last_precompact" also sets that key to now (proof that SessionStart or PreCompact ran). Keys it does not know are
+    "last_precompact" also sets that key to now (proof that SessionStart or PreCompact ran). With env WB_SELF_TEST=1 (the
+    installer's self-test) only self_test_at is set and every counter and stamp stays as it was. Keys it does not know are
     kept. Returns the new dict, or None when the state folder cannot be written.
     ponytail: read-modify-write without a lock; two hooks at once can lose a count."""
     try:
@@ -92,12 +94,15 @@ def heartbeat(fired, stamp=None):
         now = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
         d = {**d, "version": 1, "last_fired": d.get("last_fired") if isinstance(d.get("last_fired"), str) else None,
              "sessions_since_fire": n("sessions_since_fire"), "fired_total": n("fired_total")}
-        if fired:
-            d.update(last_fired=now, sessions_since_fire=0, fired_total=d["fired_total"] + 1)
-        elif fired is False:
-            d["sessions_since_fire"] += 1
-        if stamp:
-            d[stamp] = now
+        if os.environ.get("WB_SELF_TEST") == "1":      # the installer's self-test: proves nothing about a real session
+            d["self_test_at"] = now
+        else:
+            if fired:
+                d.update(last_fired=now, sessions_since_fire=0, fired_total=d["fired_total"] + 1)
+            elif fired is False:
+                d["sessions_since_fire"] += 1
+            if stamp:
+                d[stamp] = now
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
         tmp.write_text(json.dumps(d), encoding="utf-8")
@@ -105,6 +110,16 @@ def heartbeat(fired, stamp=None):
         return d
     except Exception:
         return None
+
+
+def redact(text):
+    """text with every credential-shaped value (secretscan's one pattern set, which also takes a private key block whole)
+    replaced by [REDACTED]; the name before a value stays ("API_TOKEN=[REDACTED]"). Raises when the scanner cannot load: a
+    caller that must not leak (the issues log) then writes nothing."""
+    import secretscan
+    for a, b in reversed(secretscan.scan_text(text, values_only=True)):
+        text = text[:a] + "[REDACTED]" + text[b:]
+    return text
 
 
 def config():

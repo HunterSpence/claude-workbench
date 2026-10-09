@@ -1,6 +1,6 @@
 ---
 name: policy-qa
-description: Use when the user pastes or attaches a policy, handbook or rules text and asks what it allows, requires or forbids. Answers only from that text, cites the section for every claim and flags what the text does not cover.
+description: Use when the user pastes or attaches a policy, handbook or rules text and asks what it allows, requires or forbids. Answers only from that text, cites the section, flags what it does not cover.
 license: MIT
 ---
 

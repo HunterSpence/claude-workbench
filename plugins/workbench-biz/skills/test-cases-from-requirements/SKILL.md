@@ -1,6 +1,6 @@
 ---
 name: test-cases-from-requirements
-description: Create a test case matrix from requirements or user stories, with positive, negative, boundary and data cases, Gherkin scenarios and a coverage map back to requirement IDs. Use for test cases, a test plan or QA scenarios.
+description: Create a test case matrix from requirements or user stories, with positive, negative, boundary and data cases, Gherkin scenarios and a coverage map to requirement IDs. Use for test cases, a test plan or QA scenarios.
 license: MIT
 ---
 

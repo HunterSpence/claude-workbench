@@ -33,7 +33,7 @@ import time
 import urllib.error
 import urllib.request
 
-KIT_VERSION = "0.3.1"
+KIT_VERSION = "0.3.2"
 UA = "claude-workbench-probe/" + KIT_VERSION
 NET_BUDGET_S = 45
 HTTP_TIMEOUT = 4
@@ -481,9 +481,13 @@ class Probe:
 
     def _load_packages(self, path):
         path = path or os.path.join(self.kit, "bootstrap", "packages.json")
+        self.endpoint_hosts = []
         try:
             with open(path, encoding="utf-8-sig") as f:
-                pk = json.load(f).get("packages") or []
+                doc = json.load(f)
+            pk = doc.get("packages") or []
+            # hosts that are not a package's download but a feature's (the embedding model): probed like any package host
+            self.endpoint_hosts = [e["host"] for e in doc.get("endpoints") or [] if isinstance(e, dict) and isinstance(e.get("host"), str)]
             return [p for p in pk if isinstance(p, dict) and p.get("id")], []
         except (OSError, ValueError) as e:
             return [], ["package table not read (%s)" % type(e).__name__]
@@ -770,10 +774,9 @@ class Probe:
     # network --------------------------------------------------------------------------------------------------
     def plan_hosts(self):
         out = []
-        for p in self.pkgs:
-            for h in p.get("hosts") or []:
-                if isinstance(h, str) and h and h not in out:
-                    out.append(h)
+        for h in [h for p in self.pkgs for h in p.get("hosts") or []] + self.endpoint_hosts:
+            if isinstance(h, str) and h and h not in out:
+                out.append(h)
         return out
 
     def endpoint_specs(self):
@@ -957,8 +960,14 @@ class Probe:
             with open(path, encoding="utf-8-sig") as f:
                 j = json.load(f)
             s = j["summary"]
+            steps = {str(r["id"])[:8]: str(r.get("status"))[:16] for r in j.get("steps") or [] if isinstance(r, dict) and r.get("id")}
+            tools = {}      # D18 records each optional tool's own status (ctx and tokensave are rated apart)
+            for r in j.get("steps") or []:
+                if isinstance(r, dict) and r.get("id") == "D18" and isinstance(r.get("tools"), dict):
+                    tools = {str(k)[:32]: str(v)[:16] for k, v in list(r["tools"].items())[:8]}
             return {"pass": int(s["pass"]), "warn": int(s["warn"]), "fail": int(s["fail"]),
-                    "failing": [str(x) for x in s.get("failing") or []][:20], "generated": str(j.get("generated") or "")[:40]}
+                    "failing": [str(x) for x in s.get("failing") or []][:20], "generated": str(j.get("generated") or "")[:40],
+                    "steps": dict(list(steps.items())[:40]), "tools": tools}
         except FileNotFoundError:
             return None
         except (OSError, ValueError, KeyError, TypeError, AttributeError):

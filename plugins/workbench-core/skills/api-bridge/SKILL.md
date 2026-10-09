@@ -1,6 +1,7 @@
 ---
 name: api-bridge
-description: "Wrap an existing REST or OpenAPI API as a curated MCP server: inventory, curation worksheet, bridge with error mapping and Retry-After, safe by default. Use for 'let Claude use this API'. Refuses catch-all request tools. NOT for building a server from scratch (mcp-builder)."
+description: "Wrap an existing REST or OpenAPI API as a curated MCP server. For a server from scratch use mcp-builder."
+disable-model-invocation: true
 ---
 
 # api-bridge

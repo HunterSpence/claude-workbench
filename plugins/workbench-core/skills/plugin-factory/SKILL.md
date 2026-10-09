@@ -1,6 +1,7 @@
 ---
 name: plugin-factory
-description: "Turn a plugin request into a tested, checkable plugin: scaffold a content, integration or guard plugin into a marketplace repository with portable skills, exec-form hooks, a stdlib MCP server, tests and CI, then validate it. Use for 'make a plugin' or 'package this for the team'."
+description: "Turn a plugin request into a tested plugin: scaffold, hooks, MCP server, tests, CI, validate."
+disable-model-invocation: true
 ---
 
 # plugin-factory

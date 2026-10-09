@@ -1,7 +1,7 @@
 ---
 name: skill-scan
-description: Security-scan installed Claude Code skills (personal skills plus plugin-cache skills, or any folder) with NVIDIA SkillSpector and report per-skill risk against a baseline. Use when a new skill or plugin was just installed or written, before trusting third-party skill code, or on `/workbench-core:skill-scan`.
-when_to_use: ALWAYS load before installing or trusting a third-party skill or plugin.
+description: "Security-scan installed Claude Code skills (or any folder) with NVIDIA SkillSpector and report per-skill risk. Use when a skill or plugin was just installed or written, or before trusting third-party skill code."
+when_to_use: "ALWAYS load before installing or trusting a third-party skill or plugin."
 ---
 
 # skill-scan

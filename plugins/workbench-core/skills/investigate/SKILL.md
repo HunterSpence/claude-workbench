@@ -1,6 +1,6 @@
 ---
 name: investigate
-description: "Systematic debugging with no fix before a proven root cause. Use for 'debug this', 'why is this broken', 'investigate this error', 'root cause', a stack trace, a flaky test or unexpected behaviour. For a multi-file fix after the cause is known, hand over to the cascade skill."
+description: "Systematic debugging: no fix before a proven root cause. Use for \"debug this\", \"why is this broken\", \"investigate this error\", \"root cause\", a stack trace, a flaky test or unexpected behaviour. Hand a multi-file fix to cascade once the cause is known."
 ---
 
 # /workbench-core:investigate

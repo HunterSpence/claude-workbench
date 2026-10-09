@@ -35,7 +35,8 @@ import secretscan  # noqa: E402
 
 TEXT = TEMPLATE.read_text(encoding="utf-8")
 SERVERS = json.loads(TEXT)["servers"]
-ENSURE_OK = {"tokensave", "find"}   # local, no-egress servers; find is registered by setup
+ENSURE_OK = {"find"}                # local, no-egress servers that ship on; find is registered by setup
+PARK_OK = {"tokensave"}             # local, no-egress, registered PARKED: its serve exits until a repository is indexed
 REF = re.compile(r"^(Bearer )?\$\{[A-Z0-9_]+(:-[^}]*)?\}$")
 SECRETISH = re.compile(r"(?i)token|secret|key|password|passwd|\bpat\b|_pat\b|auth")
 
@@ -99,8 +100,8 @@ class TemplateTest(unittest.TestCase):
         self.assertTrue(SERVERS)
         for name, spec in SERVERS.items():
             self.assertTrue(spec.get("egress"), f"{name}: no egress line")
-            self.assertIn(spec.get("action"), ("ensure", "ignore"), name)
-            if name not in ENSURE_OK:
+            self.assertIn(spec.get("action"), ("ensure", "ignore", "park"), name)
+            if name not in ENSURE_OK | PARK_OK:
                 self.assertEqual(spec["action"], "ignore", f"{name} must ship off")
             self.assertIs(spec.get("alwaysLoad"), False, name)
 
@@ -122,13 +123,32 @@ class TemplateTest(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.assertRegex("Bearer " + "a1b2c3d4" * 5, REF)
 
+    def test_tokensave_ships_parked_and_the_healer_registers_it_parked_when_filled(self):
+        spec = SERVERS["tokensave"]
+        self.assertEqual((spec["action"], spec["args"]), ("park", ["serve"]))
+        self.assertIn("PARKED", spec["reason"])
+        with tempfile.TemporaryDirectory() as t:
+            cfg, golden = os.path.join(t, ".claude.json"), os.path.join(t, "golden.json")
+            Path(cfg).write_text(json.dumps({"mcpServers": {}}), encoding="utf-8")
+            Path(golden).write_text(json.dumps({"servers": {"tokensave": dict(spec, command="/opt/bin/tokensave")}}), encoding="utf-8")
+            c = json.loads(Path(cfg).read_text(encoding="utf-8"))
+            changes, warnings = mh.plan(json.loads(Path(golden).read_text(encoding="utf-8")), c)
+            self.assertEqual(warnings, [])
+            self.assertEqual(c["mcpServers"], {}, "nothing live")
+            self.assertEqual(c["mcpServersParked"]["tokensave"]["command"], "/opt/bin/tokensave")
+            self.assertTrue(any("registered parked" in x for x in changes))
+            c = {"mcpServers": {}}
+            _, warnings = mh.plan({"servers": {"tokensave": spec}}, c)
+            self.assertTrue(any("PLACEHOLDER" in w for w in warnings), "an unfilled template entry is refused, as before")
+
     def test_find_entry_is_interface_I7_exactly(self):
         self.assertEqual(SERVERS["find"], I7_FIND)
 
     def test_only_local_no_egress_servers_ship_on(self):
         on = {k for k, v in SERVERS.items() if v["action"] == "ensure"}
         self.assertEqual(on, ENSURE_OK)
-        for k in on:
+        self.assertEqual({k for k, v in SERVERS.items() if v["action"] == "park"}, PARK_OK)
+        for k in on | PARK_OK:
             self.assertTrue(SERVERS[k]["egress"].startswith(("none", "local")), f"{k} ships on but its egress is not local")
 
     def test_the_playwright_mcp_server_ships_off_because_the_cli_is_preferred(self):

@@ -1,5 +1,75 @@
 # Changelog
 
+## 0.3.2
+
+Fixes for managed Windows 11 laptops, a one-phrase update loop and a quieter guard.
+
+### Upgrade notes (from 0.3.x)
+- **Restart every Claude Code window after the update.** The plugins' Python setting and the new `<WB>\bin` PATH entry
+  load only when Claude Code starts.
+- **Updating is one phrase.** Say "check the new stuff and go" (or "update the kit"): the new `kit-update` skill finds
+  the latest release, checks its SHA-256, installs it, runs setup with the opt-ins you chose before, and asks you to
+  restart. Your first message after the restart runs a verify that prints one PASS/WARN/FAIL/NEEDS-IT table and a
+  "for the kit author" box of kit defects only, with your user, computer, domain and company names scrubbed. The guard
+  asks you once before the update installs anything. A machine on 0.3.1 can follow the same steps by hand from
+  `IMPORT.md` ("Updating").
+- **Libraries an earlier setup indexed** (a whole OneDrive or Documents folder) are no longer added by setup. The setup
+  report names the ones already registered and the `remove-root` command for each; nothing is removed for you.
+- **The guard is quieter by default.** New `guard_level` (installer `--guard standard|strict`, kept across upgrades).
+  `standard`, the new default: a push or upload to a host not on your list and `--no-verify` ask instead of being
+  refused, and plain browser navigation runs without a prompt. Everything else is unchanged: force-push or delete of
+  main, secrets and key files, `.env`, destructive deletes, guard tampering, public repos and security-control changes
+  are still refused, and sends, publishing, kit installs and skill-tier changes still ask. `strict` is 0.3.1's
+  behaviour. The post-update verify counts which rules fired, so the next release can tune on data.
+- **Permissions:** an upgrade removes allow entries an earlier kit install added and the new profile no longer has
+  (the permissive profile's server-wide `mcp__tokensave` allow). Deny and ask entries, and anything you added, are kept.
+
+### Fixed
+- **The hooks, guards included, could stop running after an upgrade.** The installer wrote the plugins' `python`
+  option, then reinstalled the plugins, which cleared it; every hook then failed with `Plugin option "python" isn't
+  set` and the guards failed open. The installer now passes `--config python=<path>` to `claude plugin install`,
+  writes the option again if it is missing, and fails loudly if it still is. The doctor has a row that fails when a
+  workbench plugin's Python is unset or does not run, and the guard heartbeat ignores the installer's self-test.
+- **Each document is indexed once.** A folder that is a find root of its own inside another root was indexed twice;
+  it now belongs to the innermost root, `--root <outer>` still covers the roots nested under it, and Windows 8.3
+  short names (`PROGRA~1`) no longer split one folder in two.
+- **A blocked embedding-model download is remembered for 24 hours.** Every refresh used to retry it with three
+  sleeps (about 40 seconds) and red ERROR lines; now one attempt, one plain line, and `mode_reason` names the host
+  and the error.
+- **Reports agree with the doctor.** Rows a passing Day-1 check proves are READY; a blocked model host reads NEEDS-IT;
+  IT asks come from one deduplicated list shared by setup, the doctor and the report.
+- **Smaller:** `kit_version` in setup's state, the doctor's MCP row when the health check itself fails, D17's
+  explanation of exit 5, `python-docx` in the knowledge environment (the hidden-text and label tests now run),
+  `find` coverage and column widths, guide 45's browser check.
+
+### Added
+- **Skill listing kept lean.** The kit's own skill descriptions are about 30% shorter (15,511 to 10,913
+  characters, the new `kit-update` skill included); nine authoring and admin skills are now started by you (`/workbench-core:<name>`), with hints when a
+  request matches them. Setup measures the whole listing on the machine and, past 80% of Claude Code's default
+  budget, sets `skillOverrides` to `name-only` for skills outside plugins (packs first, then largest; skills the kit
+  routes to stay on; values you set are kept). The doctor warns at 85%. `skillListingBudgetFraction` 0.02 is set as a
+  ceiling against truncation, not a target.
+- **Claude may change harmless settings with your approval.** An edit of your own `settings.json` that changes only
+  `skillOverrides` now asks instead of being refused; every other key is still refused.
+- **Automatic issues log.** Every failed tool call is appended, redacted, to `<WB>/state/issues.jsonl`;
+  `issues.py show` prints it as a table.
+- **Guard:** blocks tokensave's `install`, `upgrade`, `doctor`, `reinstall`, `uninstall`, `claude-install` and
+  `claude-uninstall` (each rewrites Claude Code settings or hooks), wherever the command sits in the line; covers
+  tokensave's edit tools like Edit and Write; blocks deleting the kit's plugin folder; reads hard links, junctions
+  and `\\?\` spellings of protected files as the files they are.
+- **Settings:** `MSYS2_ARG_CONV_EXCL` (both profiles; Git Bash no longer rewrites `origin/main:/path`), `MCP_TIMEOUT`
+  60 s (corporate).
+- **Headless prompts:** an `@` that would make `claude -p` read a file is neutralised in text the kit did not write.
+- **ctx:** setup writes the analytics opt-out and Claude-Code-only sources into ctx's own config file.
+- **tokensave** is registered parked until you initialise a repository.
+- **Tools:** `token_split.py startup` measures a session's opening context; a default trigger-probe spec for the kit's
+  skills; three new bug cards (junction deletes, container restarts, bulk replaces on binary files).
+
+### Deferred
+- A guard for Windows command-line truncation of long Bash commands (needs a fresh reproduction first).
+- Hash-pinned requirements for the knowledge environment.
+- Lower-priority tuning items found in the same review.
+
 ## 0.3.1
 
 Fixes for installs on managed Windows 11 laptops.

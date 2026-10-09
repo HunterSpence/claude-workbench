@@ -1,7 +1,7 @@
 ---
 name: repo-review
-description: Review a repository, pull request or local folder you did not write, safely and read-only. Only allowlisted repositories are fetched, into a scratch folder; Claude runs with three read tools, no MCP server and no project settings; findings go to local files and nothing is posted without your go. Use for "review this PR", "look over this repo", "check this plugin folder".
-when_to_use: ALWAYS load before reading a repository you did not write, even just to look.
+description: "Review a repository, pull request or local folder you did not write, read-only and isolated: allowlisted repositories only, scratch folder, findings to local files, nothing posted without your go. Use for \"review this PR\", \"look over this repo\", \"check this plugin folder\"."
+when_to_use: "ALWAYS load before reading a repository you did not write, even just to look."
 ---
 
 # repo-review

@@ -1,6 +1,6 @@
 ---
 name: office-render
-description: Render a .pptx, .docx, .xlsx or .pdf to one PNG per slide or page so Claude can look at it - through real PowerPoint/Word/Excel on Windows, or LibreOffice headless, then pypdfium2. Use for visual QA of any generated Office file ("does the deck look right", "check the layout", "render this document"), and as the last step of office-pptx and office-xlsx. Also makes the scrubbed copy of any Office file that leaves the organisation.
+description: "Render a .pptx, .docx, .xlsx or .pdf to one PNG per slide or page so Claude can look at it (real Office on Windows, else headless LibreOffice). Use for visual QA (\"does the deck look right\", \"check the layout\", \"render this document\") and to make the scrubbed copy of a file that leaves the organisation."
 ---
 
 # office-render

@@ -64,9 +64,9 @@ numbers out; describe the class, not the incident.
 
 ### 7. Git Bash rewrites arguments that look like paths
 
-- **Symptom:** `gh api /repos/...` hits a filesystem path. `git show origin/main:file` fails with `ambiguous argument 'origin\main;...'`. A `/c/...` path is rejected by a native Windows program.
-- **Root cause:** MSYS converts POSIX-looking arguments (a leading slash, or `a:b` lists) into Windows paths when it starts a native executable.
-- **Fix:** Drop the leading slash where the tool allows it (`gh api repos/...`). Prefix the command with `MSYS_NO_PATHCONV=1`, or set `MSYS2_ARG_CONV_EXCL='*'`. Give Windows tools `C:/...` paths, never `/c/...`.
+- **Symptom:** `gh api /repos/...` hits a filesystem path. `git show origin/main:/path` fails with `ambiguous argument 'origin\main;C:\...'`. A `/c/...` path is rejected by a native Windows program.
+- **Root cause:** MSYS converts POSIX-looking arguments into Windows paths when it starts a native executable: a leading slash, or a colon-separated list whose later part starts with a slash. `origin/main:path` is left alone, but `origin/main:/abs/x` becomes `origin\main;C:\Program Files\Git\abs\x`.
+- **Fix:** Drop the leading slash where the tool allows it (`gh api repos/...`). The kit's profiles set `MSYS2_ARG_CONV_EXCL=origin/;upstream/;refs/`, which stops Git Bash rewriting `origin/main:/path` into `origin\main;C:\...` and keeps `/c/...` conversion working; for another argument shape prefix that one command with `MSYS_NO_PATHCONV=1` (the blanket `MSYS2_ARG_CONV_EXCL='*'` also switches off the helpful conversions). Give Windows tools `C:/...` paths, never `/c/...`.
 - **Verifying test:** The same command with the opt-out variable returns the expected object; without it, it reproduces the error.
 - **Spot it fast:** Echo the argument through a native program (`cmd //c echo /repos/x`) and look at the converted form.
 
@@ -765,3 +765,27 @@ numbers out; describe the class, not the incident.
 - **Fix:** Install the native Windows build and put its folder on the user PATH, or ship a `.cmd` twin next to each shim.
 - **Verifying test:** `where.exe <tool>` prints an `.exe` or `.cmd` and the original tool call succeeds.
 - **Spot it fast:** `where.exe <tool>` prints nothing while `which <tool>` in Git Bash finds it.
+
+### 95. A recursive delete through a Windows junction empties the folder it points to
+
+- **Symptom:** After a worktree or folder was deleted with `rm -rf`, `git worktree remove --force` or a similar recursive delete, files are missing from the main checkout or from a shared folder that was never part of what you deleted, and `git status` in the main repository shows deletions nobody made. The error that invites `--force` is `contains modified or untracked files, use --force to delete it`.
+- **Root cause:** A worktree folder can hold a Windows junction or symlink to a shared folder, for example a dependency, data or cache folder linked in to save space. `rm -rf <link>/` with a trailing slash, and some older tools, walk through the link and empty the folder it points to instead of removing only the link. A repeat test with a current `git worktree remove --force` and with PowerShell `Remove-Item -Recurse` did not follow the link, but a field report says a forced removal did, so do not rely on the tool.
+- **Fix:** Before deleting a worktree or any folder that may hold links, list them and remove each one without following it: `dir /AL /S` in `cmd` lists junctions and symlinks, and `rmdir <link>` removes only the link. Never `rm -rf <link>/`. Only then run `git worktree remove` (add `--force` after the links are gone), then `git worktree prune`.
+- **Verifying test:** In a scratch repository, link a folder holding a marker file into a worktree with `mklink /J`, run the steps above, and check that the marker file is still in the target.
+- **Spot it fast:** `dir /AL /S <worktree>` prints `<JUNCTION>` or `<SYMLINKD>` entries, and `git -C <main> status` shows deleted files right after a removal.
+
+### 96. A container restart keeps the environment it was created with
+
+- **Symptom:** You changed an environment variable, an env file or a compose environment entry and restarted the container, and the application still behaves as before. `docker exec <name> printenv NAME` shows the old value. Compose may warn `The "NAME" variable is not set. Defaulting to a blank string.`
+- **Root cause:** A container's environment is fixed when the container is created. `docker restart` and `docker compose restart` start the same container again with its stored environment and never re-read the env file or the compose file.
+- **Fix:** Recreate the container: `docker compose up -d --force-recreate <service>`, or `docker rm -f <name>` and start it again. A value baked into the image needs a rebuild instead. If compose warns that a variable is not set, the env file it read is not the one you edited: keep it next to the compose file or pass it with `--env-file`. If a failed `up` or `pull` ends with `port is already allocated` or a certificate error (`x509`), that is the real error (another process holds the port, or a proxy certificate is not trusted) and the variable warning above it is only a hint.
+- **Verifying test:** After the change, `docker exec <name> printenv NAME` prints the new value and `docker inspect` shows a new creation time for the container.
+- **Spot it fast:** Compare `docker exec <name> printenv NAME` with the file you edited.
+
+### 97. A bulk search-and-replace rewrites binary files
+
+- **Symptom:** After a folder-wide regex replace, a database, image, archive or office file no longer opens: `file is not a database`, `database disk image is malformed`, a corrupt-archive message. `git status` lists binary files as modified that no text edit should touch.
+- **Root cause:** The replace opened every file as text. Decoding and re-encoding a binary file, or replacing a byte pattern inside it, changes bytes that were never text, and the file is damaged without any error. Backup and copy folders are hit too. The same message appears when a git-lfs pointer, a small text file, sits where the database should be because the real file was never pulled.
+- **Fix:** Restore the binary files from version control or a backup first (if the file opens as a few lines of text that start with the word `version` and name git-lfs, it is an unpulled pointer: `git lfs pull` fetches the real file). Then limit the replace to text files: take the list from `git ls-files` filtered by an extension allow-list, or skip any file with a NUL byte in its first few kilobytes, and leave out backup, vendor and data folders. Run it once as a dry run that prints the file list, and read the list before it writes.
+- **Verifying test:** Run the replace on a scratch copy that holds a small SQLite file and compare checksums of the binary files before and after: they are identical.
+- **Spot it fast:** `git diff --numstat` prints `-` for both counts on every changed binary file.

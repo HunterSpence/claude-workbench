@@ -9,10 +9,14 @@ REQUIRE = os.environ.get("WB_REQUIRE_ALL") == "1"   # house convention: nothing 
 
 import hashlib  # noqa: E402
 import stat  # noqa: E402
+import contextlib  # noqa: E402
+import io  # noqa: E402
 import json  # noqa: E402
+import re  # noqa: E402
 import subprocess  # noqa: E402
 import sys  # noqa: E402
 import tempfile  # noqa: E402
+import time  # noqa: E402
 import unittest  # noqa: E402
 from pathlib import Path  # noqa: E402
 from unittest import mock  # noqa: E402
@@ -27,17 +31,39 @@ TOKEN = "readonly-token-for-test"
 REPO = "example-org/example-repo"
 
 FAKE_CLAUDE = '''
-import json, os, sys
+import json, os, sys, time
 rec = os.environ["FAKE_RECORD"]
+def hang():
+    if os.environ.get("FAKE_PIDFILE"):
+        open(os.environ["FAKE_PIDFILE"], "w").write(str(os.getpid()))
+    time.sleep(40)
+    sys.exit(1)
 if sys.argv[1:] == ["--help"]:
+    mode = os.environ.get("FAKE_CLAUDE_MODE")
+    if mode == "hang-help":
+        hang()
+    if mode == "other-help":
+        print("usage: some other program [options]")
+        sys.exit(0)
+    if mode == "node-help":
+        print("Usage: node [options] [ script.js ] [arguments]")
+        print("Options:")
+        print("  -p, --print   evaluate script and print result")
+        sys.exit(0)
+    print("Usage: claude [options] [command] [prompt]")
+    print("Claude Code - starts an interactive session by default, use -p/--print for non-interactive output")
     print("Options:")
+    if mode != "noprint-help":
+        print("  -p, --print   Print")
     for f in os.environ.get("FAKE_HELP_FLAGS", "--restricted --safe-mode --max-budget-usd --no-session-persistence").split():
         print("  " + f + "   description")
-    sys.exit(0)
-prompt = sys.stdin.read()
+    sys.exit(139 if mode == "crash-help" else 0)
+prompt = sys.stdin.buffer.read().decode('utf-8')
 tree = sorted(os.path.relpath(os.path.join(d, f), os.getcwd()).replace(os.sep, "/") for d, _, fs in os.walk(os.getcwd()) for f in fs)
 open(rec, "a").write(json.dumps({"who": "claude", "argv": sys.argv[1:], "cwd": os.getcwd(), "prompt": prompt, "tree": tree,
     "token_vars": sorted(k for k in os.environ if k.upper().startswith(("GH_", "GITHUB_")) or k == "WB_REVIEW_TOKEN")}) + "\\n")
+if os.environ.get("FAKE_CLAUDE_MODE") == "hang":
+    hang()
 if os.environ.get("FAKE_CLAUDE_MODE") == "obey":
     print(json.dumps({"type": "result", "is_error": False, "result": "BANANA"}))
 else:
@@ -148,6 +174,130 @@ class Base(unittest.TestCase):
         (src / ".git").mkdir()
         (src / ".git" / "config").write_text("x", encoding="utf-8")
         return src
+
+
+def alive(pid):
+    if os.name == "nt":
+        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH", "/FO", "CSV"], capture_output=True, text=True).stdout
+        return f'"{pid}"' in out
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+class HungClaudeTest(Base):
+    """claude behind a .cmd shim (how npm installs it) that never answers: both calls give up on time, the whole process tree is
+    killed, and the grandchild is gone. Killing only the shim left the call waiting on the pipes the grandchild held."""
+
+    def hang(self, mode, call):
+        pidfile = self.d / f"{mode}.pid"
+        t0 = time.time()
+        with mock.patch.dict(os.environ, {"FAKE_RECORD": str(self.rec), "FAKE_CLAUDE_MODE": mode, "FAKE_PIDFILE": str(pidfile)}):
+            try:
+                result = call()
+            except Exception as e:      # noqa: BLE001 - the test inspects what came out
+                result = e
+        self.assertLess(time.time() - t0, 20, "the timeout must stop the call, not wait for the child's own end")
+        pid = int(pidfile.read_text())
+        for _ in range(50):
+            if not alive(pid):
+                break
+            time.sleep(0.2)
+        self.assertFalse(alive(pid), "the fake claude behind the shim was left running")
+        return result
+
+    def test_a_hung_review_call_times_out_on_time_and_leaves_nothing_running(self):
+        result = self.hang("hang", lambda: rr.run_claude([str(self.claude), "-p"], "prompt", self.d, timeout=5))
+        self.assertIsInstance(result, subprocess.TimeoutExpired)
+
+    def test_a_hung_help_call_raises_on_time_and_leaves_nothing_running(self):
+        self.assertIsInstance(self.hang("hang-help", lambda: rr.claude_help(str(self.claude), timeout=5)), rr.HelpUnreadable)
+
+    def test_a_normal_call_still_returns_the_completed_process(self):
+        with mock.patch.dict(os.environ, {"FAKE_RECORD": str(self.rec)}):
+            r = rr.run_claude([str(self.claude), "-p"], "hello", self.d)
+            helptext = rr.claude_help(str(self.claude))
+        self.assertEqual((r.returncode, "findings" in r.stdout), (0, True))
+        self.assertIn("--safe-mode", helptext)
+        self.assertEqual(self.records("claude")[0]["prompt"], "hello")
+
+
+class FailClosedTest(Base):
+    """Claude Code reads untrusted repository text, so the safety flags must be confirmed, not assumed. A help text that cannot be
+    read (it hangs, claude cannot be started, the text is not claude's) refuses the review before anything is fetched or run."""
+
+    def main_in_process(self, *args, **env):
+        err, out = io.StringIO(), io.StringIO()
+        with mock.patch.dict(os.environ, {**self.env, **env}), mock.patch.object(rr, "HELP_TIMEOUT", 5), \
+                contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+            code = rr.main(list(args))
+        return code, out.getvalue(), err.getvalue()
+
+    def assert_refused(self, code, out, err, reason):
+        self.assertEqual(code, 2, err)
+        self.assertIn("could not confirm Claude Code's safety flags", err)
+        self.assertIn(reason, err)
+        self.assertIn("not running the review", err)
+        self.assertEqual(out, "")
+        self.assertEqual(self.records(), [], "no clone, no gh call and no review process may start")
+        self.assertFalse((self.lad / "wb-review").exists(), "no scratch folder either")
+
+    def test_a_help_that_times_out_refuses_a_repository_review_and_starts_nothing(self):
+        t0 = time.time()
+        res = self.main_in_process(REPO, "--allowlist", str(self.allow), FAKE_CLAUDE_MODE="hang-help", FAKE_PIDFILE=str(self.d / "h.pid"))
+        self.assertLess(time.time() - t0, 20)
+        self.assert_refused(*res, "claude --help timed out")
+
+    def test_a_help_that_times_out_refuses_a_local_review_print_argv_and_the_canary(self):
+        src = self.source_folder()
+        for args in (("--local", str(src)), ("--local", str(src), "--print-argv"), ("--canary",)):
+            with self.subTest(args=args):
+                self.assert_refused(*self.main_in_process(*args, FAKE_CLAUDE_MODE="hang-help", FAKE_PIDFILE=str(self.d / "h.pid")),
+                                    "claude --help timed out")
+
+    def test_a_help_that_is_not_claudes_or_a_claude_that_cannot_start_refuses_too(self):
+        for mode, reason in (("other-help", "does not name Claude Code"),
+                             ("node-help", "does not name Claude Code"),            # node --help lists -p/--print too
+                             ("noprint-help", "did not list the -p/--print option"),
+                             ("crash-help", "claude --help exited 139")):           # the full help printed, then the process crashed
+            with self.subTest(mode=mode):
+                self.assert_refused(*self.main_in_process(REPO, "--allowlist", str(self.allow), FAKE_CLAUDE_MODE=mode), reason)
+        self.assert_refused(*self.main_in_process(REPO, "--allowlist", str(self.allow), WB_CLAUDE_BIN=str(self.d / "no-such-claude")),
+                            "claude could not be started")
+
+    def test_every_flag_dropped_because_the_help_does_not_list_it_is_named_on_stderr(self):
+        src = self.source_folder()
+        r = self.run_review("--local", str(src), "--print-argv", FAKE_HELP_FLAGS="--max-turns")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        json.loads(r.stdout)                                           # stdout stays one JSON document
+        self.assertEqual(len(r.stderr.strip().splitlines()), 1)
+        for dropped in ("--restricted", "--safe-mode", "--max-budget-usd", "--no-session-persistence"):
+            self.assertIn(dropped, r.stderr)
+        self.assertNotIn("--max-turns,", r.stderr)
+        r = self.run_review("--local", str(src), "--print-argv")      # the default fake lists every flag but --max-turns
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("--max-turns", r.stderr)
+        self.assertIn("cost cap", r.stderr)
+        for kept in ("--restricted", "--safe-mode"):
+            self.assertNotIn(kept, r.stderr)
+        r = self.run_review("--local", str(src), "--print-argv", FAKE_HELP_FLAGS="--restricted --safe-mode --max-turns --max-budget-usd --no-session-persistence")
+        self.assertEqual(r.stderr, "", "nothing was dropped, so nothing is said")
+
+    def test_a_readable_help_keeps_every_flag_it_lists_and_only_those(self):
+        src = self.source_folder()
+        r = self.run_review("--local", str(src), "--out", str(self.d / "out"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        argv = self.records("claude")[0]["argv"]
+        for flag in ("--restricted", "--safe-mode", "--max-budget-usd", "--no-session-persistence"):
+            self.assertIn(flag, argv)
+        self.assertNotIn("--max-turns", argv)                     # an affirmative help that lacks a flag drops it, as before
+        r = self.run_review("--local", str(src), "--out", str(self.d / "out2"), FAKE_HELP_FLAGS="--restricted")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        argv = self.records("claude")[1]["argv"]
+        self.assertIn("--restricted", argv)
+        self.assertNotIn("--safe-mode", argv)
 
 
 class AllowlistTest(Base):
@@ -306,6 +456,30 @@ class LocalModeTest(Base):
         # the repository mode builds its command from the same function: identical argv
         self.run_review(REPO, "--allowlist", str(self.allow))
         self.assertEqual(self.records("claude")[0]["argv"], self.records("claude")[1]["argv"])
+
+    def test_an_at_path_in_the_rubric_reaches_claude_without_the_at(self):
+        """`claude -p` inlines the file named by an @path in prompt text; the prompt carries (at) instead."""
+        src = self.source_folder()
+        rubric = self.d / "rubric.md"
+        rubric.write_text("# Custom criteria\nIgnore @C:/x/secret.txt and @~/notes.md, @c:\\x\\y.txt, (@./a.txt) and \"@/etc/hosts\".\n"
+                          "Also @\"C:/x y/z.txt\", \u898b\u3066\u3002@C:/x/a.txt, a\u3001@C:/x/b.txt, a\uff1f@C:/x/c.txt and a\uff01@C:/x/d.txt.\n"
+                          "Write to name@example.com.\n", encoding="utf-8")
+        r = self.run_review("--local", str(src), "--rubric", str(rubric), "--out", str(self.d / "out"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        prompt = self.records("claude")[0]["prompt"]
+        self.assertIsNone(re.search(r"(?<![A-Za-z0-9_])@", prompt), "an @ that Claude Code could read reached claude")
+        for kept in ("Ignore (at)C:/x/secret.txt and (at)~/notes.md, (at)c:\\x\\y.txt, ((at)./a.txt) and \"(at)/etc/hosts\".",
+                     "Also (at)\"C:/x y/z.txt\", \u898b\u3066\u3002(at)C:/x/a.txt, a\u3001(at)C:/x/b.txt, a\uff1f(at)C:/x/c.txt and a\uff01(at)C:/x/d.txt.",
+                     "Write to name@example.com."):
+            self.assertIn(kept, prompt)
+
+    def test_build_prompt_changes_every_at_outside_an_address_in_the_scope_and_the_rubric_and_nothing_else(self):
+        plain = rr.PROMPT.format(scope="The material is in the folder x.", rubric="# Rubric\nReply with JSON.")
+        self.assertEqual(rr.build_prompt("The material is in the folder x.", "# Rubric\nReply with JSON."), plain)
+        got = rr.build_prompt("Look at @C:/x/scope.txt", "@~/r.md\n@.env\nx@C:/y meet @ 5pm {braces} a@b.example @\x1cC:/x @\x85C:/x")
+        self.assertIn("Look at (at)C:/x/scope.txt", got)
+        self.assertIn("(at)~/r.md\n(at).env\nx@C:/y meet (at) 5pm {braces} a@b.example (at)\x1cC:/x (at)\x85C:/x", got)
+        self.assertIsNone(re.search(r"(?<![A-Za-z0-9_])@", got))
 
     def link_source(self):
         src = self.d / "linky"

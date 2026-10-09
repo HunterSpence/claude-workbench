@@ -13,7 +13,7 @@
     "<SRC>": "<DEVDRIVE>/src when <DEVDRIVE> is set, else <HOME>/src"
   },
   "paths": [
-    {"path": "<WB>/state/", "kind": "dir", "creator": "bootstrap/setup.py", "uninstall": "remove", "class": "state", "placement": "local-only", "note": "setup state, plan, ledger, logs, capability reports, locks, update.json, knowledge-verify.json, find-mcp.golden.json"},
+    {"path": "<WB>/state/", "kind": "dir", "creator": "bootstrap/setup.py", "uninstall": "remove", "class": "state", "placement": "local-only", "note": "setup state, plan, ledger, logs, capability reports, locks, update.json, knowledge-verify.json, find-mcp.golden.json, post-update-verify.json (the pending-verify marker), kit-update.json and kit-update/ (an update in flight), field-report.md (the scrubbed verify report), skill-tiers.md"},
     {"path": "<WB>/cache/", "kind": "dir", "creator": "plugins/workbench-kb/scripts/kb_index.py", "uninstall": "remove", "class": "cache", "placement": "local-only", "note": "knowledge-base search index (SQLite, rebuilt on demand): never in the synced KB folder"},
     {"path": "<WB>/kb-state/", "kind": "dir", "creator": "plugins/workbench-kb/scripts/save_driver.py", "uninstall": "keep", "class": "state", "placement": "local-only", "note": "per-KB save lock, precompact flags, active-context snapshots, save metrics and journal windows (one folder per KB); the snapshots are recovery copies, so uninstall keeps them"},
     {"path": "<WB>/npm/", "kind": "dir", "creator": "bootstrap/setup.py", "uninstall": "remove", "class": "runtime", "placement": "local-only", "note": "user-writable npm prefix, used only when the global one is not writable"},

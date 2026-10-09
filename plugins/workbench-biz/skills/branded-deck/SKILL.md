@@ -1,6 +1,6 @@
 ---
 name: branded-deck
-description: Apply a brand (colours, fonts, layouts, tone) to a slide outline and produce a slide-by-slide build spec, or the deck itself when file creation is available. Use when asked to make slides on-brand or turn an outline into a deck.
+description: Apply a brand (colours, fonts, layouts, tone) to a slide outline and produce a build spec, or the deck itself where file creation is available. Use when asked to make slides on-brand or turn an outline into a deck.
 license: MIT
 compatibility: Builds a .pptx only where file creation is enabled; otherwise it returns the build spec.
 ---

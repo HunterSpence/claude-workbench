@@ -1,6 +1,6 @@
 ---
 name: rfp-sow-drafter
-description: Draft an RFP response grid or a statement-of-work skeleton covering scope, deliverables, assumptions, exclusions, acceptance and change control. Leaves rates and prices as placeholders for a human. Use for RFP answers, SOW or proposal drafts.
+description: Draft an RFP response grid or statement-of-work skeleton covering scope, deliverables, assumptions, exclusions, acceptance and change control; rates and prices stay placeholders for a human. Use for RFP answers, SOW or proposal drafts.
 license: MIT
 ---
 

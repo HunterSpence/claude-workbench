@@ -1,6 +1,7 @@
 ---
 name: mcp-heal
-description: Reconcile the user's MCP servers to their golden config and probe every server for real (stdio initialize handshake, HTTP initialize), then report OK / DEGRADED / DOWN with the fix for each. Use for "/workbench-core:mcp-heal", "an MCP server is broken", "MCP tools missing", "check my MCP servers", or after editing the golden config.
+description: "Probe every MCP server and report OK / DEGRADED / DOWN with the fix for each."
+disable-model-invocation: true
 ---
 
 # /workbench-core:mcp-heal

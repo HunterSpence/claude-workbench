@@ -7,7 +7,8 @@
 
 apply: only servers named in the golden file are touched. Actions: "ensure" (build or update),
 "remove", "park" (move the definition to mcpServersParked, a key Claude Code ignores, so it costs
-nothing at startup and its env stays in the file), "ignore". Timestamped backup, write to .tmp,
+nothing at startup and its env stays in the file; a park entry that carries a command or url and finds no
+live or parked server REGISTERS it parked), "ignore". Timestamped backup, write to .tmp,
 re-parse, check the server set, then atomic replace. Server names and reasons are printed, values
 never. If a managed MCP policy is in force, apply runs as a dry run and names the policy: managed
 settings always win and this tool never works around them.
@@ -20,12 +21,12 @@ only (never the current directory); each gets a JSON-RPC `initialize`. HTTP serv
 allowedMcpServers / deniedMcpServers would block are skipped, not launched. A server with a
 headersHelper is skipped too: a helper is a command, and check never runs one. A repository's
 .mcp.json is never launched or expanded: --project only LISTS its server names. Exit code 1 if
-anything is DOWN. No .claude.json yet = "no config yet", exit 0. Config changes take effect on the
+anything is DOWN; a parked server is reported PARKED (not DOWN) and never changes the exit code. No .claude.json yet = "no config yet", exit 0. Config changes take effect on the
 next Claude Code restart. Stdlib only.
 """
 import argparse, datetime, fnmatch, glob, json, os, re, shutil, subprocess, sys, tempfile, threading, urllib.error, urllib.request
 
-OK, DEGRADED, DOWN, SKIP = "OK", "DEGRADED", "DOWN", "SKIP"
+OK, DEGRADED, DOWN, SKIP, PARKED = "OK", "DEGRADED", "DOWN", "SKIP", "PARKED"
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 # Variables a process needs to start at all on Windows/Linux. Nothing secret; everything else is dropped.
 BASE_ENV = ("PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP", "HOME", "USERPROFILE",
@@ -198,6 +199,14 @@ def plan(golden, cfg):
             if existing is not None:
                 changes.append(f"PARK    {name}  - {reason}")
                 parked[name] = servers.pop(name)
+            elif name not in parked and (spec.get("command") or spec.get("url")):
+                # a park entry with a definition registers the server parked: nothing loads it at startup, `unpark` turns it on
+                obj, why = build(name, spec, None)
+                if obj is None:
+                    warnings.append(f"SKIPPED {name}  - {why}")
+                else:
+                    changes.append(f"PARK    {name}  (registered parked)  - {reason}")
+                    parked[name] = obj
         elif action == "ensure":
             if existing is None and name in parked:
                 changes.append(f"UNPARK  {name}  - golden says ensure")
@@ -378,7 +387,7 @@ def cmd_check(a):
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as empty:
         cwd = a.cwd or empty
         rows = [(n, *probe(n, s, cwd, a.timeout, allowed, denied)) for n, s in sorted(servers.items())]
-    rows += [(n, SKIP, "parked") for n in sorted(cfg.get("mcpServersParked") or {})]
+    rows += [(n, PARKED, f"not loaded at startup; `mcp_healer.py unpark {n}` turns it on") for n in sorted(cfg.get("mcpServersParked") or {})]
     if a.project:   # list only: a repository's servers are never launched, fetched or expanded here
         pj = os.path.join(a.project, ".mcp.json")
         try:

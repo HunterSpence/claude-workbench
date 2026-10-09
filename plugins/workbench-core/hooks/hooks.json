@@ -55,7 +55,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash|PowerShell|Edit|Write|MultiEdit|NotebookEdit|Read|Grep|Glob|WebFetch|Agent|mcp__.*([Pp]laywright|[Cc]hrome|[Pp]uppeteer|[Bb]rowser).*|mcp__.*([Pp][Oo][Ss][Tt][Gg][Rr][Ee][Ss]|[Ss][Qq][Ll]|[Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee]).*",
+        "matcher": "Bash|PowerShell|Edit|Write|MultiEdit|NotebookEdit|Read|Grep|Glob|WebFetch|Agent|mcp__.*([Pp]laywright|[Cc]hrome|[Pp]uppeteer|[Bb]rowser).*|mcp__.*([Pp][Oo][Ss][Tt][Gg][Rr][Ee][Ss]|[Ss][Qq][Ll]|[Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee]).*|mcp__.*_(str_replace|multi_str_replace|insert_at|insert_at_symbol|replace_symbol|ast_grep_rewrite|replace_lines|delete_symbol)",
         "hooks": [
           {
             "type": "command",

@@ -1,6 +1,7 @@
 ---
 name: linux-service-triage
-description: Diagnose a failing Linux service from evidence - systemd or PM2 status and logs, ports, permissions, disk and memory, Nginx reverse proxy, DNS and TLS - and propose the minimal fix with verification and rollback. Use when a server app, container or site is down, erroring, slow or unreachable, before ad-hoc debugging.
+description: "Diagnose a failing Linux service from evidence: systemd or PM2 status and logs, ports, disk and memory, Nginx proxy, DNS, TLS; propose a minimal fix with rollback. Use when a server app, container or site is down, erroring, slow or unreachable."
+when_to_use: "ALWAYS load before debugging a server, service or site that is down or erroring."
 ---
 
 # Linux service triage

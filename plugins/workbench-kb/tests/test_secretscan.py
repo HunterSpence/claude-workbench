@@ -103,6 +103,18 @@ CONTROLS = [
     ("password for a thing, no lead word", r"\bpass(?:word|phrase)[ \t]+for", lambda: "Pass" + "word for all rooms: " + PW),
     ("password is", r"[ \t]+is[ \t]+", lambda: "the db pass" + "word is " + PW + " today"),
     ("app password in groups", r"app[ _-]?password", lambda: "Mail app " + "password: " + "abcd efgh ijkl mnop"),
+    # shapes found missing in the field
+    ("private key block with a body", "PRIVATE KEY(?: BLOCK)?-----", lambda: "-----BEGIN " + "RSA PRIVATE KEY-----\n" + rep("QUJD" * 16 + "\n", 3) + "-----END " + "RSA PRIVATE KEY-----"),
+    ("putty key file with a body", "PuTTY-User-Key-File", lambda: "PuTTY-User-Key-File-" + "3: ssh-ed25519\nEncryption: none\nPrivate-Lines: 1\n" + rep("QUJD", 8) + "\nPrivate-MAC: " + rep("ab", 16)),
+    ("api key header", "x-api-key", lambda: "x-api" + "-key: " + rep("aB1", 8)),
+    ("api key header, long without a digit", "x-api-key", lambda: "api-" + "key=" + rep("abcdefgh", 4)),
+    ("curl user and password", r"\bcurl\b", lambda: "curl -s -u " + "svc:" + "Hq7rT2Kx9" + " https://example.com/x"),
+    ("curl user and short password", r"\bcurl\b", lambda: "curl --user " + "svc:" + "pw1" + " https://example.com/x"),
+    ("json password of any length", r'\"(?:password|passwd|pwd|secret|client_secret)\"', lambda: '{"pass' + 'word": "' + "pw1" + '"}'),
+    ("json password with an escaped quote", r'\"(?:password|passwd|pwd|secret|client_secret)\"', lambda: '{"pass' + 'word": "' + 'ab\\"cd' + '"}'),
+    ("storage sas signature", r"[?&;]sig=", lambda: "https://demo.blob.example.net/c?sv=2022-11-02&" + "sig=" + "FAKE%2Fsig%2B" + rep("A1", 10) + "%3D"),
+    ("password option, short", "--(?:password|passwd", lambda: "tool --pass" + "word=" + "Pw1x"),
+    ("password option, space form", "--(?:password|passwd", lambda: "tool --pass" + "word " + "Pw1x"),
 ]
 
 NEGATIVES = [
@@ -123,7 +135,7 @@ NEGATIVES = [
     ("prefix text only", "AKIA is the prefix of cloud key ids"),
     ("redacted line", "Admin password: `[REDACTED - see the vault]`."),
     ("redacted plain", "Password for the share: [REDACTED - see vault]"),
-    ("masked reference", "rotated " + "hf_" + "x…" + "Ab3dE" + " and " + "hf_" + "x…(37 chars) yesterday"),
+    ("masked reference", "rotated " + "tok_" + "x…" + "Zz9Q" + " and " + "tok_" + "x…(n chars) yesterday"),
     ("env var names only", "Mail works (app password = SMTP_USER/SMTP_APP_PASSWORD)."),
     ("query string with no key name", "https://example.org/dl?id=download&f=12345"),
     ("short model-hub prefix", "hf_" + "short"),
@@ -155,8 +167,25 @@ NEGATIVES = [
     ("secret_key from the environment", "SECRET_KEY = os.environ['SECRET_KEY']"),
     ("secret_key from settings", "SECRET_KEY = settings.SECRET_KEY"),
     ("json key that is only a count", '"max_tokens": 1024'),
+    ("code that builds a json password", "x = '\"pass" + "word\": \"' + value + '\"'"),
     ("json key that merely starts with token", '"tokenizer": "abc12345678901234567"'),
     ("access key marked required", "ACCESS_KEY: required"),
+    # the new shapes' own guards
+    ("api-key word that is no key", "api-key: required"),
+    ("api key header placeholder", "x-api-key: <your key>"),
+    ("api key header variable", "x-api-key: ${API_KEY}"),
+    ("curl password variable", "curl -u svc:$PW https://example.com/x"),
+    ("curl user only", "curl -u svc https://example.com/x"),
+    ("json empty password", '{"password": ""}'),
+    ("json password placeholder", '{"password": "<pw>"}'),
+    ("json password variable", '{"password": "${DB_PW}"}'),
+    ("json key that only starts with password", '{"passwordless": "yes-please"}'),
+    ("short sig", "https://example.com/?sig=abc"),
+    ("password from stdin", "docker login --password-stdin"),
+    ("password option placeholder", "tool --password <value>"),
+    ("password option followed by a flag", "tool --password -x"),
+    ("password option variable", "tool --password $PW"),
+    ("private key header words in prose", "A private key begins with a BEGIN line, then base64 text."),
 ]
 
 
@@ -226,6 +255,41 @@ class Shapes(unittest.TestCase):
         for i, p in enumerate(S.PATTERNS):
             self.assertLessEqual(p.count(S.V), 1, f"pattern {i} marks the value twice")
             single(i)
+
+
+class Blocks(unittest.TestCase):
+    """The body lines of a key are the secret: one span covers the block, and findings still print no value."""
+
+    def test_a_pem_block_is_one_span_from_header_to_end_line(self):
+        head, tail = "-----BEGIN " + "RSA PRIVATE KEY-----", "-----END " + "RSA PRIVATE KEY-----"
+        body = "\n".join(rep("QUJD", 16) for _ in range(3))
+        text = f"before\n{head}\n{body}\n{tail}\nafter"
+        (a, b), = S.scan_text(text)
+        self.assertEqual(text[a:b], f"{head}\n{body}\n{tail}")
+        self.assertEqual([f["line"] for f in S.findings(text)], [2])
+
+    def test_a_pem_block_without_an_end_line_runs_to_the_end_of_the_text(self):
+        head = "-----BEGIN " + "OPENSSH PRIVATE KEY-----"
+        text = f"x\n{head}\n{rep('QUJD', 16)}\n{rep('QUJD', 8)}"
+        (a, b), = S.scan_text(text)
+        self.assertEqual((text[:a], b), ("x\n", len(text)))
+
+    def test_a_putty_file_is_covered_through_its_mac_line(self):
+        head = "PuTTY-User-Key-File-" + "3: ssh-ed25519"
+        text = f"{head}\nEncryption: none\nComment: fictional\nPublic-Lines: 1\n{rep('QUJD', 6)}\nPrivate-Lines: 1\n{rep('QUJD', 8)}\nPrivate-MAC: {rep('ab', 16)}\nafter"
+        (a, b), = S.scan_text(text)
+        self.assertEqual(text[b:], "\nafter")
+        self.assertNotIn("after", text[a:b])
+
+    def test_two_blocks_are_two_spans(self):
+        head, tail = "-----BEGIN " + "PGP PRIVATE KEY BLOCK-----", "-----END " + "PGP PRIVATE KEY BLOCK-----"
+        text = f"{head}\n{rep('QUJD', 8)}\n{tail}\nmiddle\n{head}\n{rep('QUJD', 8)}\n{tail}"
+        self.assertEqual(len(S.scan_text(text)), 2)
+
+    def test_the_new_option_and_header_shapes_keep_the_name_readable(self):
+        text = "curl -u svc:" + "Hq7rT2Kx9 https://example.com/x\nx-api" + "-key: aB1aB1aB1aB1\n" + '{"pass' + 'word": "pw1"} --pass' + "word=Pw1x"
+        values = [text[a:b] for a, b in S.scan_text(text, values_only=True)]
+        self.assertEqual(values, ["Hq7rT2Kx9", "aB1aB1aB1aB1", "pw1", "Pw1x"])
 
 
 class Output(unittest.TestCase):
@@ -298,6 +362,9 @@ class Speed(unittest.TestCase):
             "pass words": "pass " * 40_000, "semicolon pairs": "key=val;" * 25_000, "long scheme": "https://" + "a" * 100_000,
             "spaced pairs": "a b=" * 50_000 + ";password=x", "dashes": "sk-" + "a-" * 100_000, "bearer": "bearer " + "a" * 100_000,
             "colons": "https://" + "a:" * 50_000, "quotes": '"' * 100_000 + "token:",
+            "curl words": "curl " * 40_000, "curl flags": "curl -u " * 25_000, "key headers": "x-api-key: " * 20_000,
+            "begin lines": "-----BEGIN " + "PRIVATE KEY-----" * 8_000, "putty headers": "PuTTY-User-" + "Key-File-2:" * 8_000,
+            "json password": '"password": "' + "\\" * 100_000, "password options": "--password " * 20_000, "sig": "&sig=" * 40_000,
         }.items():
             with self.subTest(input=name):
                 t = time.monotonic()

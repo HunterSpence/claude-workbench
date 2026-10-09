@@ -41,6 +41,10 @@ PUBLISHED = [
     ("Not logged in · Please run /login", 70),
     ("Credit balance is too low", 69),
     ("Concurrent subagent limit reached", 19),
+    # not Claude Code's own messages: the three later cards (95 to 97), whose detectors sit at the end of the list
+    ("fatal: 'C:/work/wt-fix' contains modified or untracked files, use --force to delete it", 95),
+    ('WARN The "API_URL" variable is not set. Defaulting to a blank string.', 96),
+    ("sqlite3.DatabaseError: file is not a database", 97),
 ]
 
 
@@ -93,10 +97,26 @@ class RedErrors(unittest.TestCase):
         self.assertEqual(self.card_of("Rate limit exceeded. Retry after a few seconds."), 19)
 
     def test_new_detectors_come_before_the_old_ones(self):
-        old = 41                                    # the detectors the earlier release shipped, kept in their order
+        later = 3                                   # cards 95 to 97 come last: the old ones stay in front of them, in their order
+        old = 41                                    # the detectors the earlier release shipped
         self.assertGreater(len(self.det), old + 40)
-        self.assertTrue(all(d["card"] <= 66 for d in self.det[-old:]))
+        self.assertEqual([d["card"] for d in self.det[-later:]], [95, 96, 97])
+        self.assertTrue(all(d["card"] <= 66 for d in self.det[-old - later:-later]))
         self.assertEqual(self.card_of("Connection dropped (ECONNRESET)"), 72, "not the dead-hosts card")
+
+    def test_a_failed_compose_up_with_a_busy_port_is_not_the_stale_environment_card(self):
+        warn = 'WARN The "API_URL" variable is not set. Defaulting to a blank string.'
+        for real in ("Error response from daemon: Bind for localhost:3000 failed: port is already allocated",
+                     "listen tcp localhost:3000: bind: address already in use",
+                     'Error response from daemon: Get "https://registry.example.com/v2/": tls: failed to verify certificate: '
+                     "x509: certificate signed by unknown authority"):
+            self.assertNotEqual(self.card_of(f"Exit code 1\n{warn}\n{real}"), 96, real)
+            self.assertNotEqual(self.card_of(f"Exit code 1\n{real}\n{warn}"), 96, real)
+        self.assertEqual(self.card_of(f"Exit code 1\n{warn}\nservice api failed to start"), 96)
+
+    def test_the_sqlite_detector_wants_the_sqlite_messages_not_any_not_a_database_text(self):
+        self.assertEqual(self.card_of("sqlite3.OperationalError: database disk image is malformed"), 97)
+        self.assertIsNone(self.card_of("Error: the path is not a database server"))
 
 
 if __name__ == "__main__":

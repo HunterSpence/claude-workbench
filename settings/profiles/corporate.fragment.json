@@ -24,6 +24,7 @@
   },
   "showThinkingSummaries": true,
   "switchModelsOnFlag": false,
+  "skillListingBudgetFraction": 0.02,
   "env": {
     "WORKBENCH_KB_ROOT": "{{KB_ROOT}}",
     "PYTHONUTF8": "1",
@@ -37,7 +38,9 @@
     "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "8",
     "HF_HUB_DISABLE_TELEMETRY": "1",
     "PIP_DISABLE_PIP_VERSION_CHECK": "1",
-    "NPM_CONFIG_UPDATE_NOTIFIER": "false"
+    "NPM_CONFIG_UPDATE_NOTIFIER": "false",
+    "MCP_TIMEOUT": "60000",
+    "MSYS2_ARG_CONV_EXCL": "origin/;upstream/;refs/"
   },
   "permissions": {
     "defaultMode": "default",

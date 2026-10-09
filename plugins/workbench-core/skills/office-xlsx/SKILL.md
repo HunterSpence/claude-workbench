@@ -1,6 +1,7 @@
 ---
 name: office-xlsx
-description: Build or edit Excel workbooks (.xlsx) with openpyxl the way a careful analyst would - live formulas instead of pasted results, a colour convention for inputs and formulas, named styles, frozen headers, dropdown validation - then recalculate and check for formula errors before handing it over. Use for "make a spreadsheet", "build a model", "add a summary sheet", "fix this workbook".
+description: "Build or edit Excel workbooks (.xlsx) with openpyxl like a careful analyst: live formulas, input colour convention, named styles; recalculate and check for formula errors. Use for \"make a spreadsheet\", \"build a model\", \"add a summary sheet\", \"fix this workbook\"."
+when_to_use: "ALWAYS load before creating or editing an Excel workbook, even a small one."
 ---
 
 # office-xlsx

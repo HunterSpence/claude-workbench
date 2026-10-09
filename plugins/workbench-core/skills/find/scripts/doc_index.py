@@ -19,6 +19,7 @@ The catalog commands (files, discover, roots, status, label, show, related, newe
 Exit: 0 ok, 1 error, 2 usage.
 """
 import argparse
+import contextlib
 import datetime
 import hashlib
 import importlib.util
@@ -31,13 +32,14 @@ import sys
 import time
 import zipfile
 import xml.etree.ElementTree as ET
+from urllib.parse import urlparse
 
 SCHEMA_VERSION = 3                      # 0.2.0 databases had user_version 0
 MODEL = "BAAI/bge-small-en-v1.5"
 MODEL_GLOB = "models--*bge-small-en-v1.5*"
 MODEL_FILE = "model_optimized.onnx"
 MODEL_SHA256 = "51f1bd0addd6e859e42c2c8021a5e5461385bb676a649f4b269aa445449f2431"   # Qdrant/bge-small-en-v1.5-onnx-Q model_optimized.onnx, as published
-RRF_K, TOPK, FANOUT_CAP, STALE_HOURS = 60, 50, 50, 24
+RRF_K, TOPK, FANOUT_CAP, STALE_HOURS, MODEL_RETRY_HOURS = 60, 50, 50, 24, 24
 EXTS = {".docx", ".pptx", ".xlsx", ".pdf", ".html", ".htm", ".md", ".markdown", ".txt"}
 PLAIN = {".md", ".markdown", ".txt"}
 OFFICE = {".docx", ".pptx", ".xlsx"}
@@ -145,11 +147,36 @@ def kind_of(label, path):
     return "sharepoint-sync" if any("sharepoint" in p for p in parts) else "documents"
 
 
+def long_path(p):
+    """Windows: p with 8.3 short names (PROGRA~1) expanded to the long ones (GetLongPathNameW); a part that does not exist
+    is kept as written. Elsewhere, and whenever the call fails, p itself."""
+    if os.name != "nt" or "~" not in p:   # a short name always carries "~"; without one there is nothing to expand, and asking the
+        return p                          # file system about an unreachable network share (\\host\share) stalls for ~20 s per call
+    try:
+        import ctypes
+        buf = ctypes.create_unicode_buffer(32768)
+        head, tail = p, []
+        while True:
+            if ctypes.windll.kernel32.GetLongPathNameW(head, buf, len(buf)):
+                return os.path.join(buf.value, *reversed(tail))
+            parent, name = os.path.split(head)
+            if not name or parent == head:
+                return p
+            head, tail = parent, tail + [name]
+    except Exception:   # noqa: BLE001
+        return p
+
+
+def norm_path(p):
+    """A folder path as the OS compares it: absolute, short names expanded, no trailing separator, case-folded on Windows."""
+    return os.path.normcase(long_path(os.path.abspath(p)))
+
+
 def add_root(con, path, label=None):
     path = os.path.abspath(path)
-    row = con.execute("select label from roots where path=?", (path,)).fetchone()
-    if row:
-        return row[0]
+    for lab, p in con.execute("select label, path from roots"):   # the same folder spelled another way is the same root
+        if norm_path(p) == norm_path(path):
+            return lab
     label = slug(label or os.path.basename(path.rstrip("\\/")))
     if con.execute("select 1 from roots where label=?", (label,)).fetchone():
         raise SystemExit(f"root label '{label}' is already used for another folder")
@@ -243,10 +270,20 @@ def is_cloud_only(st):
     return bool(getattr(st, "st_file_attributes", 0) & CLOUD_ONLY)
 
 
-def walk(root, skip_underscore=False, skip_top=()):
+def nested_roots(con, rid, path):
+    """normcase'd absolute paths of the OTHER roots that sit strictly below this root. A nested root owns its folder: the
+    outer root's walk skips it, so every file is indexed once, under the most specific root. A root with the same path is
+    not nested, and neither is a sibling that only shares a name prefix (outer2 next to outer)."""
+    base = norm_path(path)
+    pre = base if base.endswith(os.sep) else base + os.sep
+    return {p for p in (norm_path(r[0]) for r in con.execute("select path from roots where id<>?", (rid,))) if p != base and p.startswith(pre)}
+
+
+def walk(root, skip_underscore=False, skip_top=(), skip_paths=(), skipped=None):
     """(relpath, stat) for every file. DirEntry.stat() reads cached attributes on Windows, so it never opens (and never
     hydrates) a placeholder. skip_underscore (captured roots): a folder whose name starts with _ is a staging area.
-    skip_top: folder names skipped directly under the root only (the kb root's daily/ save log)."""
+    skip_top: folder names skipped directly under the root only (the kb root's daily/ save log).
+    skip_paths: normcase'd absolute folders that belong to another root; their relpaths are appended to `skipped`."""
     stack = [(os.path.abspath(root), "")]
     while stack:
         d, rel_dir = stack.pop()
@@ -260,8 +297,12 @@ def walk(root, skip_underscore=False, skip_top=()):
             rel = f"{rel_dir}/{e.name}" if rel_dir else e.name
             try:
                 if e.is_dir(follow_symlinks=False):
-                    if not (skip_underscore and e.name.startswith("_")):
-                        stack.append((os.path.join(d, e.name), rel))
+                    sub = os.path.join(d, e.name)
+                    if os.path.normcase(sub) in skip_paths:
+                        if skipped is not None:
+                            skipped.append(rel)
+                    elif not (skip_underscore and e.name.startswith("_")):
+                        stack.append((sub, rel))
                 elif e.is_file(follow_symlinks=False):
                     yield rel, e.stat(follow_symlinks=False)
             except OSError:
@@ -869,16 +910,25 @@ def mark(con, fid, status, reason, error, label=None):
                 (status, reason, error, label, now_iso(), fid))
 
 
+def drop_files(con, rid, rels):
+    for chunk in (rels[i:i + 500] for i in range(0, len(rels), 500)):
+        where = "root_id=? and rel in (%s)" % ",".join("?" * len(chunk))
+        purge_files(con, where, [rid, *chunk])
+        con.execute(f"delete from files where {where}", [rid, *chunk])
+
+
 def index_root(con, root, rebuild=False, force=False, include_labelled=False, max_mb=50, max_unzipped_mb=200,
                deadline=None, prune=False, log=print):
     rid, label, path = root
+    path = long_path(path)   # walk from the long form, so a nested root's folder is recognised however it was spelled
     if not os.path.isdir(path):
         raise SystemExit(f"not a folder: {path}")
     stats = dict(new=0, updated=0, unchanged=0, failed=0, labelled=0, cloud_only=0, removed=0, catalogued=0, added=0, partial=False)
     kind = con.execute("select kind from roots where id=?", (rid,)).fetchone()[0]
     known = {r[0]: r for r in con.execute("select rel, id, size, mtime, status, cloud_only, label from files where root_id=?", (rid,))}
-    seen, adds, changes = set(), [], []
-    for rel, st in walk(path, skip_underscore=(kind == "captured"), skip_top=("daily",) if kind == "kb" else ()):
+    seen, adds, changes, skipped = set(), [], [], []
+    for rel, st in walk(path, skip_underscore=(kind == "captured"), skip_top=("daily",) if kind == "kb" else (),
+                        skip_paths=nested_roots(con, rid, path), skipped=skipped):
         seen.add(rel)
         old = known.get(rel)
         cloud = int(is_cloud_only(st))
@@ -909,15 +959,17 @@ def index_root(con, root, rebuild=False, force=False, include_labelled=False, ma
     con.executemany("update files set size=?, mtime=?, status=?, cloud_only=? where id=?", changes)
     stats["added"], stats["catalogued"] = len(adds), len(seen)
     gone = [r for r in known if r not in seen]
+    under = tuple(x.lower() + "/" for x in skipped)
+    shadowed = [r for r in gone if r.lower().startswith(under)]   # indexed by an older version before a nested root took the folder over
+    gone = [r for r in gone if not r.lower().startswith(under)]
+    drop_files(con, rid, shadowed)   # not "gone": the nested root has them, so a duplicate is dropped even without prune
+    stats["removed"] = len(shadowed)
     if rebuild or prune:
-        if not seen and known:
+        if not seen and len(known) > len(shadowed):
             log("refusing to prune: no files found (is the folder offline or unmounted?)")
         elif gone:
-            for chunk in (gone[i:i + 500] for i in range(0, len(gone), 500)):
-                where = "root_id=? and rel in (%s)" % ",".join("?" * len(chunk))
-                purge_files(con, where, [rid, *chunk])
-                con.execute(f"delete from files where {where}", [rid, *chunk])
-            stats["removed"] = len(gone)
+            drop_files(con, rid, gone)
+            stats["removed"] += len(gone)
     elif gone:
         log(f"{len(gone)} indexed file(s) no longer present; run with --rebuild to remove them")
     con.commit()
@@ -997,6 +1049,82 @@ class ModelUnavailable(Exception):
     pass
 
 
+class ModelMissing(ModelUnavailable):
+    """No model on disk and no download asked for."""
+
+
+class ModelDownloadFailed(ModelUnavailable):
+    """A download that was attempted and failed (as opposed to a missing package or HF_HUB_OFFLINE). Names the host and
+    the error class, never the library's message: that wording talks about tokens although none is involved."""
+    def __init__(self, host, error):
+        super().__init__(f"model download from {host} failed ({error})")
+        self.host, self.error = host, error
+
+
+def hub_host():
+    return urlparse(os.environ.get("HF_ENDPOINT") or "https://huggingface.co").hostname or "huggingface.co"
+
+
+def error_name(e):
+    """Error class, plus the HTTP status when the exception carries a response: 'HfHubHTTPError, HTTP 403'."""
+    code = getattr(getattr(e, "response", None), "status_code", None)
+    return type(e).__name__ + (f", HTTP {code}" if code else "")
+
+
+@contextlib.contextmanager
+def one_download_attempt(cap):
+    """fastembed 0.9 retries a failed download three times, sleeping 3, 9 and 27 s between the tries, and logs every
+    failure at ERROR in the hub's own words (they mention tokens). That is for a long-running service; here a failure is
+    remembered for MODEL_RETRY_HOURS instead. So: one network attempt (the first error is kept in cap["exc"] and replayed
+    to the library's later tries), no sleeping, no library log lines. Best effort: if fastembed's internals differ, the
+    download just runs the way it always did."""
+    try:
+        import logging
+        import warnings
+        from fastembed.common import model_management as mm
+        from loguru import logger
+        mgmt, real_time = mm.ModelManagement, mm.time
+        orig = mgmt.__dict__["download_files_from_huggingface"]
+        func = orig.__func__ if isinstance(orig, classmethod) else None   # anything else: leave the library alone
+    except Exception:   # noqa: BLE001
+        func = None
+    if func is None:
+        yield
+        return
+
+    def once(cls, *a, **kw):
+        if kw.get("local_files_only"):   # the library's cache probe makes no network request
+            return func(cls, *a, **kw)
+        if "exc" in cap:
+            raise cap["exc"]
+        try:
+            return func(cls, *a, **kw)
+        except Exception as e:   # noqa: BLE001
+            cap["exc"] = e
+            raise
+
+    class NoSleep:
+        sleep = staticmethod(lambda _s: None)
+
+        def __getattr__(self, name):
+            return getattr(real_time, name)
+    hub_log = logging.getLogger("huggingface_hub")
+    level = hub_log.level
+    mgmt.download_files_from_huggingface = classmethod(once)
+    mm.time = NoSleep()
+    hub_log.setLevel(logging.CRITICAL)
+    logger.disable("fastembed")
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            yield
+    finally:
+        logger.enable("fastembed")
+        hub_log.setLevel(level)
+        mm.time = real_time
+        mgmt.download_files_from_huggingface = orig
+
+
 _EMB = {}
 
 
@@ -1044,7 +1172,7 @@ def get_embedder(download=False):
             raise ModelUnavailable(f"{mod} is not installed")
     if f is None:
         if not download:
-            raise ModelUnavailable("the embedding model is not downloaded yet (run: doc_index.py embed)")
+            raise ModelMissing("the embedding model is not downloaded yet (run: doc_index.py embed)")
         if offline():
             raise ModelUnavailable("offline (HF_HUB_OFFLINE is set) and the embedding model is not downloaded")
     os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
@@ -1058,21 +1186,28 @@ def get_embedder(download=False):
 
     def make():
         return TextEmbedding(MODEL, cache_dir=models_dir(), lazy_load=True, local_files_only=f is not None or not download)
+    fresh, cap = download and f is None, {}   # fresh: a real download, not the load of a cached model
     try:
         try:
-            emb = make()
+            with one_download_attempt(cap) if fresh else contextlib.nullcontext():
+                emb = make()
         except Exception as e:   # noqa: BLE001
-            if not (download and re.search(r"ssl|certificate|tls", f"{e} {e.__cause__}", re.I)):
+            if not (fresh and re.search(r"ssl|certificate|tls", f"{e} {e.__cause__} {cap.get('exc')}", re.I)):
                 raise
             os.environ["HF_HUB_DISABLE_XET"] = "1"   # the hf_xet path failed a TLS check: retry once over plain HTTPS
             import huggingface_hub.constants as hc
             hc.HF_HUB_DISABLE_XET = True
-            emb = make()
+            cap.clear()
+            with one_download_attempt(cap):
+                emb = make()
         if verified_model_file() is None:
-            raise ModelUnavailable("the embedding model files are missing after the download")
+            raise ModelDownloadFailed(hub_host(), "files missing after the download") if fresh else ModelUnavailable(
+                "the embedding model files are missing after the download")
     except ModelUnavailable:
         raise
     except Exception as e:   # noqa: BLE001
+        if fresh:
+            raise ModelDownloadFailed(hub_host(), error_name(cap.get("exc", e)))
         raise ModelUnavailable(f"embedding model unavailable ({type(e).__name__}: {str(e)[:160]})")
     _EMB["e"] = emb
     return emb
@@ -1114,14 +1249,41 @@ def embed_pending(con, emb, batch=32, deadline=None):
             return done, reused, True
 
 
-def embed_cmd(con, deadline=None, batch=32, download=True):
+def model_failure(con):
+    """The remembered failed model download (dict with at, host, error) while it is younger than MODEL_RETRY_HOURS, else None."""
+    try:
+        fail = json.loads(get_meta(con, "model_fail", "null"))
+        age = datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.strptime(fail["at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+    except (ValueError, TypeError, KeyError):
+        return None
+    return fail if age < datetime.timedelta(hours=MODEL_RETRY_HOURS) and fail.get("host") == hub_host() else None   # another endpoint is a new try
+
+
+def model_failure_reason(fail):
+    return (f"model download from {fail['host']} failed ({fail['error']}) at {fail['at']}; keyword search only. "
+            f"A refresh tries again after {MODEL_RETRY_HOURS} h; `embed` tries now")
+
+
+def embed_cmd(con, deadline=None, batch=32, download=True, force=False):
+    """Compute vectors. A download that failed is remembered for MODEL_RETRY_HOURS: inside that window `refresh` makes no
+    network attempt (force=True, which the `embed` command passes, tries anyway)."""
+    fail = None if force or not download or find_model_file() else model_failure(con)
+    if fail:
+        return {"embedded": 0, "reused": 0, "pending": None, "model": None, "mode_reason": model_failure_reason(fail)}
     try:
         emb = get_embedder(download=download)
     except ModelUnavailable as e:
+        reason = str(e)
+        if isinstance(e, ModelDownloadFailed):
+            fail = {"at": now_iso(), "host": e.host, "error": e.error}
+            set_meta(con, "model_fail", json.dumps(fail))
+            reason = model_failure_reason(fail)
         add_note(con, str(e))
-        return {"embedded": 0, "reused": 0, "pending": None, "model": None, "mode_reason": str(e)}
+        con.commit()
+        return {"embedded": 0, "reused": 0, "pending": None, "model": None, "mode_reason": reason}
     done, reused, more = embed_pending(con, emb, batch, deadline)
     set_meta(con, "model", MODEL)
+    con.execute("delete from meta where k='model_fail'")
     con.commit()
     return {"embedded": done, "reused": reused, "pending": more, "model": MODEL, "mode_reason": None}
 
@@ -1206,6 +1368,8 @@ def refresh(con, db, label=None, rebuild=False, embed="auto", max_minutes=None, 
         if embed != "off" and not partial and not (deadline and time.monotonic() > deadline):
             out["embed"] = embed_cmd(con, deadline, download=True)
             emb_done = not out["embed"]["pending"]
+            if out["embed"]["mode_reason"]:
+                log("embedding: " + out["embed"]["mode_reason"])
         if not partial and emb_done:
             set_meta(con, "last_refresh", now_iso())
             con.commit()
@@ -1230,11 +1394,23 @@ def snippet_of(body, terms, width=240):
     return re.sub(r"(?i)\b(" + "|".join(ts) + r")\w*", lambda m: "[" + m.group(0) + "]", s, count=12) if ts else s
 
 
-def filters_sql(root, path, source):
+def scope_labels(con, label):
+    """None without a --root; else [label] plus the labels of every root nested under it: a root owns the roots inside its
+    folder (their files are not indexed under it), so searching it covers them."""
+    if not label:
+        return None
+    row = con.execute("select id, path from roots where label=?", (label,)).fetchone()
+    if row is None:
+        return [label]
+    inner = nested_roots(con, row[0], row[1])
+    return [label] + [lab for lab, p in con.execute("select label, path from roots where id<>? order by id", (row[0],)) if norm_path(p) in inner]
+
+
+def filters_sql(labels, path, source):
     sql, args = "", []
-    if root:
-        sql += " and r.label=?"
-        args.append(root)
+    if labels:
+        sql += " and r.label in (%s)" % ",".join("?" * len(labels))
+        args.extend(labels)
     if path:
         sql += " and instr(lower(f.ref), ?) > 0"
         args.append(path.lower())
@@ -1244,10 +1420,10 @@ def filters_sql(root, path, source):
     return sql, args
 
 
-def bm25_arm(con, terms, root, path, source):
+def bm25_arm(con, terms, labels, path, source):
     if not terms:
         return []
-    fsql, fargs = filters_sql(root, path, source)
+    fsql, fargs = filters_sql(labels, path, source)
     for op in (" AND ", " OR "):   # every word first; any word only when nothing matches them all
         q = op.join('"' + t.replace('"', "") + '"' for t in terms)
         rows = con.execute("select fts.rowid from fts join paras p on p.id=fts.rowid join files f on f.id=p.file_id "
@@ -1258,11 +1434,11 @@ def bm25_arm(con, terms, root, path, source):
     return []
 
 
-def dense_arm(con, qvec, root, path, source):
+def dense_arm(con, qvec, labels, path, source):
     # ponytail: every vector is read per query (about half a second per 100,000 paragraphs); cache a matrix file or add
     # sqlite-vec when that stops being fast enough.
     import numpy as np
-    fsql, fargs = filters_sql(root, path, source)
+    fsql, fargs = filters_sql(labels, path, source)
     rows = con.execute("select v.para_rowid, v.blob from vec v join paras p on p.id=v.para_rowid join files f on f.id=p.file_id "
                        "join roots r on r.id=f.root_id where v.model=?" + fsql, [MODEL, *fargs]).fetchall()
     if not rows:
@@ -1281,18 +1457,21 @@ def search(con, db, query, mode="auto", limit=10, root=None, path=None, source=N
     if mode == "keyword":
         reason = "keyword mode requested"
     elif nvec == 0:
-        reason = "no vectors yet: run `embed` (or `refresh`) while online"
+        fail = None if find_model_file() else model_failure(con)
+        reason = model_failure_reason(fail) if fail else "no vectors yet: run `embed` (or `refresh`) while online"
     else:
         try:
             emb = get_embedder(download=False)
         except ModelUnavailable as e:
-            reason = str(e)
-            add_note(con, reason)
-    bm = bm25_arm(con, terms, root, path, source)
+            fail = model_failure(con) if isinstance(e, ModelMissing) else None   # a corrupt model keeps its own reason
+            reason = model_failure_reason(fail) if fail else str(e)
+            add_note(con, str(e))
+    scope = scope_labels(con, root)
+    bm = bm25_arm(con, terms, scope, path, source)
     de = []
     if emb is not None:
         qv = vec_of(next(iter(emb.query_embed(query))))
-        de = dense_arm(con, qv, root, path, source)
+        de = dense_arm(con, qv, scope, path, source)
     rank = {}
     for arm, ids in (("bm25", bm), ("dense", de)):
         for i, pid in enumerate(ids, 1):
@@ -1323,7 +1502,8 @@ def search(con, db, query, mode="auto", limit=10, root=None, path=None, source=N
     started = lazy_refresh(con, db) if lazy else False
     cov = coverage(con)
     return {"query": query, "mode": "hybrid" if emb is not None else "keyword", "mode_reason": reason, "refresh_started": started,
-            "hits": hits, "coverage": {"roots": [r[0] for r in con.execute("select label from roots order by id")], "skipped": cov["skipped"]}}
+            "hits": hits, "coverage": {"roots": [r[0] for r in con.execute("select label from roots order by id") if scope is None or r[0] in scope],
+                                       "skipped": cov["skipped"]}}
 
 
 def rerank_hits(query, hits):
@@ -1342,9 +1522,10 @@ def files_search(con, words, limit=20, root=None):
         return []
     cond = " and ".join("instr(f.hay, ?) > 0" for _ in terms)
     score = " + ".join("(instr(lower(f.name), ?) > 0) * 3 + (instr(lower(f.title), ?) > 0) * 2" for _ in terms)
-    args = [x for t in terms for x in (t, t)] + terms + ([root] if root else []) + [limit]
+    scope = scope_labels(con, root)
+    args = [x for t in terms for x in (t, t)] + terms + (scope or []) + [limit]
     rows = con.execute(f"select r.label, f.rel, f.ref, f.name, f.title, f.mtime, f.size, f.label, f.cloud_only, f.status, ({score}) sc "
-                       f"from files f join roots r on r.id=f.root_id where {cond}" + (" and r.label=?" if root else "") +
+                       f"from files f join roots r on r.id=f.root_id where {cond}" + (" and r.label in (%s)" % ",".join("?" * len(scope)) if scope else "") +
                        " order by sc desc, f.mtime desc limit ?", args).fetchall()
     return [{"ref": r[2], "root": r[0], "path": r[1], "name": r[3], "title": r[4], "mtime": iso(r[5]), "size": r[6], "label": r[7],
              "cloud_only": bool(r[8]), "status": r[9]} for r in rows]
@@ -1361,9 +1542,9 @@ def find_file(con, ref_or_path):
     q = ("select f.id, f.ref, r.label, f.rel, r.path, f.title, f.dir from files f join roots r on r.id=f.root_id where ")
     row = con.execute(q + "f.ref=?", (base,)).fetchone()
     if row is None and os.path.isabs(base):
-        norm = os.path.normcase(os.path.abspath(base))
-        for label, rpath in con.execute("select label, path from roots"):
-            rp = os.path.normcase(os.path.abspath(rpath))
+        norm = norm_path(base)
+        for label, rpath in con.execute("select label, path from roots order by length(path) desc"):   # the most specific root first
+            rp = norm_path(rpath)
             if norm.startswith(rp + os.sep):
                 row = con.execute(q + "lower(f.ref)=?", ((label + "/" + norm[len(rp) + 1:].replace(os.sep, "/")).lower(),)).fetchone()
                 break
@@ -1579,6 +1760,13 @@ def out_json(obj):
     print(json.dumps(obj, ensure_ascii=False, indent=1))
 
 
+def table(rows, right=(), indent=""):
+    """Aligned text lines: every column is as wide as its longest cell plus two spaces, whatever the data (a long label
+    never runs into the next column). Columns listed in `right` are right-aligned; the last column is not padded."""
+    w = [max(len(str(c)) for c in col) for col in zip(*rows)]
+    return [(indent + "  ".join(str(c).rjust(w[i]) if i in right else str(c).ljust(w[i]) for i, c in enumerate(r))).rstrip() for r in rows]
+
+
 def main(argv=None):
     for s in (sys.stdout, sys.stderr):
         try:
@@ -1669,7 +1857,7 @@ def run(a, db):
         elif a.cmd == "roots":
             rows = [{"label": l, "path": p, "kind": k, "files": n} for l, p, k, n in con.execute(
                 "select r.label, r.path, r.kind, (select count(*) from files f where f.root_id=r.id) from roots r order by r.id")]
-            out_json({"roots": rows}) if a.json else [print(f"{r['label']:<16}{r['kind']:<18}{r['files']:>7}  {r['path']}") for r in rows]
+            out_json({"roots": rows}) if a.json else [print(ln) for ln in table([(r["label"], r["kind"], r["files"], r["path"]) for r in rows], right=(2,))]
         elif a.cmd == "index":
             label = add_root(con, a.folder)
             root = con.execute("select id, label, path from roots where label=?", (label,)).fetchone()
@@ -1680,11 +1868,11 @@ def run(a, db):
                 ok = start_detached_refresh(db, (["--root", a.root] if a.root else []) + (["--rebuild"] if a.rebuild else []))
                 out_json({"started": ok}) if a.json else print("refresh started in the background" if ok else "refresh not started (already running, or memcap not found)")
                 return 0
-            res = refresh(con, db, a.root, a.rebuild, a.embed, a.max_minutes)
+            res = refresh(con, db, a.root, a.rebuild, a.embed, a.max_minutes, log=lambda m: print(m, file=sys.stderr))   # notes to stderr, the result to stdout
             out_json(res) if a.json else print(json.dumps(res, ensure_ascii=False))
         elif a.cmd == "embed":
             deadline = time.monotonic() + a.max_minutes * 60 if a.max_minutes else None
-            res = embed_cmd(con, deadline, a.batch)
+            res = embed_cmd(con, deadline, a.batch, force=True)   # asked for by hand: try now, whatever was remembered
             out_json(res) if a.json else print(json.dumps(res))
         elif a.cmd == "search":
             res = search(con, db, a.query, a.mode, a.limit, a.root, a.path, a.source, a.rerank)
@@ -1721,12 +1909,14 @@ def run(a, db):
             else:
                 print(f"index: {db}\nroots {len(st['roots'])}  files {st['coverage']['catalogued']}  indexed {st['coverage']['content_indexed']}  "
                       f"paragraphs {st['paragraphs']}  vectors {st['vectors']}  mode {st['mode']}  last refresh {st['last_refresh'] or 'never'}")
+                for ln in table([(r["label"], f"{sum(r['files'].values())} files", f"{r['vectors']} vectors", r["path"]) for r in st["roots"]], right=(1, 2), indent="  "):
+                    print(ln)
                 for k, n in st["coverage"]["skipped"].items():
                     print(f"  not searched: {k} {n}")
                 for n in st["notes"]:
                     print(f"  note: {n}")
-                for p in st["problems"]:
-                    print(f"  {p['status']:<10}{p['ref']}  {p['error'] or ''}")
+                for ln in table([(p["status"], p["ref"], p["error"] or "") for p in st["problems"]], indent="  "):
+                    print(ln)
                 for old in st["migrated_from"]:
                     print(f"  0.2.0 index kept at {old}; delete it with: doc_index.py --db \"{old}\" --purge")
     finally:

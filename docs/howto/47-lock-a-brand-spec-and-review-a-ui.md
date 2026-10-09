@@ -8,7 +8,8 @@ questions now stop the work drifting to a generic look. The same guide covers re
 checklist. `<KIT>` is the kit folder (guide 01).
 
 ## Steps
-1. Ask Claude: "run the brand spec interview for the claims portal". It first reads what already exists (a style guide,
+1. Run `/workbench-core:brand-spec` for the Project Heron portal (Claude cannot start it; if you only ask for a brand spec, it
+   will suggest the command). It first reads what already exists (a style guide,
    design tokens, a deck template, the current screens) and asks only what those leave open.
 2. Answer one question at a time. Say "pick for me" and it offers two to four options with a recommended one. After every
    fifth question it summarises what it has and waits for your correction.

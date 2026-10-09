@@ -1,6 +1,6 @@
 ---
 name: status-report
-description: Write a weekly or monthly status report or project update from raw notes, in a fixed format with overall RAG, KPIs, milestones, risks, asks and next steps. Use whenever asked for a status report, weekly update or steering-group summary.
+description: Write a weekly or monthly status report from raw notes in a fixed format with overall RAG, KPIs, milestones, risks, asks and next steps. Use whenever asked for a status report, weekly update or steering-group summary.
 license: MIT
 ---
 

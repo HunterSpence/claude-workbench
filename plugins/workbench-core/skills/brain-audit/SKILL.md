@@ -1,7 +1,7 @@
 ---
 name: brain-audit
-description: Read-only health check of the Claude Code configuration and knowledge base - archives in discovery paths, backup files beside live config, dead @imports, routes to missing skills, missing hook targets, credential-looking settings, path-scoped rules, managed settings, an oversized always-loaded surface. Use for "audit the setup", "brain-audit", or after a big config change. Ranked fix list; applies nothing.
-when_to_use: ALWAYS load when instructions, hooks or the KB seem stale, ignored or contradictory.
+description: "Read-only health check of the Claude Code setup and knowledge base: stale archives, backup files, dead @imports, missing skill or hook targets, credential-looking settings, oversized always-loaded files. Use for \"audit the setup\", \"brain-audit\" or after a config change."
+when_to_use: "ALWAYS load when instructions, hooks or the KB seem stale, ignored or contradictory."
 ---
 
 # brain-audit

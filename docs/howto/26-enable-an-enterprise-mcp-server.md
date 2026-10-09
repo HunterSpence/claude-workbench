@@ -21,7 +21,7 @@ catalog entry ships off. `<KIT>` is the kit folder (guide 01); the catalog and e
    py -3 <KIT>/tools/mcp-healer/mcp_healer.py apply --golden <your-golden.json> --dry-run
    py -3 <KIT>/tools/mcp-healer/mcp_healer.py apply --golden <your-golden.json>
    ```
-   Or ask Claude to run `/workbench-core:mcp-heal`. Restart Claude Code; MCP changes load on the next start.
+   Or run `/workbench-core:mcp-heal` yourself (Claude can only suggest it). Restart Claude Code; MCP changes load on the next start.
 5. Probe it for real, then sign in to hosted servers from inside Claude Code with `/mcp`:
    ```
    py -3 <KIT>/tools/mcp-healer/mcp_healer.py check

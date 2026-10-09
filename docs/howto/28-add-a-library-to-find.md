@@ -20,7 +20,10 @@ results, and you want it included. Index a scoped folder, not all of OneDrive. `
    py -3 <KIT>/plugins/workbench-core/skills/find/scripts/doc_index.py refresh --root docs
    ```
    `index "<folder>"` adds the root and indexes it in one step. Add `--max-minutes N` to let a big first run stop and resume.
-4. Check it: `roots` lists what is registered and `status --json` shows the file counts per root.
+   A folder inside another root can be a root too: it then belongs to the inner root alone, so each file is found once. Register them in
+   either order and refresh; searching the outer root with `--root` covers the inner one too, and `remove-root` on the inner one
+   plus a refresh hands its files back to the outer root.
+4. Check it: `roots` lists what is registered, and `status` (or `status --json`) shows the file counts per root.
 5. To remove a library: `remove-root docs` (add `--purge` to delete its content from the index too).
 
 ## Verify

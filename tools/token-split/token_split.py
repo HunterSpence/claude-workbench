@@ -2,6 +2,7 @@
 """token_split.py: where the money in your Claude Code sessions goes, from your own local transcripts.
 
   py -3 <KIT>/tools/token-split/token_split.py [--days N] [--projects DIR] [--prices FILE] [--json] [--self-test]
+  py -3 <KIT>/tools/token-split/token_split.py startup [--json] [--timeout SECONDS]
 
 Reads the usage fields of each assistant message and the SIZE (character count) of its text and tool-call blocks from
 <CH>/projects/**/*.jsonl (<CH> is CLAUDE_CONFIG_DIR or ~/.claude). It never prints, stores or sends any text, tool
@@ -11,10 +12,18 @@ character share; thinking tokens are taken from usage.output_tokens_details.thin
 Prices come from settings/model-evidence.json (the `prices` key: the one home, also rendered in docs/models.md).
 A model the table does not list is counted and named, never priced at a neighbour's rate. A one-hour cache write is
 priced at twice the input price (the vendor's multiplier, evidence row E32).
+
+`startup` measures the opening context instead of the spend: it runs `claude -p --output-format json` twice on one fixed
+trivial prompt, once with your current settings and once with `--safe-mode` (every customisation off), and prints the
+prompt tokens of each and the difference. It makes two real (tiny) model calls with your own sign-in.
 """
 import argparse
 import json
 import os
+import re
+import shutil
+import signal
+import subprocess
 import sys
 import tempfile
 import time
@@ -164,7 +173,139 @@ def self_test():
     print("token_split self-test ok")
 
 
+# ---- startup: the context a session opens with, with and without your customisations -------------------------------
+STARTUP_PROMPT = "Reply with the single word OK."          # fixed and trivial: the same bytes on both runs, no tool needed
+SAFE_FLAG = "--safe-mode"
+STARTUP_USAGE = (("input", "input_tokens"), ("cache_write", "cache_creation_input_tokens"), ("cache_read", "cache_read_input_tokens"))
+
+
+def lists_flag(help_text, flag):
+    return re.search(r"(?m)^\s*(?:-\w, )?" + re.escape(flag) + r"(?![\w-])", help_text) is not None
+
+
+def _failed(why):
+    print(f"token_split startup: {why}", file=sys.stderr)
+    raise SystemExit(2)
+
+
+def _kill_tree(p):
+    """Stop p and everything it started. npm installs Claude Code behind a .cmd shim that runs claude as a child holding the
+    pipes open: killing only the shim leaves the call waiting for the child."""
+    try:
+        if os.name == "nt":
+            subprocess.run([os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "taskkill.exe"), "/T", "/F", "/PID", str(p.pid)],
+                           capture_output=True, timeout=30)
+        else:
+            os.killpg(p.pid, signal.SIGKILL)
+    except (OSError, subprocess.TimeoutExpired):
+        p.kill()
+
+
+def run_tree(argv, timeout, stdin_text=None):
+    """(return code, stdout, stderr). Past the timeout the whole process tree is killed and reaped, then TimeoutExpired is raised."""
+    kw = {} if os.name == "nt" else {"start_new_session": True}
+    p = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
+                         errors="replace", **kw)
+    try:
+        out, err = p.communicate(stdin_text, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_tree(p)
+        try:
+            p.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+        raise
+    return p.returncode, out, err
+
+
+def startup_call(claude, extra, timeout):
+    """One headless turn: {input, cache_write, cache_read, context, turns}. Reads only the usage numbers, never the reply."""
+    argv = [claude, "-p", "--output-format", "json", "--no-session-persistence", "--max-turns", "1", *extra]
+    label = " ".join(["claude -p", *extra])
+    try:
+        code, stdout, stderr = run_tree(argv, timeout, STARTUP_PROMPT)
+    except subprocess.TimeoutExpired:
+        _failed(f"`{label}` timed out after {timeout} s and was stopped")
+    except OSError as e:
+        _failed(f"could not start claude ({type(e).__name__})")
+    try:
+        d = json.loads(stdout)
+        if isinstance(d, list):
+            d = next(x for x in reversed(d) if isinstance(x, dict) and x.get("type") == "result")
+        u = d["usage"]
+        out = {k: _int(u.get(src)) for k, src in STARTUP_USAGE}
+        limit = d.get("subtype") == "error_max_turns"          # --max-turns 1 and the model called a tool: the first turn's usage is still real
+        bad = (code or d.get("is_error")) and not limit
+        if limit:
+            out["turn_limit"] = True
+    except (ValueError, KeyError, TypeError, StopIteration, AttributeError):
+        out, bad = None, True
+    if bad or out is None:
+        first = next((ln.strip() for ln in stderr.splitlines() if ln.strip()), "")[:200]
+        _failed(f"`{label}` gave no usable usage numbers (exit {code})" + (f": {first}" if first else ""))
+    out["context"] = sum(out.values())
+    out["turns"] = _int(d.get("num_turns")) or 1
+    return out
+
+
+def startup(timeout=180, as_json=False):
+    claude = shutil.which("claude")
+    if not claude:
+        _failed("the claude command was not found on PATH")
+    help_wait = min(60, timeout)
+    try:
+        _, out, err = run_tree([claude, "--help"], help_wait)
+    except subprocess.TimeoutExpired:
+        _failed(f"`claude --help` timed out after {help_wait} s and was stopped, so it is not known whether {SAFE_FLAG} exists")
+    except OSError as e:
+        _failed(f"could not start claude ({type(e).__name__})")
+    help_text = out + err
+    cur = startup_call(claude, [], timeout)
+    if not lists_flag(help_text, SAFE_FLAG):
+        print(_startup_table(cur, None))
+        print(f"no baseline: this Claude Code does not list {SAFE_FLAG} in `claude --help`; update Claude Code to compare.", file=sys.stderr)
+        return 2
+    safe = startup_call(claude, [SAFE_FLAG], timeout)
+    diff = cur["context"] - safe["context"]
+    if as_json:
+        res = {"current": cur, "safe_mode": safe, "difference": diff}
+        if diff < 0:
+            res["note"] = NEGATIVE
+        print(json.dumps(res, indent=1))
+    else:
+        print(_startup_table(cur, safe))
+    return 0
+
+
+NEGATIVE = (f"the difference is negative: the current-settings run was smaller than the {SAFE_FLAG} run. That should not happen; "
+            "run it again, and if it repeats do not rely on the number.")
+
+
+def _startup_table(cur, safe):
+    rows = [("current settings", cur)] + ([(SAFE_FLAG, safe)] if safe else [])
+    L = ["startup context, one headless turn on a fixed prompt (tokens)",
+         f"  {'':18s}{'input':>9s}{'cache write':>13s}{'cache read':>12s}{'context':>10s}"]
+    L += [f"  {n:18s}{r['input']:9,d}{r['cache_write']:13,d}{r['cache_read']:12,d}{r['context']:10,d}" for n, r in rows]
+    if safe:
+        L.append(f"  {'difference':18s}{'':34s}{cur['context'] - safe['context']:10,d}   <- what your customisations add before you type")
+    L.append("  context = input + cache write + cache read. A prefix an earlier run cached is billed as a cache read, so compare context.")
+    if safe and cur["context"] < safe["context"]:
+        L.append("  note: " + NEGATIVE)
+    if any(r.get("turn_limit") for _, r in rows):
+        L.append("  note: a run stopped at the one-turn limit because the model called a tool; its numbers cover that call, not only the opening context. Run it again.")
+    if any(r["turns"] > 1 for _, r in rows):
+        L.append("  note: a run used more than one turn (the model called a tool), so its numbers include later turns; run it again.")
+    return "\n".join(L)
+
+
 def main(argv=None):
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv[:1] == ["startup"]:
+        sp = argparse.ArgumentParser(prog="token_split.py startup", description="Opening context with your settings vs --safe-mode (two real, tiny model calls).")
+        sp.add_argument("--json", action="store_true")
+        sp.add_argument("--timeout", type=int, default=180, help="seconds allowed for each call")
+        b = sp.parse_args(argv[1:])
+        return startup(b.timeout, b.json)
     ap = argparse.ArgumentParser(description="Split Claude Code spend by token class from local transcripts (no content read).")
     ap.add_argument("--days", type=int, default=14)
     ap.add_argument("--projects", default=str(Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects"))

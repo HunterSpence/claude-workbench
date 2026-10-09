@@ -10,7 +10,8 @@
   each caller, and patching only the reported path leaves the siblings broken.
 - **Markdown and notes:** use the KB search (`rules/memory-protocol.md`), never a code graph.
 - **Vendor-owned files:** a code-graph installer may write its own hooks or its own
-  `~/.claude/rules/<tool>.md`. Never run a code-graph tool's `install` or `setup` command without
-  reading what it changes. Both settings profiles exclude `rules/tokensave.md` through
+  `~/.claude/rules/<tool>.md`. Never run a code-graph tool's `install`, `setup`, `upgrade` or `doctor`
+  without reading what it changes; the guard blocks tokensave's `install`, `reinstall`, `upgrade`,
+  `doctor`, `uninstall` and `claude-install`/`claude-uninstall` (a `doctor` run silently adds hooks). Both settings profiles exclude `rules/tokensave.md` through
   `claudeMdExcludes`, so this file stays the one owner of code-graph routing.
 - A graph gap you hit repeatedly: suggest an upstream issue, with sensitive code stripped.

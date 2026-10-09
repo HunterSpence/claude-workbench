@@ -32,16 +32,15 @@ missing capability: say so and let the user fix it; never silently route around 
 - **How-to guides:** search them with `find` (its root `howto`); read on demand, never always-loaded.
 
 ## Skills (use them when the task fits, unasked; invoke as `/workbench-core:<name>`)
-`cascade` (fix, build, refactor, migrate) · `ratchet` (fix and re-audit until clean) · `handoff` ·
-`onboard` (fill in USER.md; suggest it while USER.md holds placeholders) · `spawn` · `investigate` ·
-`brain-audit` · `deep-research` · `github` · `repo-review` (read-only review of a foreign repo) ·
-`repo-fix` · `skill-scan` · `find` · `office-*` · `ui-build` · `draft-reply` · `batch-review` ·
-`linux-service-triage` · `ctx-agent-history-search` (what earlier sessions decided) · `mcp-heal` ·
-`plugin-factory` · `plugin-review` · `web-packager` · `mcp-builder` · `api-bridge` (REST to MCP) · `app-navigator` ·
-`/workbench-kb:save` · `humanizer` (prose a person will read) · `grilling` (stress-test a plan) · `playwright-cli`.
-Not installed? Say so and do the task without it.
-- User-invoked only (suggest, never start): `setup`, `vdi-drive`, `pc-checkup`, `cleanup`,
-  `/workbench-capture:capture` and `/workbench-capture:ingest`.
+`cascade` (fix, build, refactor, migrate) · `ratchet` (fix and re-audit until clean) · `handoff` · `spawn` ·
+`investigate` · `brain-audit` · `deep-research` · `github` · `repo-review` (read-only review of a foreign repo) ·
+`repo-fix` · `skill-scan` · `find` · `office-*` · `ui-build` · `draft-reply` · `linux-service-triage` ·
+`ctx-agent-history-search` (what earlier sessions decided) · `/workbench-kb:save` · `humanizer` (prose a person will
+read) · `grilling` (stress-test a plan) · `playwright-cli` · `kit-update` ("check the new stuff and go"). Not installed? Say so and do the task without it.
+- User-invoked only (the model cannot start them: suggest, never start): `setup`, `vdi-drive`, `pc-checkup`, `cleanup`,
+  `onboard` (suggest it while USER.md holds placeholders), `/workbench-capture:capture`, `/workbench-capture:ingest`, and
+  the authoring and admin skills `batch-review`, `mcp-heal`, `plugin-factory`, `plugin-review`, `web-packager`,
+  `mcp-builder`, `api-bridge` (REST to MCP), `app-navigator` and `brand-spec`.
 - **Before installing any plugin or skill:** check your organisation allows it, and run
   `skill-scan` on its source first.
 

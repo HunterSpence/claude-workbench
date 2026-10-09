@@ -13,11 +13,11 @@ file pins its own model and effort; which persona fits which task is in `docs/mo
 | Group | Skills |
 |---|---|
 | Building and fixing | `cascade`, `ratchet`, `investigate`, `repo-fix`, `repo-review`, `spawn`, `handoff`, `ponytail` |
-| Research and knowledge | `deep-research`, `find`, `ctx-agent-history-search`, `batch-review` |
+| Research and knowledge | `deep-research`, `find`, `ctx-agent-history-search` |
 | Office and output | `office-docx`, `office-pptx`, `office-xlsx`, `office-render`, `ui-build`, `draft-reply` |
-| Plugins and MCP | `plugin-factory`, `plugin-review`, `web-packager`, `mcp-builder`, `api-bridge`, `app-navigator`, `mcp-heal`, `skill-scan` |
-| Setup and health | `onboard`, `brain-audit`, `github`, `linux-service-triage` |
-| User-invoked only | `setup`, `cleanup`, `pc-checkup`, `vdi-drive` |
+| Plugins and MCP | `skill-scan` |
+| Setup and health | `brain-audit`, `github`, `linux-service-triage` |
+| User-invoked only (Claude suggests them, never starts them) | `setup`, `cleanup`, `pc-checkup`, `vdi-drive`, `onboard`, and the authoring and admin skills `plugin-factory`, `plugin-review`, `web-packager`, `mcp-builder`, `api-bridge`, `app-navigator`, `mcp-heal`, `batch-review`, `brand-spec` |
 
 ## Hooks (`hooks/hooks.json`, scripts in `scripts/`)
 - PreToolUse: the guard engine (`scripts/guards/`, generic and corporate rule packs), a read-flood guard and the

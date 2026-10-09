@@ -1,6 +1,7 @@
 ---
 name: mcp-builder
-description: "Build and test an MCP server so Claude can reach a system: Python or TypeScript scaffold, tool-design lint, contract and injection tests, deploy checklist. Use for 'build an MCP server' or 'a connector for X'. NOT for wrapping an existing REST API (api-bridge)."
+description: "Build and test an MCP server from scratch. To wrap an existing REST API use api-bridge."
+disable-model-invocation: true
 ---
 
 # mcp-builder

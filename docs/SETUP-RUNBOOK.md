@@ -83,7 +83,8 @@ read the plan first.) Drop `--with` or `--git-hosts` when the user gave none. Th
 | `--profile corporate\|permissive` | settings profile, default `corporate` |
 | `--upstream-plugins`, `--upstream-plugins-optional` | register upstream plugin marketplaces (the optional set is never implied) |
 | `--kb-root PATH`, `--data-root PATH` | where the knowledge base and the data folder live |
-| `--git-hosts a,b` | git hosts company code may be pushed to; until set, every push is refused |
+| `--git-hosts a,b` | git hosts company code may be pushed to; until set, a push to another host asks first (refused at the strict guard level) |
+| `--guard standard\|strict` | guard level, default `standard` (asks instead of refusing for unlisted push or upload hosts and `--no-verify`; plain browser navigation runs); `strict` refuses; kept across upgrades |
 | `--with LIST` | opt-ins, below |
 | `--no-nightly`, `--no-update` | no nightly refresh task (permissive profile); skip the update phase |
 | `--force`, `--no-cli` | replace settings keys the user set; print the `claude` plugin commands instead of running them |
@@ -102,8 +103,9 @@ and asks around the browser CLI): it is on in both, and only `"enabled": false` 
 own edit, turns it off; never edit that file yourself. **The user decides the profile, after reading the capability report and
 guide 08. Never pass `--profile permissive` on your own.**
 
-**Verify.** Exit 0. The output ends with `Next:` lines. `<KIT>` and `<WB>/config.json` exist. After a restart of Claude Code,
-`/status`, `/plugin`, `/agents`, `/skills` and `/hooks` list the kit, and report rows `plugin-core`, `plugin-kb` and
+**Verify.** Exit 0. The output ends with `Next:` lines. `<KIT>` and `<WB>/config.json` exist. After a restart of Claude Code (close every
+Claude Code window and start a new one from a fresh terminal: the `Path` change and the plugins' options, the hook interpreter
+among them, are read only when it starts), `/status`, `/plugin`, `/agents`, `/skills` and `/hooks` list the kit, and report rows `plugin-core`, `plugin-kb` and
 `plugin-biz` read READY (D14 and the doctor `setup` row repeat the check later).
 
 **If blocked.** Exit 3, or a line starting `STOP`, means managed settings or policy refused a step. The installer never edits
@@ -169,6 +171,11 @@ and `capture-runtime`.
 | `playwright-cli` | Playwright CLI (2.9) | npm, needs Node.js |
 | `tokensave` | optional code graph | release zip, only with `--with tokensave` |
 | `ctx` | local agent-history search (2.10) | release asset, only with `--with ctx` |
+
+`tokensave` is registered in the machine's MCP configuration **parked**: the healer reports it as PARKED, not DOWN, and the
+doctor does not warn, until a repository is initialised (`tokensave init`, `mcp/README.md`). Never run `tokensave install`,
+`reinstall`, `upgrade`, `doctor`, `uninstall`, `claude-install` or `claude-uninstall` (`doctor` adds hooks to the user's
+settings on its own; the others rewrite or remove its settings, permissions, hooks and rules); the guard blocks all seven.
 
 Every package row has a tested `pin` in `bootstrap/packages.json`. Setup installs through `winget configure` when it is allowed
 and one package at a time otherwise (`winget install --id <id> -e --source winget --scope user ...`).
@@ -340,7 +347,8 @@ screen unasked. Never run `npx playwright install` or download a browser.
 **Command.** Opt-in: `--with ctx`. Setup downloads the pinned release asset (about 200 MB) over HTTPS, checks its SHA-256 against
 `bootstrap/packages.json`, and puts it in `<WB>/bin/`. Before its first run it sets the user variables `CTX_ANALYTICS_ENABLED=false`,
 `CTX_DAEMON_ENABLED=false` and `CTX_UPGRADE_AUTO=off`, then runs `ctx index mode manual`; if that fails the binary is removed
-unused. The nightly task, when it exists, adds `ctx import --all`. By hand, after the user agreed:
+unused. Setup also writes the analytics opt-out and limits the sources to Claude Code in ctx's own configuration file, so a coding
+agent that is not installed here does not fail the nightly import; a real ctx failure still does. The nightly task, when it exists, adds `ctx import --all`. By hand, after the user agreed:
 ```
 ctx --version
 ctx status
@@ -370,12 +378,20 @@ run ok"; after a failed turn the next prompt shows one line naming a bug card.
 
 ### 2.12 Guards
 **Command.** The guards ship with the `workbench-core` plugin: a command guard with a generic rule pack and the corporate pack
-(on by default in both profiles), a credential check on written files, session notices and a statusline. Restart Claude Code once after the install so the plugins load, run any tool, then prove they run:
+(on by default in both profiles), a credential check on written files, session notices and a statusline. Restart every Claude Code window after the install (close them all and start a new one from a fresh terminal) so the plugins
+load with their options, run any tool, then prove they run:
 in a scratch git repository ask Claude to run `git push --force origin main`. It must be blocked with a message. Hooks fail open
 silently when misconfigured, so this is the only proof. Pushes are refused to any host not in `--git-hosts` (the allowlist is
 `<WB>/corporate-allowlist.json`); that is expected until the user names theirs (guide 20).
 **Verify.** The block message appears; the doctor row `guard heartbeat` is OK (WARN until a session ran a tool, FAIL after three
-sessions without a guard firing); D14; report rows `hooks-guards` and `plugin-core`.
+sessions without a guard firing); D14; report rows `hooks-guards` and `plugin-core`. The installer's own self-test does not count
+as a guard firing: it is recorded apart (`self_test_at` in `<WB>/state/guard-heartbeat.json`) and leaves `last_fired` alone.
+**The issues log.** The failure hook also appends every failed tool call (not one the user interrupted) to
+`<WB>/state/issues.jsonl`: UTC time, tool, session id and the first ten error lines, with credential-shaped values replaced by
+`[REDACTED]`. At 5 MB the file rotates (one `issues.jsonl.1` is kept) and a write problem never stops the hook. List it, or hand
+it over to be fixed, with `PY <KIT>/plugins/workbench-core/scripts/issues.py show [--since YYYY-MM-DD]`: a numbered markdown table
+of number, time, tool and first error line. It stays empty while the plugins' hooks do not run (troubleshooting: `Plugin option
+"python" isn't set`).
 **If blocked.** A block of your own command is a denial: show it, never rephrase the command to slip past it. Hooks locked by
 managed settings: the kit then runs without them, on permission prompts only. **Ask.** Row `hooks-guards` (admin-asks "Hooks
 locked"); rows `plugin-*` for a closed marketplace.
@@ -427,6 +443,38 @@ report; a row only added or removed means the kit changed between the two runs.
 **Verify.** The diff file exists and its counts add up to the number of rows in `capability-post.json`.
 **If blocked.** Nothing to deny. **Ask.** The Roadmap in `capability-post.html` ranks the asks by what each unlocks.
 
+### 2.16 Updating the kit itself
+**Command.** The user says "check the new stuff and go", "update the kit" or "check for kit updates"; the `kit-update` skill runs
+```
+PY <KIT>/bootstrap/kit_update.py                     # update (or "already current" + the verify); --check changes nothing
+PY <KIT>/bootstrap/kit_update.py verify              # the pending post-update verify (also runnable alone)
+PY <KIT>/bootstrap/kit_update.py record guard-live PASS|WARN|FAIL "<text>"     # the live guard test row, see below
+```
+The update asks GitHub for the latest release (anonymous HTTPS through setup's own `curl` helper, so the Windows revocation retry
+applies), requires a published SHA-256 for the zip (the release's digest and its checksum table; two values that differ, or none, stop
+it before any download), compares the download with it, unpacks into a fresh folder under `<WB>/state/kit-update/`, refuses an
+archive entry outside that folder or a package whose `VERSION` is not the release's, runs that release's `install.py --apply
+--profile <the recorded profile> --with <the remembered opt-ins>`, then `setup.py run --detach` with the same opt-ins (read from
+`<WB>/state/setup-state.json`, nothing added) and waits for it with `status --json --wait 60`. The tool that runs you has a timeout
+(2 minutes by default), so the update is a chain of short stages kept in `<WB>/state/kit-update.json`: give every call an explicit
+10-minute timeout, and whenever the output says "Run the same command again" (exit 6) run the SAME command again. A call waits at most
+`--wait` seconds (90 by default); setup is waited for first, then `doctor --deep` runs as a background job of its own (the next call
+collects it), then the marker `<WB>/state/post-update-verify.json`, one table and the line "Restart every Claude Code window, then type:
+go". Exit 3 is a proxy or policy block (show it, ask IT), 4 a failed step, 5 a reboot. Where the releases live: the repository the kit
+remembers (`config.json` `kit_repo`), else env `WB_KIT_REPO`, else `plugins/workbench-core/skills/kit-update/release-source.json` (empty on
+purpose); the first time the repository the user names in their message (`--repo OWNER/REPO`), and a `--repo` that differs from the remembered one is refused unless `--new-repo` is given (never add it
+yourself). The guard asks the user before any `kit_update.py` call except `verify`, `record` and `--check`.
+Setup (not you) also applies the user-only parts: the plugin python option, `<WB>\bin` on the Path, and the skill tiers
+(`SETUP skills [--dry-run] [--force]`: over 80% of the listing limit, the user's own skills go name-only, largest first; skills the kit
+routes to stay on; a value the user set stays unless `--force`; `settings.json` is backed up first; plugin skills are never changed).
+**Verify.** After the restart the session start line "a post-update verify is pending" tells you to run `verify`: PASS / WARN / FAIL /
+NEEDS-IT per check, the IT asks once, and the box FOR THE KIT AUTHOR (kit defects only, scrubbed), saved as
+`<WB>/state/field-report.md`; the marker is cleared. Then do the live guard test no script can do: in a scratch repository under the
+temp folder (remote `https://example.invalid/scratch.git`) try `git push --force origin main`; the workbench guard must block it; run
+`record guard-live PASS|FAIL` and delete the scratch repository.
+**If blocked.** A hash mismatch, a denial or a declined UAC prompt is a hard stop. **Ask.** admin-asks: the release hosts
+(`api.github.com`, `github.com`, `release-assets.githubusercontent.com`).
+
 ## 3. What you hand back: the results table
 Finish with a table, one row per component of section 2 (and one per opt-in the user chose):
 
@@ -455,7 +503,7 @@ Then write four short lists:
 - **We cannot, yet:** every NEEDS-IT and BLOCKED-BY-POLICY row, with the reason from its `note` and the ask name.
 - **Pending asks:** every `ask_it` entry of `SETUP status --json`, every D-step `ask_it`, with the ask name from section 5. The
   user sends them; offer to open the text, never send it.
-- **Waiting on the user:** deferred update commands (including `claude update`), a restart of Claude Code so the plugins load,
+- **Waiting on the user:** deferred update commands (including `claude update`), a restart of every Claude Code window so the plugins and the `Path` change load (a fresh terminal),
   onboarding, the guard test, a reboot, and any opt-in they did not choose.
 
 ## 5. Ask index: which ask to show

@@ -1,6 +1,6 @@
 ---
 name: ponytail
-description: "Lazy senior dev mode: simplest code that works, YAGNI, stdlib and native first, no needless abstractions; also reviews code for over-engineering and lists deferred shortcuts. Use when writing, fixing, refactoring or reviewing code, or for 'is this over-engineered', 'what can we delete', 'ponytail debt'. Not for documents or other prose."
+description: "Lazy senior dev mode: simplest code that works, YAGNI, stdlib and native first; also reviews code for over-engineering and lists deferred shortcuts. Use when writing, fixing, refactoring or reviewing code, or for \"is this over-engineered\", \"what can we delete\", \"ponytail debt\"."
 license: MIT (adapted from DietrichGebert/ponytail; see LICENSE.txt)
 ---
 

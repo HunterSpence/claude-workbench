@@ -6,8 +6,15 @@ tool call for that skill (`docs/howto/51-check-that-skills-fire-and-rules-hold.m
 
 ```
 py -3 <KIT>/tools/skill-probe/skill_probe.py --spec probe.json [--transcripts DIR] [--json]
+py -3 <KIT>/tools/skill-probe/skill_probe.py --kit [--transcripts DIR] [--json]
 py -3 <KIT>/tools/skill-probe/skill_probe.py --self-test
 ```
+
+`--kit` is the shortcut for the kit's own cases, `probe.kit.json` in this folder: 5 should and 5 should-not patterns for each
+kit skill that carries a `when_to_use` line, plus one example prompt per pattern (the kit's tests check each pattern against its
+example; the tool ignores the examples). Use Claude Code normally for a while, then run it: a skill under 80 percent on its
+should side, or over 20 percent on its should-not side, needs its description reworded. For a skill that ships in a plugin,
+`claude plugin eval` is the vendor's own check (it runs each prompt with and without the plugin; `docs/howto/51-check-that-skills-fire-and-rules-hold.md`).
 
 `probe.json`:
 

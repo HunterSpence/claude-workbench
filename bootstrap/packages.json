@@ -81,5 +81,9 @@
      "sha256": "7f051028fbe24d296c9c5146182d8c4fb66b1805acf66bde6ac56724971df7fe",
      "ask_it": "Please allow downloading the pinned ctx release (one executable of about 200 MB) from the vendor's GitHub releases (SHA-256 checked); it builds a local index of my own coding-agent history on this laptop, and its analytics, background service and automatic upgrades are switched off before first use.",
      "policy_keys": []}
+  ],
+  "endpoints": [
+    {"id": "embedding-model", "host": "huggingface.co", "feature": "find-hybrid",
+     "why": "the one-time download of the local embedding model that meaning-based document search needs; the capability report probes it like a package host, so a blocked host reads NEEDS-IT"}
   ]
 }

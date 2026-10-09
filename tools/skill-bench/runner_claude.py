@@ -11,6 +11,7 @@ the child environment unless keep_api_key is set. SKILL_BENCH_CLAUDE overrides t
 import json
 import os
 import shutil
+import signal
 import subprocess
 import tempfile
 from pathlib import Path
@@ -19,6 +20,35 @@ USAGE_KEYS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "c
 LIMIT_WORDS = ("usage limit", "rate limit", "limit reached", "rate_limit", "quota", "too many requests", "overloaded")
 NESTED = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")
 API_KEYS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+
+
+def _kill_tree(p):
+    """Stop p and everything it started. npm installs Claude Code behind a .cmd shim that runs claude as a child holding the
+    pipes open: killing only the shim leaves the call waiting for the child."""
+    try:
+        if os.name == "nt":
+            subprocess.run([os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "taskkill.exe"), "/T", "/F", "/PID", str(p.pid)],
+                           capture_output=True, timeout=30)
+        else:
+            os.killpg(p.pid, signal.SIGKILL)
+    except (OSError, subprocess.TimeoutExpired):
+        p.kill()
+
+
+def run_tree(argv, input_text, timeout, cwd, env):
+    """(stdout, stderr). Past the timeout the whole process tree is killed and reaped, then TimeoutExpired is raised."""
+    kw = {} if os.name == "nt" else {"start_new_session": True}
+    p = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
+                         errors="replace", cwd=cwd, env=env, **kw)
+    try:
+        return p.communicate(input_text, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_tree(p)
+        try:
+            p.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+        raise
 
 
 class UsageLimit(Exception):
@@ -82,9 +112,7 @@ class ClaudeRunner:
     def call(self, model, system, prompt, **_):
         env = child_env(self.cfg, self.keep_api_key)
         try:
-            p = subprocess.run(command(model, system), input=prompt, capture_output=True, text=True, encoding="utf-8",
-                               errors="replace", timeout=self.timeout, cwd=self.cwd, env=env)
-            out, err = p.stdout, p.stderr
+            out, err = run_tree(command(model, system), prompt, self.timeout, self.cwd, env)
         except subprocess.TimeoutExpired:
             return {"is_error": True, "error": "timeout"}
         try:

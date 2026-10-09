@@ -12,7 +12,7 @@ background: `docs/plugins-playbook.md`.
    `cc-plugin-`). The kind: `content` (skills only), `guard` (adds a shell hook) or `integration` (adds an MCP server).
    The surface: `cli` (Claude Code only) or `all` (must also load on claude.ai). For an integration, `remote` or `stdio`;
    claude.ai connects only to remote servers, so `all` needs `--mcp remote`.
-2. Scaffold into a marketplace repository (a new folder is fine), or ask Claude: "make a plugin called team-notes with one skill".
+2. Scaffold into a marketplace repository (a new folder is fine), or run `/workbench-core:plugin-factory` and describe it: "a plugin called team-notes with one skill". Claude can only suggest that command.
    ```
    py -3 <KIT>/plugins/workbench-core/skills/plugin-factory/scripts/scaffold.py team-notes --kind content --surfaces cli --out <repo>
    ```

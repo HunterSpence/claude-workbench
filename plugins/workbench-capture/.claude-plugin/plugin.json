@@ -1,7 +1,7 @@
 {
   "name": "workbench-capture",
   "displayName": "Workbench capture",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Opt-in, read-only capture of work pages and shared files into the local knowledge layer: a dedicated signed-in Edge profile or the OneDrive sync folder, human pacing, explicit scope lists, and a stop on any sign-in, consent or policy page. Kept in its own plugin so IT can allow or deny it separately.",
   "author": {
     "name": "The claude-workbench contributors"

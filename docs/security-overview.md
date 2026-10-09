@@ -148,7 +148,10 @@ export OpenTelemetry data to a collector you run; neither profile turns it on. I
   permission rules, effort caps. `/status` shows the managed source.
 - The kit's guards (generic and corporate rule packs) deny or ask before pushes to unapproved hosts, publishing,
   production builds (`prod-build`), production database writes (`protected-db-write`), changes to security tooling
-  (`security-tooling-change`) and disabling TLS checks. They are a backstop, not a boundary.
+  (`security-tooling-change`) and disabling TLS checks. They are a backstop, not a boundary. How firm they are is one value,
+  `guard_level` in `corporate-allowlist.json`: `standard` (the default) asks instead of refusing for a push or upload to an unapproved
+  host and for skipping git hooks, and lets plain browser navigation through; `strict` refuses them. Every other refusal is the same at
+  both levels (`settings/SETTINGS.md`), and each decision is logged with its rule id and level.
 - When several hooks answer the same tool call, the vendor's hooks reference gives the order `deny`, `defer`, `ask`, `allow`:
   another hook's allow cannot override a guard's deny or ask.
 - Each Claude Code seat's allowance depends on its seat tier (the vendor sells a standard tier and a higher one), and the controls

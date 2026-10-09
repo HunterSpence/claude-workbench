@@ -1,6 +1,7 @@
 ---
 name: office-docx
-description: Build or rebuild a Word document (.docx) with python-docx from an outline, from Markdown, or on a corporate template - headings, nested lists, numbered lists that restart, tables with repeating headers, images, captions, headers, footers, page numbers - read a .docx back as Markdown, then render every page and fix what looks wrong. Use for "write a memo", "make this a Word doc", "use our document template", "turn these notes into a report", "convert this docx to markdown".
+description: "Build or rebuild a Word document (.docx) with python-docx from an outline, Markdown or a corporate template, read a .docx back as Markdown, then render every page and fix what looks wrong. Use for \"write a memo\", \"make this a Word doc\", \"use our template\", \"turn these notes into a report\"."
+when_to_use: "ALWAYS load before creating or editing a Word document, even a short memo."
 ---
 
 # office-docx

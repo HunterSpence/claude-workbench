@@ -1,7 +1,7 @@
 ---
 name: diagram
-description: Turn an English description or Mermaid text into a diagram - the .mmd source, an editable .excalidraw, an SVG and a PNG - rendered offline in a local browser. Use for flowcharts, sequence, state and architecture sketches for docs, decks and pull requests.
-when_to_use: ALWAYS load when a diagram, flowchart or architecture sketch is requested.
+description: "Turn an English description or Mermaid text into a diagram: .mmd source, editable .excalidraw, SVG and PNG, rendered offline in a local browser. Use for flowcharts, sequence, state and architecture sketches for docs, decks and pull requests."
+when_to_use: "ALWAYS load when a diagram, flowchart or architecture sketch is requested."
 ---
 
 # diagram

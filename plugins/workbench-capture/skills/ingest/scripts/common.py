@@ -198,6 +198,18 @@ def inline(s):
     return re.sub(r"\s+", " ", clean_text(str(s or ""))).strip()
 
 
+# `claude -p` reads a token-initial @path in prompt text (stdin or argument), even with no tools, and inlines the file. Any
+# text the kit did not write goes through defang_at before it joins a prompt. Every @ not right after an ASCII letter, digit or
+# underscore is changed, whatever follows it (Claude Code 2.1.295 also reads one after a space or after CJK sentence marks such
+# as U+3001, U+3002, U+FF01 and U+FF1F, and accepts a quoted @"path"), so name@example.com still reads as an address. A
+# non-ASCII neighbour is never trusted: Claude Code ignores an @ after a CJK letter, but this guard changes it anyway.
+_AT = re.compile(r"(?<![A-Za-z0-9_])@")
+
+
+def defang_at(text):
+    return _AT.sub("(at)", str(text))
+
+
 # ---- pacing -----------------------------------------------------------------------------------------------------
 class Pacer:
     """Local mailbox reads and Graph calls at a human pace: a minimum gap between calls and a jittered pause per batch."""

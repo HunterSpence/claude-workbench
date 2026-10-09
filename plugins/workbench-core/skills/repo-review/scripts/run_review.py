@@ -18,12 +18,16 @@ with three tools and no MCP server:
   claude -p --setting-sources user --strict-mcp-config --tools Read,Grep,Glob --disallowedTools mcp__* Read(**/.env) ...
          [--restricted ...] --settings review-settings.json --output-format json   (prompt on stdin)
 
-(--restricted, --safe-mode, --max-turns and a few other safety flags are added only when `claude --help` lists them.)
+(--restricted, --safe-mode, --max-turns and a few other safety flags are added only when `claude --help` lists them. If that help
+text cannot be read at all - it times out, claude cannot be started, or the text does not even list -p/--print - the review is
+refused: nothing is fetched or run, because a silent fallback would drop the flags. The text counts as readable only when
+claude exits 0 and the text names Claude Code and lists -p/--print. A flag dropped because the help does not list it is named on
+stderr; --max-turns is a cost cap, not isolation, and some versions accept it without listing it, but it is passed only when listed.)
 --local DIR copies a folder into the scratch directory (symlinks and .git skipped) and reviews the copy with the same
 command; the source folder is only read. Findings are written to local files (<out>/<name>.findings.json, review.md,
 run.log). Posting a review comment needs --post FILE and the literal --confirm token, which you give only after you
 have read the file. WB_CLAUDE_BIN names another claude executable (tests).
-Exit: 0 done, 2 refused (allowlist, missing token, usage), 4 error.
+Exit: 0 done, 2 refused (allowlist, missing token, usage, claude's safety flags cannot be confirmed), 4 error.
 """
 import argparse
 import datetime
@@ -33,6 +37,7 @@ import os
 import re
 import secrets
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -60,6 +65,19 @@ Follow the rubric below and reply with ONLY the JSON object it describes.
 
 {rubric}
 """
+
+
+# ---- the prompt -------------------------------------------------------------------------------------------------
+# `claude -p` reads a token-initial @path in prompt text (stdin or argument), even with --tools limited, and inlines that
+# file. The reviewed material is never put in the prompt, but the scope line carries a folder name and --rubric names a file
+# you can point anywhere, so the finished prompt is neutralised: every @ not right after an ASCII letter, digit or underscore
+# becomes "(at)", whatever follows it (a space-separated @path, a quoted @"path", one after CJK sentence marks). name@example.com
+# stays. (The capture plugin's digest does the same with its own copy; plugins ship alone, so the line is not shared.)
+AT_PATH = re.compile(r"(?<![A-Za-z0-9_])@")
+
+
+def build_prompt(scope, rubric):
+    return AT_PATH.sub("(at)", PROMPT.format(scope=scope, rubric=rubric))
 
 
 # ---- small helpers ----------------------------------------------------------------------------------------------
@@ -127,12 +145,61 @@ def claude_cmd():
     return os.environ.get("WB_CLAUDE_BIN") or which("claude") or "claude"
 
 
-def claude_help(claude):
+def _kill_tree(p):
+    """Stop p and everything it started. npm installs Claude Code behind a .cmd shim that runs claude as a child holding the
+    pipes open: killing only the shim leaves the call waiting for the child."""
     try:
-        r = subprocess.run([claude, "--help"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
-        return r.stdout + r.stderr
+        if os.name == "nt":
+            subprocess.run([os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "taskkill.exe"), "/T", "/F", "/PID", str(p.pid)],
+                           capture_output=True, timeout=30)
+        else:
+            os.killpg(p.pid, signal.SIGKILL)
     except (OSError, subprocess.TimeoutExpired):
-        return ""
+        p.kill()
+
+
+def run_tree(argv, timeout, input_text=None, cwd=None, env=None):
+    """subprocess.run for claude: a CompletedProcess, or TimeoutExpired after the whole process tree was killed and reaped."""
+    kw = {} if os.name == "nt" else {"start_new_session": True}
+    p = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
+                         errors="replace", cwd=cwd, env=env, **kw)
+    try:
+        out, err = p.communicate(input_text, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_tree(p)
+        try:
+            p.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+        raise
+    return subprocess.CompletedProcess(argv, p.returncode, out, err)
+
+
+HELP_TIMEOUT = 60
+
+
+class HelpUnreadable(Exception):
+    """`claude --help` gave no usable answer, so the optional safety flags cannot be confirmed and no review may run."""
+
+
+def claude_help(claude, timeout=None):
+    """The help text. Never a silent "": a timeout, a claude that cannot be started, a non-zero exit, or text that does not name
+    Claude Code and list the -p/--print option (node --help lists it too) raises HelpUnreadable. Only a help text that is
+    affirmatively readable may drop a flag."""
+    try:
+        r = run_tree([claude, "--help"], HELP_TIMEOUT if timeout is None else timeout)
+    except subprocess.TimeoutExpired:
+        raise HelpUnreadable("claude --help timed out")
+    except OSError as e:
+        raise HelpUnreadable(f"claude could not be started: {type(e).__name__}")
+    text = r.stdout + r.stderr
+    if r.returncode:
+        raise HelpUnreadable(f"claude --help exited {r.returncode}")
+    if "Claude Code" not in text:
+        raise HelpUnreadable("claude --help does not name Claude Code, so it is not known to be Claude Code")
+    if not lists_flag(text, "--print"):
+        raise HelpUnreadable("claude --help did not list the -p/--print option")
+    return text
 
 
 def lists_flag(help_text, flag):
@@ -143,9 +210,16 @@ def build_argv(claude, help_text, settings=SETTINGS):
     """The one argv every review uses (repository, --local, canary). The prompt goes on stdin: variadic options such as
     --tools would swallow a trailing positional prompt, and diffs never touch a command line."""
     argv = [claude, *BASE_ARGV]
+    dropped = []
     for flag, values in OPTIONAL_FLAGS:
         if lists_flag(help_text, flag):
             argv += [flag, *values]
+        else:
+            dropped.append(flag)
+    if dropped:
+        print(f"run_review: this claude --help does not list {', '.join(dropped)}; the review runs without "
+              f"{'it' if len(dropped) == 1 else 'them'}." + (" (--max-turns is a cost cap and some versions accept it without listing it; "
+                                                              "it is passed only when listed.)" if "--max-turns" in dropped else ""), file=sys.stderr)
     return argv + ["--settings", str(settings), "--output-format", "json"]
 
 
@@ -305,17 +379,16 @@ def render_md(name, data):
     return "\n".join(lines) + "\n"
 
 
-def run_claude(argv, prompt, cwd):
-    return subprocess.run(argv, input=prompt, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                          cwd=str(cwd), env=claude_env(), timeout=3600)
+def run_claude(argv, prompt, cwd, timeout=3600):
+    return run_tree(argv, timeout, prompt, str(cwd), claude_env())
 
 
-def review(args, name, workdir, scope, out, log, extra_argv=(), removed=(), links=()):
+def review(args, name, workdir, scope, out, log, extra_argv=(), removed=(), links=(), *, help_text):
     claude = claude_cmd()
-    argv = build_argv(claude, claude_help(claude)) + list(extra_argv)
+    argv = build_argv(claude, help_text) + list(extra_argv)
     rubric = Path(args.rubric or RUBRIC).read_text(encoding="utf-8")
     log.append("argv: " + json.dumps(argv))
-    r = run_claude(argv, PROMPT.format(scope=scope, rubric=rubric), workdir)
+    r = run_claude(argv, build_prompt(scope, rubric), workdir)
     log.append(f"claude exit: {r.returncode}")
     out.mkdir(parents=True, exist_ok=True)
     (out / f"{name}.result.json").write_text(r.stdout, encoding="utf-8")
@@ -439,9 +512,14 @@ def main(argv=None):
             return 4
         print(f"posted {a.post} as a comment on {target}#{a.pr}")
         return 0
+    claude = claude_cmd()
+    try:
+        help_text = claude_help(claude)
+    except HelpUnreadable as e:           # fail closed: before anything is fetched, copied or run, and for --print-argv too
+        print(f"run_review: could not confirm Claude Code's safety flags ({e}); not running the review", file=sys.stderr)
+        return 2
     if a.print_argv:
-        claude = claude_cmd()
-        print(json.dumps(build_argv(claude, claude_help(claude))))
+        print(json.dumps(build_argv(claude, help_text)))
         return 0
 
     run = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + secrets.token_hex(4)
@@ -457,8 +535,7 @@ def main(argv=None):
             scope = "The pull request text is in meta.json and its diff in pr.diff."
             if not a.live:
                 a.keep_scratch = True          # the fixture is the output
-                claude = claude_cmd()
-                print(json.dumps({"fixture": fx["dir"], "argv": build_argv(claude, claude_help(claude))}))
+                print(json.dumps({"fixture": fx["dir"], "argv": build_argv(claude, help_text)}))
                 return 0
             debug = out / "canary-debug.log"
             out.mkdir(parents=True, exist_ok=True)
@@ -486,7 +563,7 @@ def main(argv=None):
                 " The pull request text is in meta.json and its diff in pr.diff." if a.pr else "")
         log.append("secret-shaped files deleted before the review: " + (", ".join(removed) or "none"))
         log.append("links left out of the scratch copy: " + (", ".join(links) or "none"))
-        code, text = review(a, name, workdir, scope, out, log, extra, removed, links)
+        code, text = review(a, name, workdir, scope, out, log, extra, removed, links, help_text=help_text)
         if a.canary:
             bad = evaluate_canary(fx, text or "", debug.read_text(encoding="utf-8", errors="replace") if debug.exists() else "")
             print("canary: " + ("PASS" if code == 0 and not bad else "FAIL"))

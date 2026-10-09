@@ -111,7 +111,7 @@ class DraftReplyTest(unittest.TestCase):
     def test_quote_header_keeps_the_zone(self):
         q = lambda d: dr.quote_header({"from_name": "Sam", "date": d}, {})
         self.assertEqual(q("Wed, 09 Oct 2024 14:05:00 +0530"), "On Wed, 9 Oct 2024 at 14:05 UTC+05:30, Sam wrote:")
-        self.assertEqual(q("Wed, 09 Oct 2024 14:05:00 -0400"), "On Wed, 9 Oct 2024 at 14:05 UTC-04:00, Sam wrote:")
+        self.assertEqual(q("Wed, 09 Oct 2024 14:05:00 -0700"), "On Wed, 9 Oct 2024 at 14:05 UTC-07:00, Sam wrote:")
         self.assertEqual(q("Wed, 09 Oct 2024 14:05:00 -0000"), "On Wed, 9 Oct 2024 at 14:05, Sam wrote:")
         self.assertEqual(q("not a date"), "On not a date, Sam wrote:")
 

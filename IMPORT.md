@@ -32,7 +32,7 @@ release is tagged). `<EXTRAS>` is a comma-separated list of opt-ins (for example
 or empty; `<GIT-HOSTS>` is your organisation's git hosts, comma-separated, or empty. The prompt drives
 `docs/SETUP-RUNBOOK.md`, which gives the session the exact command, check, denial step and ask for every component.
 
-> Set up claude-workbench `v0.3.1` on this machine, end to end, following `docs\SETUP-RUNBOOK.md` from the release. This
+> Set up claude-workbench `v0.3.2` on this machine, end to end, following `docs\SETUP-RUNBOOK.md` from the release. This
 > message is my authorisation for every step in it; do not stop to ask me except where step 11 says.
 > 1. Download `<ZIP-URL>` over HTTPS, without credentials, into a new empty temp folder. Check its SHA-256 with
 >    `(Get-FileHash <file> -Algorithm SHA256).Hash`. If it is not `<SHA256>`, stop and tell me. Unpack it with
@@ -154,7 +154,8 @@ Guide `docs/howto/02-read-the-capability-report.md` walks through it.
 | `--upstream-plugins-optional` | Also registers the optional set; see `settings/SETTINGS.md` |
 | `--data-root PATH` | Your data folder (`<DATA>`): default the work OneDrive's `Workbench` folder when exactly one verified work OneDrive exists, else `Workbench` in your profile |
 | `--kb-root PATH` | Where your knowledge base lives (default `<DATA>/kb`; an upgrade keeps the previous one) |
-| `--git-hosts host1,host2` | Git hosts the corporate guard pack lets you push to. Until set, pushes are refused |
+| `--git-hosts host1,host2` | Git hosts the corporate guard pack lets you push to. Until set, a push to another host asks you first (refused at the strict guard level) |
+| `--guard standard\|strict` | Guard level. `standard` (default): a push or upload to an unlisted host and `--no-verify` ask instead of being refused, and plain browser navigation runs without a prompt; `strict` refuses them. Kept across upgrades; `settings/SETTINGS.md` lists what each level does |
 | `--force` | Overwrite keys you already set |
 | `--no-cli` | Don't call the `claude` CLI; print the plugin commands for you to run instead |
 | `--uninstall` | Undo everything the installer and setup recorded, newest first (dry run unless `--apply`) |
@@ -222,9 +223,78 @@ What not to do in the first week:
 4. **How-to guides** for common tasks: `docs/howto/README.md`. When something fails: `docs/troubleshooting.md`.
 
 ## Updating
-Download a newer tag, verify it, and run its installer the same way. Upgrading from 0.2.0: read the upgrade notes in
-`CHANGELOG.md` (a renamed skill, a renamed variable and an index that migrates by itself). The tools setup installed
-move between releases with `setup.py update --check`, then `setup.py update`.
+The kit updates only when you ask. On a machine that already has this kit, say **"check the new stuff and go"** (or "update the kit",
+"check for kit updates") to Claude Code. The `kit-update` skill (`plugins/workbench-core/skills/kit-update/SKILL.md`) runs ONE script,
+`py -3 <KIT>/bootstrap/kit_update.py`, in short stages (each call is bounded; when it says "Run the same command again", Claude runs
+the same command again, with an explicit 10-minute timeout, until it prints the table):
+1. asks GitHub for the latest release of this kit (anonymous HTTPS, no credentials) and compares it with the installed version;
+2. when a newer one is out, downloads its zip, checks the SHA-256 the release publishes before and after the download (a mismatch
+   stops everything, nothing is installed), unpacks it to a fresh folder under `<WB>/state/kit-update/` and runs that release's
+   `install.py --apply`, then `setup.py run --detach` with the profile and opt-ins your last setup remembered
+   (`<WB>/state/setup-state.json` and `<WB>/config.json`; nothing new is turned on);
+3. waits for the background setup, which also applies the parts only your own user may change (the plugin Python option, `<WB>\bin` on
+   your Path, and, when the whole skill listing is over 80% of the 30,000-character default limit, your own skills listed by name only;
+   see `py -3 <KIT>/bootstrap/setup.py skills --dry-run` and guide `docs/howto/53-audit-and-clean-up.md`), then runs `setup.py doctor
+   --deep` as a background job of its own, writes `<WB>/state/post-update-verify.json` and prints one table with the line **Restart every
+   Claude Code window, then type: go**;
+4. after the restart, the first message you type (any message, "go" is enough) starts the pending verify: every check as
+   PASS, WARN, FAIL or NEEDS-IT in one table (plugin Python options, hook errors in the newest debug log, whether the guard fired in a
+   session that started after the update, the guard's denies and asks since then as counts per rule, the Path, the `doctor --deep` rows, the skill listing against its limit, failures logged since
+   the update), the live guard test in a scratch repository, your IT asks once, and a box **FOR THE KIT AUTHOR** with only the kit's own
+   defects: an id, the command, the first three error lines, the kit and Claude Code versions. User, computer, domain and company names,
+   unknown hosts and credentials are scrubbed from the box and from the report saved as `<WB>/state/field-report.md`.
+If the kit is already current it says so and runs the verify. It never elevates, never changes policy or managed settings and never
+runs `claude update`. Where the releases live: the repository the kit remembers (`kit_repo` in `<WB>/config.json`), else the environment
+variable `WB_KIT_REPO`, else `plugins/workbench-core/skills/kit-update/release-source.json` (empty on purpose). The first time, name the
+repository in your message (`--repo OWNER/REPO`); it is remembered, and naming another repository later needs `--new-repo` and asks you
+first. That first choice is trusted as given, and the SHA-256 comes from the same release: it shows the download is intact, not who
+published it (release signing is deferred).
+
+### Paste this to say "check the new stuff and go" on a kit without the skill
+A kit older than 0.3.2 (no `kit-update` skill) does the same by hand. Paste this into Claude Code. `<REPO>` is the OWNER/REPO of the
+release page the kit came from: take it from my message (the release page fills it in), else from `kit_repo` in `<WB>\config.json`,
+else ask me once. `<PY>` is the `python` in `<WB>\config.json` (the installer wrote it).
+
+> Update claude-workbench on this machine and check it, end to end. This message is my authorisation for every step below; do not
+> stop to ask me except where step 9 says. `<WB>` is `%USERPROFILE%\.claude\workbench` (or under `CLAUDE_CONFIG_DIR`), `<KIT>` is
+> `<WB>\kit`. Give every command below an explicit timeout of 10 minutes.
+> 1. Latest release: `curl.exe -fsSL -H "Accept: application/vnd.github+json" https://api.github.com/repos/<REPO>/releases/latest`.
+>    Read `tag_name` and the asset named `claude-workbench-<tag_name>.zip` (its `browser_download_url`, its `digest`, and the checksum
+>    table in `body`). The installed version is the `VERSION = "..."` line of `<KIT>\bootstrap\install.py`. Not newer: tell me the
+>    kit is current and stop (when `<KIT>\bootstrap\kit_update.py` exists, run its `verify` as in the last paragraph).
+> 2. Download that URL (HTTPS only, no credentials) into a new empty temp folder with
+>    `curl.exe --fail --location --silent --show-error --proto =https --proto-redir =https -o <file> <url>`. Its SHA-256
+>    (`(Get-FileHash <file> -Algorithm SHA256).Hash`) must equal the SHA-256 the release publishes: the asset's `digest` (after
+>    `sha256:`) or the value in the checksum table of `body`; either one is enough. Neither given, or two different values: delete the
+>    file and stop, and tell me.
+> 3. Unpack with `Expand-Archive` into a new folder. The kit is the nested folder `claude-workbench-v<ver>` (for example
+>    `claude-workbench-v0.3.2`); call it `<unpacked>`. Its `bootstrap\install.py` must hold `VERSION = "<ver>"`, the `tag_name` without
+>    the `v`; if not, delete everything and stop. Read `<unpacked>\IMPORT.md`, section "Updating": if it says more than this list,
+>    follow that one.
+> 4. Remember my choices; do not add or change any: `with`, `no_nightly` and `no_update` in `<WB>\state\setup-state.json`
+>    (`options`), and `profile` in `<WB>\config.json`.
+> 5. Install: `<PY> <unpacked>\bootstrap\install.py --apply --profile <profile> --with <with>` (drop `--with` when it is empty). Never
+>    `--force`; never `--profile permissive` unless that is the remembered profile. Exit 3 is my organisation's policy: stop and show
+>    me the message word for word.
+> 6. Setup: `<PY> <KIT>\bootstrap\setup.py run --detach --with <with>` (plus `--no-nightly` / `--no-update` when remembered), then
+>    `<PY> <KIT>\bootstrap\setup.py status --json --wait 60` until `running` is false; tell me each new phase in one line. `setup.py
+>    run` ends with exit code 5 when a reboot is needed (`status --json` shows `reboot_pending`): tell me to save my work and restart;
+>    setup resumes at sign-in.
+> 7. `<PY> <KIT>\bootstrap\setup.py doctor --deep`. Show me every FAIL row word for word; do not fix a row by hand.
+> 8. If something was installed, tell me exactly this and nothing else: "Restart every Claude Code window, then type: go." Setup has
+>    written `<WB>\state\post-update-verify.json`, so the first session after the restart is told to run the verify.
+> 9. Stop only for: a hash mismatch, a denial (show it, never retry another way, never elevate), a UAC prompt, a reboot, and step 8.
+> After the restart, on my first message: run `<PY> <KIT>\bootstrap\kit_update.py --repo <REPO>` (it reports that the kit is current,
+> remembers the repository and runs the verify; if it says "Run the same command again", run the same command again; if it refuses
+> `--repo` because the kit remembers another repository, stop and show me, and do not add `--new-repo` yourself). Show me the table,
+> then try `git push --force origin main` in a scratch git repository under the temp folder (its only remote is
+> `https://example.invalid/scratch.git`): the workbench guard must block it. Record the result with
+> `<PY> <KIT>\bootstrap\kit_update.py record guard-live PASS "<text>"` (or FAIL), delete the scratch repository, and show me the box FOR
+> THE KIT AUTHOR as printed.
+
+From 0.3.2 on, the same update is one sentence. Upgrading from 0.2.0: read the upgrade notes in `CHANGELOG.md` first (a renamed skill, a
+renamed variable and an index that migrates by itself). The tools setup installed move between releases with `setup.py update --check`,
+then `setup.py update`.
 
 ## Removing everything
 1. `py -3 <KIT>/bootstrap/install.py --uninstall` (dry run), then again with `--apply`. It uninstalls the plugins, restores
@@ -239,6 +309,6 @@ move between releases with `setup.py update --check`, then `setup.py update`.
    `<DATA>/` yourself. Leaving the company or under a legal hold: `docs/runbooks.md` first.
 
 ## What this kit never does
-It never sends telemetry of its own, updates itself (setup's update phase moves only the tools it installed, when you run
-it), pushes to any remote, sends messages, edits managed settings, asks for or stores credentials, or bypasses any site's or
-organisation's controls. What does leave the machine, and why, is listed in `docs/security-overview.md`.
+It never sends telemetry of its own, pushes to any remote, sends messages, edits managed settings, asks for or stores
+credentials, or bypasses any site's or organisation's controls, and it updates only when you ask (the `kit-update` skill for the
+kit; setup's update phase for the tools it installed). What does leave the machine, and why, is listed in `docs/security-overview.md`.

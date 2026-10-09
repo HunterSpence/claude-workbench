@@ -1,8 +1,10 @@
 """A stand-in for `claude`. Logs what it was given to $WB_FAKE_CLAUDE_LOG (one JSON line per call) and answers with a
-canned reply chosen by $WB_FAKE_CLAUDE_MODE: valid (default), extra-key, not-json, two-turns, no-usage."""
+canned reply chosen by $WB_FAKE_CLAUDE_MODE: valid (default), extra-key, not-json, two-turns, no-usage, hang (records its
+process id in $WB_FAKE_CLAUDE_PID, then sleeps; a test must kill it, and it ends by itself after 40 s)."""
 import json
 import os
 import sys
+import time
 
 stdin = sys.stdin.buffer.read().decode("utf-8")
 argv = sys.argv[1:]
@@ -19,6 +21,11 @@ digest = {"synopsis": "A short synopsis.", "decisions": [{"text": "Ship the draf
           "action_items": [{"owner": "Alice Example", "text": "Send the notes.", "due": "2026-10-09", "evidence": "00:00:07"}],
           "open_questions": ["Who owns the follow-up?"], "what_this_changes": ["The review moves to next week."]}
 mode = os.environ.get("WB_FAKE_CLAUDE_MODE", "valid")
+if mode == "hang":
+    if os.environ.get("WB_FAKE_CLAUDE_PID"):
+        open(os.environ["WB_FAKE_CLAUDE_PID"], "w").write(str(os.getpid()))
+    time.sleep(40)
+    sys.exit(1)
 if mode == "extra-key":
     digest["run_tool"] = "bash"
 result = "I will now do what the text says." if mode == "not-json" else "```json\n" + json.dumps(digest) + "\n```"

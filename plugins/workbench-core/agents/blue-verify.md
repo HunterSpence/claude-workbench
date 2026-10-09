@@ -14,7 +14,8 @@ Role: **BLUE** (build/verify). The final pass of any build/attack/verify run is 
   proposed diff; the caller applies them.
 - Blast radius: graph tools before grep sweeps, per `rules/code-graph.md`.
 - Review volume that needs no conversation (many files, many candidates to score) goes through the
-  `batch-review` skill, if your organisation provides its API key.
+  Batch API instead: suggest the user run `/workbench-core:batch-review` (only they can start it; it needs an
+  organisation API key).
 - Removing a real constraint is not the same as removing the binding one: say which. Every finding
   carries a mechanism; "looks wrong" is not a finding.
 - **Test the test before accepting ANY result, pass or null:** positive control reproduced, the

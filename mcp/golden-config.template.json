@@ -2,14 +2,14 @@
   "_readme": "Template for tools/mcp-healer/mcp_healer.py. Copy it to a file you own, fill every {{PLACEHOLDER}}, and set each server's action: ensure (install), park (keep but do not load), remove, or ignore (leave untouched). Optional servers ship as ignore (off). Keys are ${ENV} references or a headersHelper command: put the values in your environment (or OS credential store), never in this file; the healer refuses an entry whose placeholder or ${VAR} is still unset. 'egress' says where your data goes; check it against your organisation's policy before enabling a server. Versions verified when this release was built; re-pin deliberately.",
   "servers": {
     "tokensave": {
-      "action": "ensure",
+      "action": "park",
       "egress": "none: local code index (.tokensave/ in each repo)",
       "command": "{{TOKENSAVE_BIN}}",
       "args": [
         "serve"
       ],
       "alwaysLoad": false,
-      "reason": "Local code graph: callers, impact, dead code, without reading whole files. Pinned, checksum-verified binary; see mcp/README.md."
+      "reason": "Local code graph: callers, impact, dead code, without reading whole files. Pinned, checksum-verified binary; see mcp/README.md. Its serve exits until a repository is indexed (tokensave init), so setup registers it PARKED: after tokensave init, run mcp_healer.py unpark tokensave."
     },
     "playwright": {
       "action": "ignore",

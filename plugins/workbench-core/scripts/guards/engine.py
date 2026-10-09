@@ -21,8 +21,11 @@ Contract (pretooluse.py is the hook entry point):
   - Log: <claude config dir>/workbench/logs/guards.log (GUARDS_LOG_DIR overrides), credential shapes redacted,
     rotated at 1 MB. Every BLOCK and ASK names its guard id.
 """
+import bisect
 import datetime
+import glob
 import importlib
+import itertools
 import json
 import os
 import re
@@ -56,8 +59,49 @@ PACKS = ("generic", "corporate")
 LOG_MAX_BYTES = 1_048_576
 
 # ── decisions and logging ────────────────────────────────────────────────────────────────────────────────────
-CTX = {"sid": "-", "tool": "-", "cwd": "-"}
+CTX = {"sid": "-", "tool": "-", "cwd": "-", "level": "standard"}
 _ASKS = []
+
+# ── guard level (H7) ─────────────────────────────────────────────────────────────────────────────────────────
+# `guard_level` in <workbench home>/corporate-allowlist.json (the file the corporate pack reads its "enabled" from):
+#   standard  the default, also when the file or the key is missing, or the key holds another value
+#   strict    every rule below refuses, as 0.3.1 did; also when the file exists but cannot be read or parsed, or is not a JSON
+#             object (fail closed, logged), and when CLAUDE_CONFIG_DIR differs from the installed one
+# Under standard only the rules in SOFT_RULES ask instead of refusing, and browser-cli plain navigation passes (logged). Every
+# other deny stays a deny at both levels: the list is short on purpose, and a rule joins it only with a test that names it.
+LEVELS = ("standard", "strict")
+SOFT_RULES = frozenset({"remote-not-allowlisted", "upload-not-allowlisted", "no-verify"})
+SOFT_LEAD = "Standard guard level: this asks instead of refusing (the strict level refuses it). "
+
+
+def guard_level():
+    """"standard" or "strict". A missing file, a missing key and any other value of the key give "standard". A file that exists but
+    cannot be read or parsed, or holds something other than a JSON object, gives "strict" (logged): a damaged file must not quieten
+    the guard. So does a CLAUDE_CONFIG_DIR that differs from the installed one (the corporate pack fails closed there too)."""
+    try:
+        if _wb.config_redirected():
+            return "strict"
+        with open(_wb.workbench_home() / "corporate-allowlist.json", encoding="utf-8-sig") as f:
+            conf = json.load(f)
+    except (FileNotFoundError, NotADirectoryError):
+        return "standard"
+    except (OSError, ValueError) as e:
+        log(f"ERROR corporate-allowlist.json exists but cannot be read ({type(e).__name__}): guard level strict")
+        return "strict"
+    if not isinstance(conf, dict):
+        log("ERROR corporate-allowlist.json is not a JSON object: guard level strict")
+        return "strict"
+    v = conf.get("guard_level")
+    if v is None:
+        return "standard"
+    if isinstance(v, str) and v.strip().lower() in LEVELS:
+        return v.strip().lower()
+    log(f"ERROR guard_level {str(v)[:40]!r} is not standard or strict: using standard")
+    return "standard"
+
+
+class _Soft(BaseException):
+    """A SOFT_RULES rule found something: it asked instead of refusing, and the rule stops here. A BaseException, like Decision."""
 
 
 class Decision(BaseException):
@@ -67,14 +111,14 @@ class Decision(BaseException):
         self.out = out
 
 
+REDACT_FAILED = "[log text withheld: the credential scanner could not load]"
+
+
 def _redact(text):
     try:
-        import secretscan
-        for a, b in reversed(secretscan.scan_text(text)):
-            text = text[:a] + "[REDACTED]" + text[b:]
+        return _wb.redact(text)
     except Exception:
-        pass
-    return text
+        return REDACT_FAILED   # never the raw text: it may hold the credential this step exists to hide
 
 
 def log(msg):
@@ -85,8 +129,9 @@ def log(msg):
         if os.path.exists(p) and os.path.getsize(p) > LOG_MAX_BYTES:
             os.replace(p, p + ".1")   # keep one previous file
         with open(p, "a", encoding="utf-8") as f:
-            f.write(_redact(f"{datetime.datetime.now().isoformat(timespec='seconds')} sid={CTX['sid']} "
-                            f"tool={CTX['tool']} cwd={CTX['cwd']} {' '.join(str(msg).split())}") + "\n")
+            f.write(datetime.datetime.now().isoformat(timespec="seconds") + " " +
+                    _redact(f"sid={CTX['sid']} tool={CTX['tool']} cwd={CTX['cwd']} level={CTX['level']} "
+                            f"{' '.join(str(msg).split())}") + "\n")
     except Exception:
         pass
 
@@ -97,15 +142,27 @@ def _out(decision, reason):
 
 
 def block(reason, gid, detail=""):
-    """Deny the call now."""
+    """Deny the call now (a SOFT_RULES rule at the standard level asks instead and ends its own run)."""
+    if gid in SOFT_RULES and CTX["level"] == "standard":
+        log(f"ASK [{gid}] (relaxed from deny at the standard level) {(detail + ' | ' if detail else '')}{reason}"[:600])
+        _ASKS.append(f"[workbench guard: {gid}] {SOFT_LEAD}{reason}")
+        raise _Soft()
     log(f"BLOCK [{gid}] {(detail + ' | ' if detail else '')}{reason}"[:600])
     raise Decision(_out("deny", f"[workbench guard: {gid}] {reason}"))
 
 
+def relaxed(gid, detail=""):
+    """Log a call a rule would have asked about at the strict level and lets through at the standard one."""
+    log(f"PASS [{gid}] (relaxed from ask at the standard level) {detail}"[:600])
+
+
 def ask(reason, gid, detail=""):
     """Ask the user to confirm. Collected: it is returned only if no rule denies the call."""
+    msg = f"[workbench guard: {gid}] {reason}"
+    if msg in _ASKS:   # the same ask again (a statement repeated thousands of times): said and logged once
+        return
     log(f"ASK [{gid}] {(detail + ' | ' if detail else '')}{reason}"[:600])
-    _ASKS.append(f"[workbench guard: {gid}] {reason}")
+    _ASKS.append(msg)
 
 
 def _win_forms(p):
@@ -136,10 +193,10 @@ _DATA_CONSUMER = re.compile(r"(?i)(?<![\w.-])(python[\d.]*|py|node|deno|psql|mys
                             r"perl|ruby|php|git)(?![\w.-])")
 _CODE_HEAD = re.compile(r"(?i)(?<![\w.-])(?:" + _INTERP + r")(?:\.exe)?(?![\w.-])")
 _EXEC_HEAD = re.compile(r"(?i)(?:" + _SHELLS + r"|ssh|source|\.|eval|" + _INTERP + r")$")
-_RUNNER = re.compile(r"(?i)(?<![\w.-])(ssh|bash|sh|zsh|dash|ksh|eval|su|pwsh|powershell|cmd|wsl|iex|"
+_RUNNER = re.compile(r"(?i)(?<![\w.$-])(ssh|bash|sh|zsh|dash|ksh|eval|su|pwsh|powershell|cmd|wsl|iex|"
                      r"invoke-expression)(?:\.exe)?(?![\w.-])")
-_JOINER = re.compile(r"(?i)(?<![\w.-])(ssh|wsl|eval|pwsh|powershell|cmd)(?:\.exe)?(?![\w.-])")  # re-parse ALL their args
-_SSH_WORD = re.compile(r"(?i)(?<![\w.-])ssh(?![\w.-])")
+_JOINER = re.compile(r"(?i)(?<![\w.$-])(ssh|wsl|eval|pwsh|powershell|cmd)(?:\.exe)?(?![\w.-])")  # re-parse ALL their args
+_SSH_WORD = re.compile(r"(?i)(?<![\w.$-])ssh(?![\w.-])")   # a $ssh variable is no runner word
 _VAR_HEAD = re.compile(r"""["']?(\$\{?\w+\}?)["']?(?=\s)(?!\s*=)""")   # `$RUN '...'`: a command held in a variable
 _GIT_HOOK_NAME = (r"(?:pre-[\w-]+|post-[\w-]+|prepare-commit-msg|commit-msg|update|applypatch-msg|proc-receive|"
                   r"reference-transaction|push-to-checkout|sendemail-validate|fsmonitor-watchman|p4-[\w-]+)$")
@@ -149,12 +206,54 @@ _FS_PARSE_ONLY = re.compile(r"^\s*(?:ba|z|da)?sh\s+-n\b")
 _HEAD_SKIP = re.compile(r"""^\s*[({!]*\s*(?:(?:\w+=(?:"[^"]*"|'[^']*'|\S*)\s*)|(?:sudo|time|nohup|exec|command|env|"""
                         r"""then|do|else|elif|if|while|until)\s+|timeout\s+(?:-\S+\s+)*\S+\s+)*""")
 _LEXED, _WALKED, _PROSED, _LEX_NEST = {}, {}, {}, [0]
+# Work limits for one evaluate(). _MEMO holds the answers of the file system lookups that repeat once per target (norm, _as_written,
+# _kit_anchors): outside evaluate() it is None and nothing is remembered, so a direct call always looks at the disk. _WORK counts the
+# characters a loop that is quadratic in the worst case has re-read; past _WORK_MAX the command cannot be judged in bounded time and
+# is denied (nest-cap). _MAX_TARGETS is the same for the paths a command deletes, moves, links or writes.
+_MEMO, _WORK = [None], [0]
+_WORK_MAX, _MAX_TARGETS = 2_000_000, 2000
+
+
+def _memo(fn):
+    def wrapper(*a):
+        m = _MEMO[0]
+        if m is None:
+            return fn(*a)
+        k = (fn.__name__, a)
+        if k not in m:
+            m[k] = fn(*a)
+        return m[k]
+    wrapper.__name__, wrapper.__doc__ = fn.__name__, fn.__doc__
+    return wrapper
+
+
+def _work(n):
+    """Count n characters of rescanning against the command's budget."""
+    _WORK[0] += n
+    if _WORK[0] > _WORK_MAX:
+        raise _TooDeep("more than %d characters rescanned" % _WORK_MAX)
 # Past this nesting (quotes / $( ) per walk, heredoc and runner-string re-lex levels), length or heredoc count the
 # guard cannot judge a command in bounded time or stack, so it DENIES. Real commands sit far below these limits.
 _MAX_NEST, _MAX_CMD, _MAX_HD = 32, 256_000, 64
 DEEP_MSG = ("This command is too large or too deeply nested for the guard to judge (limits: %d nesting levels of quotes "
             "/ $( ) / heredocs / runner strings, %d KB, %d heredocs). Flatten it: write the script with the Write tool "
             "and run the file." % (_MAX_NEST, _MAX_CMD // 1000, _MAX_HD))
+
+
+_RUN_MIN, _RUN_KEEP = 2000, 256
+
+
+def squash_runs(s):
+    """s with every run of 2,000 or more of one character cut to 256 of them (plus its length mod 4, which keeps a base64 payload's
+    alignment). No rule reads the length of such a run (base64 of zero-filled data, a filler of spaces or ; or A), and a regex
+    that backtracks over one is quadratic in it. A run of anything else (a repeated word) is not touched."""
+    if len(s) < _RUN_MIN:
+        return s
+    out = []
+    for ch, grp in itertools.groupby(s):
+        n = sum(1 for _ in grp)
+        out.append(ch * (_RUN_KEEP + n % 4 if n >= _RUN_MIN else n))
+    return "".join(out)
 
 
 class _TooDeep(BaseException):
@@ -349,7 +448,7 @@ def _ran(writes, segs, cmd):   # segs: [(statement, files it writes by heredoc, 
 
 
 class _Walk:
-    __slots__ = ("segs", "bounds", "top", "subs", "spans", "tsubs", "notes", "st")
+    __slots__ = ("segs", "bounds", "top", "subs", "spans", "tsubs", "notes", "st", "starts")
 
 
 def _walk(s, ps=False, hd=False):
@@ -471,7 +570,10 @@ def _stage(text, pos, ps=False):
         if a <= pos < b:
             s, e = _stage(text[a:b], pos - a, ps)
             return s + a, e + a
-    return next(((a, b) for a, b in w.bounds if a <= pos < b), (pos, pos))
+    if getattr(w, "starts", None) is None:   # the bounds are in order and do not overlap: look the statement up by bisection
+        w.starts = [a for a, _ in w.bounds]
+    i = bisect.bisect_right(w.starts, pos) - 1
+    return w.bounds[i] if i >= 0 and w.bounds[i][0] <= pos < w.bounds[i][1] else (pos, pos)
 
 
 _ANSI_ESC = re.compile(r"\\(x[0-9A-Fa-f]{1,2}|u[0-9A-Fa-f]{1,4}|U[0-9A-Fa-f]{1,8}|[0-7]{1,3}|c.|.)", re.S)
@@ -595,23 +697,82 @@ def blank_prose(text, ps=False, prose=True):
     return _PROSED[key]
 
 
-def _prose_texts(text, ps=False, remote=False, depth=0):
+def _prose_texts(text, ps=False, remote=False, depth=0, prose=True):
     """[(flat, remote?)] for text and, re-lexed recursively, every runner string in it (ssh '...' runs remotely)."""
-    flat, inner = blank_prose(text, ps)
+    flat, inner = blank_prose(text, ps, prose)
     out = [(flat, remote)]
     for s, r, p in inner:
-        out += _prose_texts(s, p, remote or r, _deeper(depth))
+        out += _prose_texts(s, p, remote or r, _deeper(depth), prose)
     return out
 
 
-def statements(c):
+def statements(c, prose=True):
     """Every statement a shell runs in this command, prose blanked: [(statement, remote?)] across the top text,
-    shell-run heredoc bodies and runner strings (ssh '...' is remote)."""
+    shell-run heredoc bodies and runner strings (ssh '...' is remote). prose="words": a quoted word with a space in it
+    (a path under "C:\\Program Files") stays one word instead of becoming "" (see blank_prose)."""
     out = []
     for t, rem in c.L.shell_texts():
-        for flat, r in _prose_texts(t, c.ps, rem):
+        for flat, r in _prose_texts(t, c.ps, rem, prose=prose):
             out += [(s, r) for s in _walk(flat, c.ps).segs if s.strip()]
+    for d in decoded_payloads(c):   # powershell -EncodedCommand <base64 of "tokensave doctor"> runs that text
+        for flat, r in _prose_texts(d, True, False, prose=prose):
+            out += [(s, r) for s in _walk(flat, True).segs if s.strip()]
     return out
+
+
+ENC_MSG = ("This runs a PowerShell -EncodedCommand (or a prefix of it) whose payload the guard cannot decode. "
+           "Run the command as plain text so it can be checked.")
+
+
+def decoded_payloads(c):
+    """The decoded text of every -EncodedCommand this command runs (the prose-blanked view, nested ones up to three deep).
+    An undecodable payload on the command line itself is the encoded-command rule's (it refuses it); one inside a decoded
+    payload, or a payload that still holds an encoded command after the third level, is refused here (encoded-command, and
+    nest-cap): both are text the guard cannot judge, and passing them silently would be a way round it."""
+    if not _PWSH.search(c.cmd):
+        return []
+    out, todo = [], [_raw_body(c)]
+    for depth in range(3):
+        found = [d for t in todo for d in encoded_commands(t)]
+        if depth and None in found:
+            block(ENC_MSG, "encoded-command", c.cmd[:120])
+        todo = [squash_runs(d) for d in found if d]
+        out += todo
+    if any(encoded_commands(t) for t in todo):
+        raise _TooDeep("-EncodedCommand nested more than 3 levels")
+    return out
+
+
+_CMD_SPLIT = re.compile(r"\$\(|[(){}`;&|]")
+_PS_ASSIGN = re.compile(r"(\$[\w:]+(?:\[[^\]\n]*\])?)[ \t]*[-+*/]?=(?!=)")   # $out = cmd, $env:X=cmd, $a[0] += cmd
+_PS_HOSTS = ("pwsh", "powershell")
+
+
+def cmd_starts(seg, names):
+    """The suffixes of one statement that start at a command word whose basename (lower case, no .exe) is in `names`: the
+    statement's own command word, and one after $( ( ) { } ` ; & | or a PowerShell assignment (a substitution, a block, a call
+    operator: `out=$(tokensave doctor)`, `$out = tokensave doctor`, `try { git commit -n } catch {}`), and one past the
+    switches of a PowerShell host (`pwsh -NonInteractive -c tokensave install`, or the payload ` -NoProfile -Command ...`).
+    A `NAME=value` word is no assignment (`make TOOL=tokensave install`), and prose is already blanked in `seg`, so `echo
+    tokensave doctor` has no command word of that name."""
+    out = []
+    seg = _PS_ASSIGN.sub(r"\1;", seg)   # the variable's own statement ends at the =; the command follows
+    for part in [seg] + _CMD_SPLIT.split(seg):
+        toks = _cmd_toks(part)
+        j = 0
+        if toks and re.split(r"[\\/]", toks[0].strip("\"'"))[-1].lower().removesuffix(".exe") in _PS_HOSTS:
+            if len(toks) < 2 or not toks[1].startswith("-"):
+                continue                                   # `pwsh script.ps1 ...` runs a file, not a command word
+            j = 1
+        while j < len(toks):
+            if re.split(r"[\\/]", toks[j].strip("\"'"))[-1].lower().removesuffix(".exe") in names:
+                out.append(" ".join(toks[j:]))
+                break
+            if toks[j].startswith("-") or (j and toks[j - 1].startswith("-")):   # a leading switch, or its value
+                j += 1
+            else:
+                break
+    return list(dict.fromkeys(out))
 
 
 def git_sub(seg):
@@ -664,6 +825,8 @@ def local_files(text, cwd, rels, cap=200_000):
 
 
 # ── the files a shell write targets ──────────────────────────────────────────────────────────────────────────
+_MARKUP = re.compile(r"<[A-Za-z/][^<>\s]*$")
+_WT = {}   # write_targets answers for this evaluate() (it is called by several rules with the same command)
 _REDIRECT = re.compile(r'(?<![<>=\-])>>?\|?\s*([^\s;&|<>()]+)')
 _WRITER = re.compile(r'(?i)(?:^|[\s"\'(;&|`])(tee|tee-object|sed|perl|cp|mv|install|scp|rsync|copy-item|move-item|'
                      r'set-content|add-content|out-file|clear-content|dd)(?=\s)')
@@ -673,10 +836,14 @@ _PY_WRITE = re.compile(r"""(?i)\bopen\(\s*[rbuf]*["']([^"'\n]+)["']\s*,\s*(?:mod
 
 
 def write_targets(cmd, ps=False, remote=False, depth=0):
-    """[(path, text before it, remote?)] for every file a shell write targets: redirects, tee / sed -i / perl -i / cp /
+    """[(path, remote?)] for every file a shell write targets: redirects, tee / sed -i / perl -i / cp /
     mv / install / scp / rsync / dd of= / Set-Content / Add-Content / Out-File / Clear-Content / Copy-Item / Move-Item
     (-Destination), python open(<literal>, 'w') / Path(<literal>).write_text. Quoted prose writes nothing; runner
-    strings and shell-run heredoc bodies are judged, remote when ssh carries them."""
+    strings and shell-run heredoc bodies are judged, remote when ssh carries them. Every writer word re-reads the rest of its
+    statement, so a command that repeats one thousands of times is denied past a budget (nest-cap)."""
+    key = (cmd, ps, remote, depth)
+    if key in _WT:
+        return _WT[key]
     L, out = lex(cmd, ps), []
     for body, rem in L.bodies:
         out += write_targets(body, ps, remote or rem, _deeper(depth))
@@ -684,9 +851,10 @@ def write_targets(cmd, ps=False, remote=False, depth=0):
     for s, rem, p in inner:
         out += write_targets(s, p, remote or rem, _deeper(depth))
     cands = [(m.group(1), m.start()) for m in _REDIRECT.finditer(flat)
-             if not re.search(r"<[A-Za-z/][^<>\s]*$", flat[:m.start()])]   # `<code>.env</code>` is markup
+             if not _MARKUP.search(flat, 0, m.start())]   # `<code>.env</code>` is markup
     for m in _WRITER.finditer(flat):
         rest = re.split(r"&&|\|\||[;\n|()]", flat[m.end():], maxsplit=1)[0]
+        _work(len(rest))
         try:  # a quoted sed script stays ONE token; posix=False keeps Windows backslashes
             lx = shlex.shlex(rest, posix=False)
             lx.whitespace_split = True
@@ -706,19 +874,22 @@ def write_targets(cmd, ps=False, remote=False, depth=0):
         else:  # tee / Tee-Object / Set-Content / Add-Content / Out-File / Clear-Content
             targets = args
         cands += [(t, m.start()) for t in targets if t]
-    out += [(x, flat[:pos], remote) for t, pos in cands
+    out += [(x, remote) for t, pos in cands
             for x in {t.strip("\"'`"), re.sub(r"[\s._]+$", "", t.strip("\"'`"))} if x]
     if depth == 0:
         x = expand_vars(cmd)
-        out += [(m.group(1) or m.group(2) or m.group(3), x[:m.start()], remote) for m in _PY_WRITE.finditer(x)]
+        out += [(m.group(1) or m.group(2) or m.group(3), remote) for m in _PY_WRITE.finditer(x)]
+    _WT[key] = out
     return out
 
 
 # ── data arguments: a journal line or a commit message is data, not shell ─────────────────────────────────────
 _TO_SHELL = re.compile(r"(?i)" + _PIPE_WRAP + r"(?:(?:ba|z|da|k)?sh|pwsh|powershell|iex|invoke-expression|"
                        r"python[\d.]*|node|xargs)\b|(?<![\w.-])(?:eval|source)\s|(?:^|[;&|(]\s*)\.\s+\S")
+# The gap between `commit` and `-m` is bounded: an unbounded one is quadratic on a line that repeats `git commit`, and a message past the
+# bound is simply not blanked (judged as text), which can only add findings.
 _DATA_ARG = re.compile(r"""(?:save_driver\.py["']?\s+(?P<f>--inbox-add)|"""
-                       r"""(?<![\w.-])git\s+commit\b[^\n;&|"'#]*?\s(?P<g>-[A-Za-z]*m))\s*"""
+                       r"""(?<![\w.-])git\s+commit\b[^\n;&|"'#]{0,400}?\s(?P<g>-[A-Za-z]*m))\s*"""
                        r"""(?P<v>"(?:\\.|[^"\\])*"|'[^']*')""")
 
 
@@ -782,14 +953,24 @@ def encoded_commands(text):
     return out
 
 
+_RAWB = {}   # _raw_body answers for this evaluate() (a dozen rules read it)
+
+
 def _raw_body(c):
     """The raw command minus provable prose (see raw_view)."""
+    key = (c.doc, c.ps)
+    if key not in _RAWB:
+        _RAWB[key] = _raw_body_of(c)
+    return _RAWB[key]
+
+
+def _raw_body_of(c):
     text = blank_data(c.doc, c.ps)
     w = _walk(text, c.ps)
     bounds = [(a, b) for a, b in w.bounds if text[a:b].strip()]
     segs = [(text[a:b], {os.path.basename(f.strip("\"'")) for f in _fs_wtargets(text[a:b])}, _head(text[a:b]))
             for a, b in bounds]
-    edits = []
+    edits, ran = [], {}
     for a, b in bounds:
         seg, h = text[a:b], _head(text[a:b])
         if re.search(r"\$\(|`|<\(", seg):
@@ -798,7 +979,10 @@ def _raw_body(c):
                 and not (h == "printf" and re.search(r"(?<![\w-])-v(?![\w-])", seg)):   # rg --pre runs a program
             nxt = text[b:b + 3].lstrip(" \t")
             targets = [f.strip("\"'") for f in _fs_wtargets(seg)]
-            if (nxt.startswith("|") and not nxt.startswith("||")) or (targets and _ran(targets, segs, text)):
+            if targets and tuple(targets) not in ran:      # _ran reads every statement: once per set of files, and counted
+                _work(len(segs))
+                ran[tuple(targets)] = _ran(targets, segs, text)
+            if (nxt.startswith("|") and not nxt.startswith("||")) or (targets and ran[tuple(targets)]):
                 continue                               # piped onward, or written to a file this command runs
             edits.append((a, b, h))
         elif h == "git" and re.search(r"(?<![\w.-])git\s+(?:commit|tag)\b", seg):
@@ -889,6 +1073,14 @@ def git_config_pairs(cmd, ps=False):
 
 # ── the guards' own configuration: write-protected whatever pack is loaded ───────────────────────────────────
 WRITE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
+# MCP tools that edit files on disk by path: tokensave's edit tools (mcp__tokensave__tokensave_<verb>). They are not Edit or Write,
+# so without this they skip every write check (secret files, .env, the kit's own configuration, settings). The server key
+# varies by registration, so any mcp__ tool ending in one of these verbs counts; over-matching only runs a path check. The
+# PreToolUse matcher in hooks/hooks.json names the same verbs (a test compares them). A verb a newer tokensave adds goes here.
+EDIT_MCP_VERBS = ("str_replace", "multi_str_replace", "insert_at", "insert_at_symbol", "replace_symbol", "ast_grep_rewrite",
+                  "replace_lines", "delete_symbol")
+EDIT_MCP = re.compile(r"mcp__.*_(?:" + "|".join(EDIT_MCP_VERBS) + ")")
+_PATH_KEYS = ("path", "file_path", "file", "filepath")
 READ_TOOLS = ("Read", "Grep", "Glob")
 OTHER_TOOLS = ("WebFetch", "Agent")
 # Browser MCP servers (playwright, chrome-devtools, puppeteer, plugin-namespaced ones): their URL inputs go to TOOL rules.
@@ -904,9 +1096,41 @@ KIT_MSG = ("{path} configures Claude Code or the workbench guards (settings file
            "the user edits these by hand, with /config or /permissions, or re-runs the workbench installer.")
 
 
+def _win_unprefix(p):
+    r"""The plain spelling of a Windows path: \\?\C:\x and \\.\C:\x are C:\x, \\?\UNC\srv\share\x is \\srv\share\x, and
+    \\localhost\C$\x (this machine's own admin share, also by the loopback address or its name) is C:\x. Either slash. \\?\Volume{id}\
+    and \\?\GLOBALROOT\Device\... are left whole: realpath resolves them to \\?\C:\..., which is then unprefixed (norm())."""
+    m = re.match(r"^[\\/]{2}[?.][\\/](?:(UNC)[\\/]|(?=[A-Za-z]:))", p, re.I)   # only before a drive letter or UNC\
+    if m:
+        p = ("\\\\" if m.group(1) else "") + p[m.end():]
+    hosts = [h for h in ("localhost", "127" + ".0.0.1", os.environ.get("COMPUTERNAME", "")) if h]   # no address literal here
+    m = re.match(r"^[\\/]{2}(?:" + "|".join(re.escape(h) for h in hosts) + r")[\\/]([A-Za-z])\$(?=[\\/]|$)", p, re.I)
+    return f"{m.group(1)}:{p[m.end():] or chr(92)}" if m else p
+
+
+_ENV_REF = re.compile(r"(?i)\$\{(?:env:)?(HOME|USERPROFILE|CLAUDE_CONFIG_DIR)\}|\$env:(HOME|USERPROFILE|CLAUDE_CONFIG_DIR)(?!\w)|"
+                      r"%(HOME|USERPROFILE|CLAUDE_CONFIG_DIR)%|\$(HOME|USERPROFILE|CLAUDE_CONFIG_DIR)(?!\w)")
+
+
+def expand_env(p):
+    """p with $HOME, ${HOME}, $env:HOME, $env:USERPROFILE, %USERPROFILE% (and the same spellings of CLAUDE_CONFIG_DIR) replaced by
+    what they are for this session: the shell would expand them before the command ran, and a path to the guards' folders is the
+    same path in either spelling. HOME and USERPROFILE fall back to the home folder (~) when unset; CLAUDE_CONFIG_DIR to the config
+    dir the guards use. Other variables are left as written (known-limits)."""
+    if "$" not in p and "%" not in p:
+        return p
+
+    def val(m):
+        name = next(g for g in m.groups() if g).upper()
+        return str(_wb.claude_home()) if name == "CLAUDE_CONFIG_DIR" else os.environ.get(name) or os.path.expanduser("~")
+    return _ENV_REF.sub(val, p)
+
+
+@_memo
 def norm(p, cwd=""):
-    """An absolute, normalised, case-folded path for comparisons; a Git Bash /tmp or /c/ path is mapped first."""
-    p = os.path.expanduser(str(p).strip("\"'"))
+    """An absolute, normalised, case-folded path for comparisons; a Git Bash /tmp or /c/ path is mapped first. $HOME and the like
+    are expanded first (expand_env)."""
+    p = _win_unprefix(os.path.expanduser(expand_env(str(p).strip("\"'"))))
     if os.name == "nt":
         m = re.match(r"^/([A-Za-z])(/.*)?$", p)
         if re.match(r"^/tmp(/|$)", p):
@@ -915,7 +1139,7 @@ def norm(p, cwd=""):
             p = f"{m.group(1)}:{m.group(2) or '/'}"
     if cwd and not os.path.isabs(p):
         p = os.path.join(cwd, p)
-    return os.path.normcase(os.path.realpath(os.path.abspath(p))).replace("\\", "/")
+    return os.path.normcase(_win_unprefix(os.path.realpath(os.path.abspath(p)))).replace("\\", "/")
 
 
 def under(path, root):
@@ -923,9 +1147,10 @@ def under(path, root):
     return path == root or path.startswith(root.rstrip("/") + "/")
 
 
+@_memo
 def _as_written(p, cwd=""):
     """norm() without following symlinks: the path as the command names it."""
-    p = os.path.expanduser(str(p).strip("\"'"))
+    p = _win_unprefix(os.path.expanduser(expand_env(str(p).strip("\"'"))))
     if cwd and not os.path.isabs(p):
         p = os.path.join(cwd, p)
     return os.path.normcase(os.path.abspath(p)).replace("\\", "/")
@@ -959,7 +1184,7 @@ def kit_protected(path, cwd=""):
     return raw_hit
 
 
-_LINK_HEADS = {"ln", "mklink", "new-item", "ni", "cp"}
+_LINK_HEADS = {"ln", "mklink", "new-item", "ni", "cp", "fsutil"}
 
 
 def _cmd_toks(seg):
@@ -989,39 +1214,338 @@ def _link_targets(toks):
                                                                                r"Junction)['\"]?", a)]
     if h == "mklink":
         return [a for a in args if not a.startswith("/")]
+    if h == "fsutil":   # fsutil hardlink create <new file> <existing file>
+        return args[2:] if [a.lower() for a in args[:2]] == ["hardlink", "create"] else []
     if h == "ln":
         return [a for a in args if not a.startswith("-")]
     return []
 
 
-_INSTALLER = re.compile(r"(?i)bootstrap[/\\]+(?:un)?install\.(?:py|sh)\b")
+# A script that makes a link (Python, Node, PowerShell / .NET, ctypes): its string literals are judged as link targets. A path
+# built at run time (os.path.join(home, ".claude", ...)) is not visible to a reader of the text.
+_LINK_CALL = re.compile(r"\bos\.(?:link|symlink)\b|\.(?:hardlink_to|symlink_to|link_to)\s*\(|\bshutil\.\w*link\w*|"
+                        r"\bCreate(?:Hard|Symbolic)Link\w*|\.(?:link|symlink)(?:Sync)?\s*\(")
+_STR_LIT = re.compile(r"""[rRbBuU]{0,2}(["'])((?:\\.|(?!\1)[^\\\n])*)\1""")
+
+
+def _code_link_targets(c):
+    view = raw_view(c)
+    if not _LINK_CALL.search(view):
+        return []
+    out, texts = [], [view]
+    for _ in range(3):   # a literal inside a literal: python -c "os.link('a', 'b')"
+        texts = [m.group(2) for t in texts for m in _STR_LIT.finditer(t)]
+        out += texts
+    return [t.replace("\\\\", "\\") for t in out]
+
+
+# The installer and the kit updater (kit_update.py downloads and installs a release from the repository it is given). The updater's
+# read-only verbs need no approval: `verify` or `record` as its first argument, or a statement that is nothing but plain `--check`
+# options (_CHECK_ONLY): a `--check` after a `#`, a redirection or a substitution is not an option. `rest` is a lookahead so a
+# second kit_update.py inside a `$( )` of the first is found too.
+_INSTALLER = re.compile(r"(?i)bootstrap[/\\]+(?:un)?install\.(?:py|sh)\b|kit_update\.py\b(?=(?P<rest>[^\n;&|]*))")
+_CHECK_ONLY = re.compile(r"\s*(?:update\s+)?(?:(?:--check|--repo(?:\s+|=)[\w.-]+/[\w.-]+|--wait(?:\s+|=)\d+(?:\.\d+)?)(?:\s+|$))+")
+
+
+def _installer_run(cmd):
+    for m in _INSTALLER.finditer(cmd):
+        rest = m.group("rest")
+        if rest is None:
+            return True
+        rest = rest.replace('"', " ").replace("'", " ")
+        args = rest.split()
+        if not (args[:1] in (["verify"], ["record"]) or ("--check" in args and _CHECK_ONLY.fullmatch(rest))):
+            return True
+    return False
+
+
+_LIST_HEADS = {"get-childitem", "gci", "ls", "dir", "get-item", "gi", "find", "fd"}
+_DEL_HEADS = {"remove-item", "ri", "rm", "rmdir", "rd", "del", "erase", "unlink"}
+
+
+def _glob_targets(t, cwd=""):
+    """What a delete target names: itself, or - when it holds *, ? or [ - what glob finds (the shell would expand it before rm
+    ran). More than 500 matches: the first 500 and the folder the pattern lists. No match: the pattern itself."""
+    if not re.search(r"[*?\[]", t):
+        return [t]
+    pat = os.path.expanduser(expand_env(t.strip("\"'")))
+    if cwd and not os.path.isabs(pat):
+        pat = os.path.join(cwd, pat)
+    try:
+        hits = glob.glob(pat)
+    except Exception:
+        hits = []
+    return (hits[:500] + ([os.path.dirname(pat)] if len(hits) > 500 else [])) or [t]
+
+
+def _find_roots(toks):
+    """The folders a `find` statement lists, when it deletes what it finds (-delete, or -exec rm / rmdir / unlink)."""
+    low = [t.lower() for t in toks]
+    deletes = "-delete" in low or any(low[i] in ("-exec", "-execdir", "-ok") and low[i + 1:i + 2]
+                                       and os.path.basename(low[i + 1]).removesuffix(".exe") in _DEL_HEADS for i in range(len(low)))
+    roots = []
+    for t in toks[1:]:
+        if t.startswith(("-", "(", "!", ")")):
+            break
+        roots.append(t)
+    return roots if deletes else []
+
+
+def _pipeline_delete_roots(c):
+    """The folders whose contents a pipeline deletes: `Get-ChildItem <dir> | Remove-Item -Recurse`, `ls <dir> | xargs rm -rf`,
+    `find <dir> | xargs rm`. Without a folder named it is the session folder."""
+    out = []
+    texts = [(t, c.ps, rem) for t, rem in c.L.shell_texts()] + [(d, True, False) for d in decoded_payloads(c)]
+    for t, ps, rem in texts:
+        for flat, _r in _prose_texts(t, ps, rem, prose="words"):
+            for chain in re.split(r";|&&|\|\||\n", flat):
+                stages = re.split(r"(?<!\|)\|(?!\|)", chain)
+                if len(stages) < 2:
+                    continue
+                first = _cmd_toks(re.split(r"[{(]|\$\(", stages[0])[-1])        # `try { Get-ChildItem x | ...` starts after the {
+                if not first or os.path.basename(first[0]).lower().removesuffix(".exe") not in _LIST_HEADS:
+                    continue
+                if not any(_deletes_stage(_cmd_toks(st)) for st in stages[1:]):
+                    continue
+                roots = [t for t in first[1:] if not t.startswith(("-", "|"))]
+                out += roots or [c.cwd or "."]
+    return out
+
+
+def _deletes_stage(toks):
+    head = os.path.basename(toks[0]).lower().removesuffix(".exe") if toks else ""
+    if head == "xargs":
+        rest = [t for t in toks[1:] if not t.startswith("-")]
+        head = os.path.basename(rest[0]).lower().removesuffix(".exe") if rest else ""
+    return head in _DEL_HEADS
 
 
 def _kit_shell(c):
-    if _INSTALLER.search(c.cmd):   # it rewrites settings, the allowlist and the plugins: only with the user's OK
-        ask("This runs the workbench installer, which changes the controls that apply to the agent (settings, the "
-            "approved git hosts, the plugins). Approve only if you asked for this install, and read its options.",
-            "installer-run")
-    targets = [t for t, _b, rem in write_targets(c.cmd, c.ps) if not rem]
+    if _installer_run(c.cmd):   # it rewrites settings, the allowlist and the plugins: only with the user's OK
+        ask("This runs the workbench installer or kit updater, which changes the controls that apply to the agent (settings, the "
+            "approved git hosts, the plugins) and may download code from the repository it names. Approve only if you asked for "
+            "this install or update, and read its options.", "installer-run")
+    targets = [(t, False) for t, rem in write_targets(c.cmd, c.ps) if not rem] + [(t, False) for t in _code_link_targets(c)]
     for seg, rem in statements(c):
         if rem:
             continue
-        toks = _cmd_toks(seg)
-        head = os.path.basename(toks[0]).lower().removesuffix(".exe") if toks else ""
-        if head in _RM_HEADS:
-            targets += [t for t in toks[1:] if not t.startswith("-")]
-        if head in _LINK_HEADS:
-            targets += _link_targets(toks)
-    for t0 in targets:
-        for t in _win_forms(t0):
-            if kit_protected(t, c.cwd):
-                block(KIT_MSG.format(path=t), "guard-config-write", t)
+        for start in cmd_starts(seg, _RM_HEADS | _LINK_HEADS | {"find"}):   # also `x=$(ln -s ...)` and `try { mklink ... } catch {}`
+            toks = start.split()
+            head = os.path.basename(toks[0]).lower().removesuffix(".exe")
+            if head in _RM_HEADS:
+                targets += [(t, True) for t in toks[1:] if not t.startswith("-")]
+            if head in _LINK_HEADS:
+                targets += [(t, False) for t in _link_targets(toks)]
+            if head == "find":
+                targets += [(t, True) for t in _find_roots(toks)]
+    targets += [(t, True) for t in _pipeline_delete_roots(c)]
+    targets = list(dict.fromkeys(targets))
+    if len(targets) > _MAX_TARGETS:   # each is looked up on disk: a list this long is not judged in bounded time
+        raise _TooDeep("%d paths to delete, move, link or write" % len(targets))
+    judged = set()
+    for t0, deleting in targets:
+        for t1 in (_glob_targets(t0, c.cwd) if deleting else [t0]):
+            if (t1, deleting) in judged:
+                continue
+            judged.add((t1, deleting))
+            if len(judged) > 2 * _MAX_TARGETS:
+                raise _TooDeep("%d paths after globbing" % len(judged))
+            for t in _win_forms(t1):
+                if kit_protected(t, c.cwd):
+                    block(KIT_MSG.format(path=t), "guard-config-write", t)
+                elif kit_hardlinked(t, c.cwd):
+                    block(KIT_LINK_MSG.format(path=t), "guard-config-write", t)
+                elif deleting and _in_config_dir(t, c.cwd) and kit_contains(t, c.cwd):   # rm -rf <config dir>/plugins deletes the guards
+                    block(KIT_GONE_MSG.format(path=t), "guard-config-write", t)
+
+
+# H5: the top-level keys of the USER's settings.json / settings.local.json that the agent may change once the user approves
+# the edit (ASK instead of DENY). Each is plain data that cannot run or load code, grant or remove a permission, or touch
+# hooks, plugins, plugin options, env, MCP servers, the status line, API key helpers or hook policy. skillOverrides maps a
+# skill name to a visibility state. Add a key only when the same is true of it; when in doubt, leave it out (outputStyle,
+# theme, language and model are out: they change what the agent is told or which model judges, which is part of its controls).
+SAFE_SETTINGS_KEYS = frozenset({"skillOverrides"})
+SETTINGS_ASK_MSG = ("{path} is a Claude Code settings file, which the agent does not change on its own. This edit changes "
+                    "{what}, which cannot run or load code or touch permissions, hooks, plugins, environment, MCP servers "
+                    "or the status line. Approve it only if you asked for this change; everything else in the file you "
+                    "edit by hand, with /config or /permissions.")
+_SETTINGS_MAX = 1_000_000
+
+
+def _strict_json(text):
+    """json.loads that refuses what another parser might read differently: a repeated key (at any depth) and NaN / Infinity."""
+    def pairs(items):
+        d = {}
+        for k, v in items:
+            if k in d:
+                raise ValueError("duplicate key")
+            d[k] = v
+        return d
+
+    def const(x):
+        raise ValueError(x)
+    return json.loads(text, object_pairs_hook=pairs, parse_constant=const)
+
+
+def _edited(text, old, new, replace_all):
+    """text with one Edit applied as the Edit tool does (old must be found, once unless replace_all), else None."""
+    if not (isinstance(old, str) and isinstance(new, str)) or not old or old == new:
+        return None
+    n = text.count(old)
+    return text.replace(old, new) if n == 1 or (n > 1 and replace_all is True) else None
+
+
+def _safe_settings_change(c, path):
+    """The set of top-level keys this Edit / MultiEdit / Write changes in the user's settings file, when every one is in
+    SAFE_SETTINGS_KEYS and both the current file and the resulting text are valid JSON objects; else None (DENY, as before).
+    Only <claude config dir>/settings.json and settings.local.json qualify, reached without a symlink: a project's own
+    .claude folder, the workbench folder, the corporate allowlist and the installed plugins never do. Never raises."""
+    try:
+        if c.tool not in ("Edit", "Write", "MultiEdit"):
+            return None
+        homes = [_wb.claude_home()] + [h for h in [_wb.installed_claude_home()] if h]
+        files = {f(h) + "/" + n for h in homes for f in (norm, _as_written) for n in ("settings.json", "settings.local.json")}
+        if norm(path, c.cwd) not in files or _as_written(path, c.cwd) not in files:
+            return None
+        real = os.path.realpath(os.path.abspath(os.path.expanduser(str(path).strip("\"'"))))
+        if os.path.getsize(real) > _SETTINGS_MAX:
+            return None
+        with open(real, encoding="utf-8-sig") as fh:
+            cur = fh.read().replace("\r\n", "\n")
+        nl = lambda x: x.replace("\r\n", "\n") if isinstance(x, str) else x  # noqa: E731 - JSON ignores line endings
+        ti = c.ti
+        if c.tool == "Write":
+            res = nl(ti.get("content"))
+        else:
+            edits = [ti] if c.tool == "Edit" else ti.get("edits")
+            if not isinstance(edits, list) or not edits:
+                return None
+            res = cur
+            for e in edits:
+                if not isinstance(e, dict) or res is None:
+                    return None
+                res = _edited(res, nl(e.get("old_string")), nl(e.get("new_string")), e.get("replace_all"))
+        if not isinstance(res, str):
+            return None
+        old, new = _strict_json(cur), _strict_json(res)
+        if not (isinstance(old, dict) and isinstance(new, dict)):
+            return None
+        canon = lambda d, k: json.dumps(d[k], sort_keys=True) if k in d else None  # noqa: E731 - true != 1, unlike ==
+        changed = {k for k in old.keys() | new.keys() if canon(old, k) != canon(new, k)}
+        return changed if changed <= SAFE_SETTINGS_KEYS else None
+    except Exception as e:
+        log(f"settings change not judged safe: {e!r}"[:200])
+        return None
+
+
+KIT_DIR_MSG = ("{path} is a folder that holds the guards' own configuration (the settings files, the workbench folder or the "
+               "installed plugins), and a tool that rewrites a whole tree would reach them. Name the files or the subfolder you mean.")
+
+
+@_memo
+def _kit_anchors():
+    """The places kit_protected guards that can sit inside a folder: each config dir's settings files and workbench folder, and
+    the workbench plugin folders found up to four levels under its plugins folder."""
+    out = set()
+    for h in [_wb.claude_home()] + [x for x in [_wb.installed_claude_home()] if x]:
+        for f in (norm, _as_written):
+            c = f(h)
+            out |= {c + "/settings.json", c + "/settings.local.json", f(h / "workbench")}
+            stack = [(c + "/plugins", 0)]
+            while stack and len(out) < 400:
+                d, depth = stack.pop()
+                try:
+                    entries = list(os.scandir(d))[:300]
+                except OSError:
+                    continue
+                for e in entries:
+                    if "workbench" in e.name.lower():
+                        out.add(d + "/" + e.name)
+                    elif depth < 3 and e.is_dir(follow_symlinks=False):
+                        stack.append((d + "/" + e.name, depth + 1))
+    return {norm(a) for a in out}
+
+
+KIT_LINK_MSG = ("{path} is another name (a hard link) for one of the guards' own files, so writing it changes that file. "
+                "The user edits those by hand, with /config or /permissions, or re-runs the workbench installer.")
+
+
+KIT_GONE_MSG = ("{path} holds the guards' own files (the workbench plugins, the workbench folder or the settings files), and deleting or "
+                "moving it switches the guards off. To refresh a stale plugin cache, use the `claude plugin` commands (update, or "
+                "remove the plugin and add it again) or re-run the workbench installer, then restart Claude Code.")
+
+
+def _kit_files():
+    """The files that exist among the protected places: the settings files, and the files under the workbench folder and the
+    workbench plugin folders (at most 5000)."""
+    out = []
+    for a in _kit_anchors():
+        if os.path.isfile(a):
+            out.append(a)
+        for root, _dirs, names in os.walk(a):
+            out += [os.path.join(root, n) for n in names]
+            if len(out) > 5000:
+                return out
+    return out
+
+
+def kit_hardlinked(path, cwd=""):
+    r"""True when `path` is an existing file whose (device, inode) is a protected file's, whatever its spelling: a hard link made
+    before this guard looked, \\?\Volume{id}\..., \\?\GLOBALROOT\..., an 8.3 short name. The settings files are compared on
+    every write; the workbench folder and plugins (a walk) only when the file has a second name."""
+    try:
+        real = norm(path, cwd)
+        st = os.stat(real)
+        if not st.st_ino or not os.path.isfile(real):
+            return False
+        key = (st.st_dev, st.st_ino)
+        same = lambda files: any((s.st_dev, s.st_ino) == key for s in (os.stat(f) for f in files if os.path.exists(f)))  # noqa: E731
+        homes = [_wb.claude_home()] + [h for h in [_wb.installed_claude_home()] if h]
+        if same(str(h / n) for h in homes for n in ("settings.json", "settings.local.json")):
+            return True
+        return st.st_nlink > 1 and same(_kit_files())
+    except (OSError, ValueError):
+        return False
+
+
+def _in_config_dir(path, cwd=""):
+    """True when `path` is a config dir or inside one. A delete of the home folder or a drive root is the rm-rf-root rule's, with its
+    own message; this is for the folders in between (<config dir>/plugins)."""
+    try:
+        d = norm(path, cwd)
+        return any(under(d, f(h)) for h in [_wb.claude_home()] + [x for x in [_wb.installed_claude_home()] if x] for f in (norm, _as_written))
+    except (OSError, ValueError):
+        return False
+
+
+def kit_contains(path, cwd=""):
+    """True when `path` is an existing folder with a kit-protected place at or below it (D6): ~/.claude, the home folder or a
+    drive root holds the settings files, so ast-grep -U there could rewrite them. A project's own .claude/settings*.json is not
+    looked for (a folder with one is common and the rewrite tools name a language)."""
+    try:
+        d = norm(path, cwd)
+        return os.path.isdir(d) and any(under(a, d) for a in _kit_anchors())
+    except (OSError, ValueError):
+        return False
 
 
 def _kit_write(c):
+    safe = None
     for f in _win_forms(c.path) if c.path else ():
         if kit_protected(f, c.cwd):
-            block(KIT_MSG.format(path=c.path), "guard-config-write", c.path)
+            safe = _safe_settings_change(c, f)
+            if safe is None:
+                block(KIT_MSG.format(path=c.path), "guard-config-write", c.path)
+        elif kit_hardlinked(f, c.cwd):
+            block(KIT_LINK_MSG.format(path=c.path), "guard-config-write", c.path)
+        elif kit_contains(f, c.cwd):
+            if getattr(c, "named", True):
+                block(KIT_DIR_MSG.format(path=c.path), "guard-config-write", c.path)
+            else:   # a symbol edit that names no file works in its base folder: asked about, not refused (a project may sit in a home folder)
+                ask(KIT_DIR_MSG.format(path=c.path), "guard-config-write", c.path)
+    if safe is not None:
+        ask(SETTINGS_ASK_MSG.format(path=c.path, what=("the setting " + ", ".join(sorted(safe))) if safe else "formatting only"),
+            "guard-config-write", c.path)
 
 
 # ── dispatch ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1040,6 +1564,8 @@ def _run(fn, c):
     nest cap (_TooDeep) are BaseExceptions and pass straight through."""
     try:
         fn(c)
+    except _Soft:
+        pass   # it asked instead of refusing; the ask is collected
     except Exception as e:
         log(f"ERROR rule {getattr(fn, '__module__', '?')}.{getattr(fn, '__name__', '?')} skipped (fail-open): {e!r}"[:300])
 
@@ -1049,6 +1575,7 @@ def shell_checks(cmd, data, packs, depth=0):
     value re-judged as shell)."""
     if len(cmd) > _MAX_CMD:
         raise _TooDeep("%d chars" % len(cmd))
+    cmd = squash_runs(cmd)
     ps = data.get("tool_name") == "PowerShell"
     L = lex(cmd, ps)
     c = SimpleNamespace(cmd=cmd, data=data, ps=ps, cwd=data.get("cwd") or "", L=L, depth=depth, packs=packs,
@@ -1067,6 +1594,54 @@ def _tool_path(ti, cwd):
     if p and cwd and not os.path.isabs(p) and not p.startswith("~"):
         p = os.path.join(cwd, p)
     return p.replace("\\", "/")
+
+
+_ROOT_KEYS = ("project_root", "cwd")
+# A key that looks like a base folder but is not one the guard reads: the call asks (KIT_ROOT_MSG), because the guard cannot tell which
+# folder a relative path in the call is read against.
+_ROOT_LIKE = re.compile(r"(?i)root|workspace|work_?dir|working|(?:base|current|cur)_?(?:dir|path|folder)|directory|^dir$|folder|"
+                        r"repo(?:sitory)?_?(?:path|dir)|project_?(?:dir|path|folder)")
+KIT_ROOT_MSG = ("This edit names a base folder under `{key}`, which the guard does not read, so it cannot tell which files a relative "
+                "path in it means. Approve only if that folder is not one that holds your settings files or the workbench files.")
+
+
+def _edit_mcp_paths(ti, cwd):
+    """([(path, named?)], [root keys the guard cannot read]) for an MCP edit tool: every file it names, absolute, from `path` (and the
+    `path` of each edit of a multi-edit; nested lists and objects are searched three levels deep). tokensave has no root parameter: its
+    relative paths are read against the folder the server was started in, taken here to be the session cwd. A `project_root` or `cwd`
+    the CALL supplies is the model's word, so a relative path is judged against the session cwd AND against each supplied root, and a
+    hit through any of them counts. A symbol edit (insert_at_symbol, replace_symbol, delete_symbol) may name no file: then each of
+    those bases is judged itself, as a path that was not named (named? False). A root-like key that is not project_root or cwd is
+    returned as unreadable."""
+    found, roots, odd, stack = [], [], [], [(ti, 0)]
+    while stack:
+        node, depth = stack.pop()
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k in _PATH_KEYS and isinstance(v, str) and v:
+                    found.append(v)
+                elif k in _PATH_KEYS and isinstance(v, list):
+                    found += [x for x in v[:500] if isinstance(x, str) and x]
+                elif k in _ROOT_KEYS and v not in (None, ""):
+                    if isinstance(v, str):
+                        roots.append(v)
+                    else:
+                        odd.append(k)
+                elif isinstance(k, str) and _ROOT_LIKE.search(k) and isinstance(v, (str, list, dict)) and v:
+                    odd.append(k)
+                if depth < 3 and isinstance(v, (dict, list)):          # whatever the key: a path can sit under any of them
+                    stack.append((v, depth + 1))
+        elif isinstance(node, list) and depth < 3:
+            stack += [(x, depth + 1) for x in node[:500] if isinstance(x, (dict, list))]
+    if len(found) > _MAX_TARGETS:
+        raise _TooDeep("%d paths in one edit call" % len(found))
+    rooted = lambda r: os.path.join(cwd, r) if cwd and not os.path.isabs(r) and not r.startswith("~") else r  # noqa: E731
+    bases = [b for b in dict.fromkeys([cwd, *map(rooted, roots)]) if b]
+    paths = []
+    for p in found:
+        paths += [p] if os.path.isabs(p) or p.startswith("~") or not bases else [os.path.join(b, p) for b in bases]
+    named = [(p.replace("\\", "/"), True) for p in dict.fromkeys(paths) if p]
+    return named or [(b.replace("\\", "/"), False) for b in bases], list(dict.fromkeys(odd))
 
 
 def _bash_mechanics(cmd):
@@ -1105,10 +1680,13 @@ def _evaluate(data):
     tool = data.get("tool_name") or ""
     ti = data.get("tool_input") if isinstance(data.get("tool_input"), dict) else {}
     cwd = data.get("cwd") if isinstance(data.get("cwd"), str) else ""
-    CTX.update(sid=str(data.get("session_id") or "-")[:8], tool=tool or "-", cwd=(cwd or "-").replace("\\", "/"))
+    CTX.update(sid=str(data.get("session_id") or "-")[:8], tool=tool or "-", cwd=(cwd or "-").replace("\\", "/"),
+               level="standard")
+    CTX["level"] = guard_level()
     _ASKS.clear()
-    for cache in (_LEXED, _WALKED, _PROSED):
+    for cache in (_LEXED, _WALKED, _PROSED, _WT, _RAWB):
         cache.clear()
+    _WORK[0] = 0
     packs = _packs()
     if tool in ("Bash", "PowerShell"):
         cmd = ti.get("command") or ""
@@ -1117,25 +1695,40 @@ def _evaluate(data):
         shell_checks(cmd, data, packs)
         if tool == "Bash":
             _bash_mechanics(cmd)
-    elif tool in WRITE_TOOLS + READ_TOOLS + OTHER_TOOLS or BROWSER_MCP.fullmatch(tool) or DB_MCP.fullmatch(tool):
-        path = _tool_path(ti, cwd) if tool not in OTHER_TOOLS else ""
-        c = SimpleNamespace(tool=tool, ti=ti, data=data, cwd=cwd, path=path, packs=packs)
-        if tool in WRITE_TOOLS:
-            _run(_kit_write, c)
-        kind = "WRITE" if tool in WRITE_TOOLS else "READ" if tool in READ_TOOLS else "TOOL"
-        for p in packs:
-            for fn in getattr(p, kind, ()):
-                _run(fn, c)
+    elif tool in WRITE_TOOLS + READ_TOOLS + OTHER_TOOLS or BROWSER_MCP.fullmatch(tool) or DB_MCP.fullmatch(tool) \
+            or EDIT_MCP.fullmatch(tool):
+        edit_mcp = bool(EDIT_MCP.fullmatch(tool))
+        paths, odd = _edit_mcp_paths(ti, cwd) if edit_mcp else ([(_tool_path(ti, cwd) if tool not in OTHER_TOOLS else "", True)], [])
+        for key in odd:
+            ask(KIT_ROOT_MSG.format(key=str(key)[:40]), "guard-config-write", str(key)[:40])
+        kind = "WRITE" if tool in WRITE_TOOLS or edit_mcp else "READ" if tool in READ_TOOLS else "TOOL"
+        for path, named in paths or [("", True)]:
+            c = SimpleNamespace(tool=tool, ti=ti, data=data, cwd=cwd, path=path, named=named, packs=packs)
+            if kind == "WRITE":
+                _run(_kit_write, c)
+            for p in packs:
+                for fn in getattr(p, kind, ()):
+                    _run(fn, c)
     if _ASKS:
         raise Decision(_out("ask", " ".join(dict.fromkeys(_ASKS))))
 
 
 def evaluate(data):
     """The decision for one PreToolUse event: a hookSpecificOutput dict ("deny" or "ask"), or None (no opinion)."""
+    _MEMO[0] = {}
+    try:
+        return _judge(data)
+    finally:
+        _MEMO[0] = None
+
+
+def _judge(data):
     try:
         _evaluate(data if isinstance(data, dict) else {})
     except Decision as d:
         return d.out
+    except _Soft:   # a soft rule outside _run: its ask must not be lost
+        return _out("ask", " ".join(dict.fromkeys(_ASKS)))
     except _TooDeep as e:
         try:
             block(DEEP_MSG, "nest-cap", f"limit {e}")

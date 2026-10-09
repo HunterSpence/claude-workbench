@@ -39,10 +39,15 @@ folder inside your Claude config folder.
 - `playwright-cli --version` prints a version, and `py -3 <KIT>/bootstrap/setup.py report run --phase refresh --quick` shows
   the `pkg-playwright-cli` and `browser-automation` rows as READY.
 - `playwright-cli open http://localhost:3000` followed by `playwright-cli screenshot` writes a PNG and shows no window.
-- On the corporate profile, `playwright-cli goto https://example.org` makes Claude Code ask for your approval first.
+- On the corporate profile, open a browser first, then go to an outside page: `playwright-cli open about:blank`, then
+  `playwright-cli goto https://example.org`. Claude Code asks for your approval before the `goto` (`open about:blank` needs none).
+  Finish with `playwright-cli close`.
 
 ## Common failures
 - **`browser-automation` is BLOCKED-BY-POLICY:** Edge's `RemoteDebuggingAllowed` policy is off. Send the row's ask-IT text to IT.
+- **`The browser 'default' is not open, please run open first` (exit 1):** `goto`, `snapshot`, `click` and the other commands act
+  on a browser that is already open. Run `playwright-cli open about:blank` (or `open` with your page's address) first;
+  `playwright-cli list` shows what is open.
 - **No window appears and you wanted one:** add `--headed`. With `HeadlessModeEnabled` off the config already does.
 - **The plan says "needs Node.js":** install Node.js first (guide 01), then run setup again.
 - **The npm install is refused (E403 or E407):** a proxy or registry policy; setup records an ask-IT item and does not retry.

@@ -1,7 +1,7 @@
 ---
 name: handoff
-description: Turn a mission into a self-contained handoff document a fresh Claude session can execute, or a short resume note. Use for "/workbench-core:handoff", "write a handoff", "resume note", when a usage-limit warning appears, when a mission outgrows the session, or when a plan in progress must survive a restart.
-when_to_use: ALWAYS load when a session nears its limit or work must continue elsewhere.
+description: "Turn a mission into a self-contained handoff document a fresh Claude session can execute, or a short resume note. Use for \"write a handoff\", \"resume note\", a usage-limit warning, or work that must survive a restart."
+when_to_use: "ALWAYS load when a session nears its limit or work must continue elsewhere."
 ---
 
 # /workbench-core:handoff

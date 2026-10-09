@@ -34,6 +34,9 @@ One `claude -p` call per item, built in `scripts/digest.py`:
 - the child environment has no `ANTHROPIC_API_KEY`; the user's own Claude Code sign-in is used;
 - the prompt goes in on standard input: a fixed instruction, then the item inside `<untrusted-meeting>` or
   `<untrusted-email>` tags with a statement that it is data, then a fixed reminder;
+- every `@` in the item text that is not right after an ASCII letter, digit or underscore (`@C:/path`, `@~/notes`, `@"a b"`,
+  and one after a Japanese full stop or comma) becomes `(at)` just before the prompt is built (`common.defang_at`): `claude -p`
+  reads the file such a token names into the prompt, even with no tools. An address such as `name@example.com` is untouched;
 - the reply must be one JSON object that validates against `scripts/digest.schema.json` (no extra keys, bounded lengths,
   dates as `YYYY-MM-DD`). Anything else is rejected, logged without content to `<WB>/state/ingest/digest-rejects.log`
   and not appended; the call is not retried;

@@ -201,7 +201,8 @@ class Relay(unittest.TestCase):
         ctx = out["hookSpecificOutput"]
         self.assertEqual(ctx["hookEventName"], "PostToolUseFailure")
         self.assertTrue(ctx["additionalContext"].startswith("Known bug, card 69: "))
-        self.assertFalse(self.state.exists())
+        self.assertEqual(list(self.state.glob("pending-hint-*")), [])      # no relay file; the only state is the issues log (H3)
+        self.assertEqual([p.name for p in self.state.iterdir() if p.suffix != ".lock"], ["issues.jsonl"])
 
 
 if __name__ == "__main__":

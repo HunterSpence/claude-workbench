@@ -1,6 +1,7 @@
 ---
 name: app-navigator
-description: "Add an in-app assistant that answers 'where do I do X?' with links to the right page of a signed-in web app: route inventory, help corpus, cached prompt, streaming endpoint (Python or TypeScript), safe-link React widget, route eval. NOT for assistants with tools or data access."
+description: "Add an in-app assistant that answers \"where do I do X?\" with links into a signed-in web app."
+disable-model-invocation: true
 ---
 
 # app-navigator

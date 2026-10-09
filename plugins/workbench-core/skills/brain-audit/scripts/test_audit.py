@@ -123,6 +123,19 @@ class SurfaceTest(unittest.TestCase):
         F = audit.audit(self.h)
         self.assertTrue(any(f["severity"] == "MEDIUM" and "/alpha" in f["finding"] and "\"off\"" in f["finding"] for f in F), F)
 
+    def test_a_routed_org_synced_skill_is_not_a_dead_route_and_a_hidden_one_is_reported(self):
+        w(os.path.join(self.h, "CLAUDE.md"), "Use /orgdocs for documents and /orghidden for the rest, /nosuchskill for nothing.\n")
+        for n in ("orgdocs", "orghidden"):
+            w(os.path.join(self.h, "skills", "synced", "org_user", n, "SKILL.md"), f"---\nname: {n}\n---\n")
+        w(os.path.join(self.h, "skills", "synced", "org_user", "manifest.json"), "{}")
+        self.settings(self.h, {"skillOverrides": {"orghidden": "off"}})
+        sf = self.sf()["surface"]
+        self.assertEqual({x["ref"] for x in sf["dead_refs"]}, {"/nosuchskill"}, "the org-synced skills are installed skills")
+        self.assertEqual([(x["skill"], x["state"]) for x in sf["hidden_skills"]], [("orghidden", "off")])
+        F = audit.audit(self.h)
+        self.assertFalse(any("/orgdocs" in f["finding"] and "not an installed" in f["finding"] for f in F), F)
+        self.assertTrue(any("/orghidden" in f["finding"] and "\"off\"" in f["finding"] for f in F), F)
+
     def test_a_project_local_setting_hides_a_skill_and_wins_over_the_user_setting(self):
         w(os.path.join(self.proj, "CLAUDE.md"), "Run /ship when the branch is ready.\n")
         w(os.path.join(self.proj, ".claude", "skills", "ship", "SKILL.md"), "---\nname: ship\n---\n")

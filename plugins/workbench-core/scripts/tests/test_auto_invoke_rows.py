@@ -51,20 +51,148 @@ class Rows(unittest.TestCase):
         return out
 
     # ---- the two kit skills ----------------------------------------------------------------------------------------
-    def test_diagram_and_brand_spec_rows_fire_and_are_not_user_only(self):
+    def test_diagram_and_brand_spec_rows_fire_diagram_is_model_started_brand_spec_is_user_only(self):
         for prompt, want in (("draw an architecture diagram of the nightly pipeline", "diagram"),
                              ("turn this mermaid into an excalidraw file", "diagram"),
                              ("sketch the data flow chart for the import", "diagram"),
                              ("we need a brand spec before the redesign", "brand-spec"),
                              ("write a style guide for the new product", "brand-spec")):
             self.assertIn(want, self.named(prompt), prompt)
-        self.assertFalse({"diagram", "brand-spec"} & ai.USER_ONLY, "both skills may be started by the model")
+        self.assertNotIn("diagram", ai.USER_ONLY, "the model may start diagram")
+        self.assertIn("brand-spec", ai.USER_ONLY, "brand-spec is a one-time intake: hidden from the model, suggested to the user")
+        self.assertIn("/workbench-core:brand-spec is user-invoked only", ai.skill_hints("we need a brand spec before the redesign")[0])
         self.assertEqual((ai.cmd("diagram"), ai.cmd("brand-spec")),
                          ("/workbench-core:diagram", "/workbench-core:brand-spec"))
         for quiet in ("what is the capital of France", "thanks", "brand new laptop arrived today"):
             self.assertEqual(set(self.named(quiet)) & {"diagram", "brand-spec"}, set(), quiet)
         for name in ("diagram", "brand-spec"):
             self.assertTrue((PLUGIN / "skills" / name / "SKILL.md").is_file(), name)
+
+    def test_user_only_is_exactly_the_skills_that_hide_from_the_model(self):
+        """USER_ONLY and `disable-model-invocation: true` must agree both ways: a skill the model cannot start is only ever
+        suggested, and a skill the model can start is never described as user-only."""
+        hidden = set()
+        for f in PLUGIN.parent.glob("*/skills/*/SKILL.md"):
+            head = f.read_text(encoding="utf-8").split("---")[1]
+            if any(line.strip() == "disable-model-invocation: true" for line in head.splitlines()):
+                hidden.add(f.parent.name)
+        self.assertEqual(hidden, ai.USER_ONLY)
+        for name in ("batch-review", "mcp-heal", "plugin-factory", "plugin-review", "web-packager", "mcp-builder",
+                     "api-bridge", "app-navigator", "brand-spec"):
+            self.assertIn(name, hidden, f"{name}: authoring and admin skills are hidden from the model")
+
+    # ---- the nine skills hidden from the model keep their old trigger phrases as hints --------------------------------
+    # Every quoted phrase in the v0.3.1 descriptions of the nine skills (the descriptions that told the model when to start
+    # them). The model no longer sees those descriptions, so the hook is the only thing that can still say the skill exists.
+    OLD_PHRASES = {
+        "api-bridge": ["let Claude use this API"],
+        "brand-spec": ["what should this look and feel like", "brand intake", "new product, no style guide"],
+        "mcp-builder": ["build an MCP server", "build a connector for X"],
+        "mcp-heal": ["/workbench-core:mcp-heal", "an MCP server is broken", "MCP tools missing", "check my MCP servers"],
+        "plugin-factory": ["make a plugin", "package this plugin for the team"],
+        "plugin-review": ["review this plugin", "check this skill before upload"],
+        "web-packager": ["can web users use this", "package this skill for claude.ai"],
+    }
+
+    def test_every_old_description_phrase_of_the_hidden_skills_still_gets_a_hint(self):
+        self.assertEqual(sum(len(v) for v in self.OLD_PHRASES.values()), 16)
+        for skill, phrases in self.OLD_PHRASES.items():
+            self.assertIn(skill, ai.USER_ONLY)
+            for phrase in phrases:
+                for prompt in (phrase, f"Hi, quick one: {phrase}, please", f"{phrase.capitalize()}?"):
+                    self.assertIn(skill, self.named(prompt), prompt)
+                hint = next(h for h in ai.skill_hints(phrase) if h.startswith(ai.cmd(skill)))
+                self.assertIn("is user-invoked only", hint, phrase)
+                self.assertIn("do not start it", hint, phrase)
+
+    # Ordinary prompts that an earlier, broader version of the new alternatives answered with a user-only hint, plus everyday work.
+    QUIET = (
+        "package this for the team as a pdf", "fresh look and feel for the quarterly deck", "no style guide for these emails",
+        "a connector between our crm export and the finance spreadsheet", "let the model use the api key", "we bought a connector for salesforce",
+        "how do i use the api from python", "let the model use the api keys from the vault", "write a status update for the team standup",
+        "reply to the email from finance about the invoice", "join these two spreadsheets on customer id",
+        "summarise the meeting notes into action items", "why does this function return None when the list is empty",
+        "what is the difference between a list and a tuple in python", "can you rename these files to lowercase", "check the spelling in my notes",
+        "how many days until the end of the quarter", "translate this paragraph into french", "sort this column by date",
+        "the build is slow on my laptop", "the MCP spec says servers use JSON-RPC", "package the report for the team to read",
+        "look and listen carefully", "the Slack connector for Claude is enabled", "can users log in", "we have no budget guide",
+        "upload the file to the server", "what is the capital of France", "brand new laptop arrived today",
+    )
+
+    def test_the_new_hint_alternatives_stay_quiet_on_ordinary_prompts(self):
+        self.assertEqual(len(self.QUIET), len(set(self.QUIET)))
+        self.assertGreaterEqual(len(self.QUIET), 20)
+        noisy = {q: sorted(set(self.named(q)) & ai.USER_ONLY) for q in self.QUIET if set(self.named(q)) & ai.USER_ONLY}
+        self.assertEqual(noisy, {}, "a user-only hint on an ordinary prompt is noise the user pays for every turn")
+
+    # ---- nothing the model reads tells it to start a skill it cannot start -------------------------------------------------
+    AMBIGUOUS = {"setup", "cleanup", "onboard", "capture", "ingest"}      # ordinary words: only /plugin:name or a backticked `name` counts
+    SUGGESTS = ("suggest", "user-invoked", "only they can start", "cannot start", "the user runs", "the user can run", "tell the user")
+    STARTS = (r"\b(?:run|runs|start|starts|invoke|invokes|use|uses|load|loads|call|calls|launch|trigger|through|via|prefer|prefers|"
+              r"apply|execute|kick off|hand (?:it )?(?:off )?to|delegate to)\b")
+    NEGATED = r"\b(?:never|not|don't|do not|without|cannot|can't)\b"
+    CLAUSE_BREAK = r"[.;:!?] |, |\) | then | and | but "
+
+    def model_facing_files(self):
+        kit = PLUGIN.parents[1]
+        files = list((kit / "instructions").rglob("*.md")) + list((kit / "templates").glob("*.md")) + list(kit.glob("plugins/*/agents/*.md"))
+        for skill_md in kit.glob("plugins/*/skills/*/SKILL.md"):
+            if skill_md.parent.name not in ai.USER_ONLY:                     # the body of a skill only the user starts is read after the user starts it
+                files += [skill_md, *skill_md.parent.glob("references/*.md")]
+        return sorted(files)
+
+    def offenders(self, text):
+        """[(line, skill)]: a user-only skill's name with a verb of starting (run, use, prefer, hand off to ...) in the clause just
+        before it, and nothing in that same clause saying the user starts it (suggest, tell the user ...) or forbidding it (never, not)."""
+        import re
+        out = []
+        for name in sorted(ai.USER_ONLY):
+            rx = (rf"/workbench-[a-z]+:{name}\b|`{name}`" if name in self.AMBIGUOUS
+                  else rf"(?<![\w/-]){re.escape(name)}(?![\w/-])")                  # not a folder or file name
+            for m in re.finditer(rx, text):
+                clause = re.split(self.CLAUSE_BREAK, re.sub(r"\s+", " ", text[max(0, m.start() - 120):m.start()]))[-1]
+                if (re.search(self.STARTS, clause, re.I) and not any(s in clause.lower() for s in self.SUGGESTS)
+                        and not re.search(self.NEGATED, clause, re.I)):
+                    out.append((text.count("\n", 0, m.start()) + 1, name))
+        return sorted(set(out))
+
+    def test_no_instruction_agent_or_model_visible_skill_tells_claude_to_start_a_user_only_skill(self):
+        kit = PLUGIN.parents[1]
+        bad = [f"{f.relative_to(kit).as_posix()}:{n} tells Claude to start {name}"
+               for f in self.model_facing_files() for n, name in self.offenders(f.read_text(encoding="utf-8"))]
+        self.assertEqual(bad, [], "a skill with disable-model-invocation cannot be started by the model: say 'suggest the user run it'")
+        self.assertGreater(len(self.model_facing_files()), 30, "the scan reached the instruction, agent and skill files")
+
+    def test_tool_routing_lists_no_user_only_skill_among_those_claude_starts(self):
+        import re
+        text = (PLUGIN.parents[1] / "instructions" / "rules" / "tool-routing.md").read_text(encoding="utf-8")
+        started, user_only = text.split("## Skills", 1)[1].split("\n## ", 1)[0].split("- User-invoked only", 1)
+        started_names = set(re.findall(r"`(?:/[\w-]+:)?([a-z][\w-]*)`", started))
+        self.assertIn("cascade", started_names)
+        self.assertEqual(started_names & ai.USER_ONLY, set(), "the list of skills Claude starts names a skill only the user can start")
+        for name in sorted(ai.USER_ONLY):
+            self.assertRegex(user_only, rf"(?<![\w-]){name}(?![\w-])", f"{name} is missing from the user-invoked-only list")
+
+    def test_the_text_check_itself_catches_the_old_wording_and_the_new_shapes(self):
+        for bad in ("- **Brand spec:** a `BRAND_SPEC.md` (from `brand-spec`) is the design system.\n  A product with neither and a look: run `brand-spec` first.\n",
+                    "- Non-interactive review, judging or bulk passes go through\n  `batch-review` (Batch API: half price).\n",
+                    "Review volume that needs no conversation goes through the\n  `batch-review` skill, if your organisation provides its API key.\n",
+                    "Or ask Claude to run `/workbench-core:mcp-heal` for you.\n",
+                    "- Prefer `batch-review` for bulk grading passes.\n",
+                    "- After the review, run `cleanup` on the scratch folder.\n",
+                    "- Suggest a commit message, then run `mcp-heal`.\n",
+                    "- Hand it off to `/workbench-core:plugin-review` when done.\n",
+                    "- For bulk passes, delegate to `batch-review`.\n",
+                    "Apply `plugin-factory` to scaffold it, and tell the user it is done.\n"):
+            self.assertTrue(self.offenders(bad), bad)
+        for good in ("- A product with neither and a look to decide: suggest the user run `/workbench-core:brand-spec` first.\n",
+                     "- Passes can use the Batch API: suggest the user run `/workbench-core:batch-review`.\n",
+                     "`BRAND_SPEC.md` (see `brand-spec`), then this page.\n",
+                     "- User-invoked only (the model cannot start them): `vdi-drive`, `pc-checkup`, `cleanup`.\n",
+                     "- Never run a code-graph tool's `install`, `setup`, `upgrade` or `doctor`.\n",
+                     "- Do not run `cleanup` yourself; the user runs it.\n",
+                     "- Suggest a commit message, then suggest the user run `mcp-heal`.\n"):
+            self.assertEqual(self.offenders(good), [], good)
 
     # ---- rows for skills the kit does not ship ---------------------------------------------------------------------
     def test_external_rows_stay_silent_until_the_skill_is_installed(self):

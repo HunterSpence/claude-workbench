@@ -166,6 +166,49 @@ class HealerTest(unittest.TestCase):
         self.assertIn("headersHelper", row["detail"])
         self.assertEqual(rc, 0)
 
+    def test_a_park_entry_with_a_definition_registers_the_server_parked_and_check_says_parked_not_down(self):
+        self.golden_with(tokensave={"action": "park", "command": "/opt/bin/tokensave", "args": ["serve"], "alwaysLoad": False,
+                                    "egress": "none", "reason": "serve exits until a repository is indexed"})
+        rc, out = self.apply()
+        self.assertEqual(rc, 0, out)
+        self.assertIn("registered parked", out)
+        cfg = json.loads(read(self.cfg))
+        self.assertEqual(cfg["mcpServers"], {}, "nothing is live: Claude Code never starts it")
+        self.assertEqual(cfg["mcpServersParked"]["tokensave"],
+                         {"command": "/opt/bin/tokensave", "args": ["serve"], "alwaysLoad": False})
+        rc, out = self.apply()
+        self.assertIn("already matches", out)                                    # idempotent
+        rc, out = run(["--config", self.cfg, "check", "--json", "--managed-dir", self.empty_managed])
+        self.assertEqual([(r["server"], r["status"]) for r in json.loads(out)], [("tokensave", "PARKED")])
+        self.assertEqual(rc, 0, "a parked server never makes the check fail")
+        rc, out = run(["--config", self.cfg, "check", "--managed-dir", self.empty_managed])
+        self.assertIn("PARKED", out)
+        self.assertIn("unpark tokensave", out)
+        self.assertNotIn("DOWN", out)
+        rc, out = run(["--config", self.cfg, "unpark", "tokensave"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(read(self.cfg))["mcpServers"]["tokensave"]["command"], "/opt/bin/tokensave")
+
+    def test_a_down_server_still_fails_the_check_beside_a_parked_one(self):
+        dump({"mcpServers": {"dead": {"command": sys.executable, "args": ["-c", "import sys; sys.exit(3)"]}},
+              "mcpServersParked": {"tokensave": {"command": "x"}}}, self.cfg)
+        rc, out = run(["--config", self.cfg, "check", "--json", "--timeout", "20", "--managed-dir", self.empty_managed])
+        rows = {r["server"]: r["status"] for r in json.loads(out)}
+        self.assertEqual(rows, {"dead": "DOWN", "tokensave": "PARKED"})
+        self.assertEqual(rc, 1)
+
+    def test_park_with_a_definition_leaves_a_live_or_parked_user_entry_as_it_is_and_refuses_a_placeholder(self):
+        dump({"mcpServers": {"mine": {"command": "my-own", "args": ["x"]}}, "mcpServersParked": {"kept": {"command": "old"}}}, self.cfg)
+        dump({"servers": {"mine": {"action": "park", "command": "/other"}, "kept": {"action": "park", "command": "/new"},
+                          "todo": {"action": "park", "command": "{{BIN}}", "args": []}}}, self.golden)
+        rc, out = self.apply()
+        self.assertEqual(rc, 0, out)
+        self.assertIn("SKIPPED todo", out)
+        cfg = json.loads(read(self.cfg))
+        self.assertEqual(cfg["mcpServersParked"], {"mine": {"command": "my-own", "args": ["x"]}, "kept": {"command": "old"}},
+                         "an existing live entry is parked as it is (the old behaviour); a parked one is not rebuilt")
+        self.assertEqual(cfg["mcpServers"], {})
+
     def test_missing_config_is_reported_not_raised(self):
         gone = os.path.join(self.d, "never-written.json")
         for argv in (["check"], ["check", "--json"], ["apply", "--golden", self.golden], ["unpark", "x"]):
