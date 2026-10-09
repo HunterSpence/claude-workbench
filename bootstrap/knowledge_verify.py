@@ -182,7 +182,12 @@ class Verifier:
             rc, out, _ = self.run([self.py, self.kb_script("kb_health.py"), "--json"], self.live_env(), timeout=300)
             d = jparse(out, {}) or {}
             self._health = {r.get("check"): r.get("status") for r in d.get("results") or [] if isinstance(r, dict)}
+            self._health_detail = {r.get("check"): str(r.get("detail") or "") for r in d.get("results") or [] if isinstance(r, dict)}
         return self._health
+
+    def health_detail(self, check):
+        self.health()
+        return (getattr(self, "_health_detail", None) or {}).get(check, "")
 
     def feature_ask(self, fid):
         feats = jload(self.kit / "bootstrap" / "features.json", {}) or {}
@@ -248,8 +253,14 @@ def d3_kb_machinery(v):
     if not tests.is_dir() or not rs.is_file():
         return FAIL, "the KB tests or tools/run_suites.py are not in this kit"
     out, t = v.sb / "d3.json", v.sb / "d3"
-    env = {"CLAUDE_CONFIG_DIR": str(t / "ch"), "WORKBENCH_KB_ROOT": str(t / "kb"), "KB_INDEX_DB": str(t / "kb.db")}
-    rc, _, err = v.run([v.py, rs, "--child-unittest", tests, "--child-out", out], env, timeout=600, mb=1024)
+    env = {"CLAUDE_CONFIG_DIR": str(t / "ch"), "WORKBENCH_KB_ROOT": str(t / "kb"), "KB_INDEX_DB": str(t / "kb.db"),
+           "WB_FIELD_CHECK": "1"}   # correctness only: the tests' wall-clock budgets belong to the kit's own suite
+    cmd = [v.py, rs, "--child-unittest", tests, "--child-out", out]
+    field = field_tests(tests)
+    if field:           # the field list: the full suite starts several hundred processes, too slow where each start is (release runs it)
+        write_atomic(v.sb / "d3-names.json", json.dumps(field))
+        cmd += ["--child-names", v.sb / "d3-names.json"]
+    rc, _, err = v.run(cmd, env, timeout=600, mb=1024)
     res = jload(out)
     if not isinstance(res, dict):
         return FAIL, f"the KB test run wrote no result (exit {rc}): {err.strip()[-200:]}"
@@ -259,7 +270,17 @@ def d3_kb_machinery(v):
     if res.get("failed") or rc != 0 or odd:
         return FAIL, (f"{res.get('failed')} failure(s)/error(s)" + failing_names(res.get("failures"))
                       + (f"; skips not in tools/skips.allow: {', '.join(odd[:3])}" if odd else ""))
-    return PASS, f"{len(res.get('ids') or [])} test(s), 0 failures, {len(res.get('skipped') or [])} allowed skip(s)"
+    which = " from the field list (the kit's release runs all of them)" if field else ""
+    return PASS, f"{len(res.get('ids') or [])} test(s){which}, 0 failures, {len(res.get('skipped') or [])} allowed skip(s)"
+
+
+def field_tests(tests):
+    """The test ids in <tests>/field-tests.txt (one per line, # comments), [] when the kit has no list: run everything."""
+    try:
+        text = (tests / "field-tests.txt").read_text(encoding="utf-8")
+    except OSError:
+        return []
+    return [ln.strip() for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
 
 
 def failing_names(ids, most=10, width=230):
@@ -309,7 +330,12 @@ def d5_kb_index(v):
     soft = [c for c in ("caps", "frontmatter", "secrets", "dead-links", "orphans") if h.get(c) == WARN]
     if fts != "1":
         return WARN, "built, but this Python has no FTS5: a plain-table fallback is used"
-    return (WARN, f"built (fts5); kb_health WARN: {', '.join(soft)}") if soft else (PASS, "built (fts5); kb_health caps, "
+    if soft:
+        n = v.health_detail("dead-links").split(" ", 1)[0] if "dead-links" in soft else ""
+        hint = (f" ({n} dead link(s) in your notes: list them with `kb_health.py --verbose`)" if n.isdigit() else
+                " (details: `kb_health.py --verbose`)")
+        return WARN, f"built (fts5); kb_health WARN: {', '.join(soft)}{hint}"
+    return (PASS, "built (fts5); kb_health caps, "
                                                                                        "frontmatter and secrets PASS")
 
 

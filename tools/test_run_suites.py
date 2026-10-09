@@ -197,6 +197,12 @@ class Running(Base):
         rc, out = self.go("--require-all", "--skips", self.allow("# none\n"), env=env)
         self.assertEqual(rc, 0, out)
 
+    def test_an_exported_field_check_flag_never_reaches_a_release_suite(self):
+        self.repo({"a/test_field.py": "import os, unittest\nclass T(unittest.TestCase):\n"
+                                      "    def test_budgets_apply(self): self.assertIsNone(os.environ.get('WB_FIELD_CHECK'))\n"})
+        rc, out = self.go("--skips", self.allow("# none\n"), env={"WB_FIELD_CHECK": "1"})
+        self.assertEqual(rc, 0, out)
+
     def test_node_suite_counts_and_its_skip_id(self):
         if not HAVE_NODE:
             self.fail("node is required") if REQUIRE else self.skipTest("node not installed")

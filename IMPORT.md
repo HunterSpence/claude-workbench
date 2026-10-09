@@ -32,7 +32,7 @@ release is tagged). `<EXTRAS>` is a comma-separated list of opt-ins (for example
 or empty; `<GIT-HOSTS>` is your organisation's git hosts, comma-separated, or empty. The prompt drives
 `docs/SETUP-RUNBOOK.md`, which gives the session the exact command, check, denial step and ask for every component.
 
-> Set up claude-workbench `v0.3.2` on this machine, end to end, following `docs\SETUP-RUNBOOK.md` from the release. This
+> Set up claude-workbench `v0.3.3` on this machine, end to end, following `docs\SETUP-RUNBOOK.md` from the release. This
 > message is my authorisation for every step in it; do not stop to ask me except where step 11 says.
 > 1. Download `<ZIP-URL>` over HTTPS, without credentials, into a new empty temp folder. Check its SHA-256 with
 >    `(Get-FileHash <file> -Algorithm SHA256).Hash`. If it is not `<SHA256>`, stop and tell me. Unpack it with
@@ -268,7 +268,7 @@ else ask me once. `<PY>` is the `python` in `<WB>\config.json` (the installer wr
 >    `sha256:`) or the value in the checksum table of `body`; either one is enough. Neither given, or two different values: delete the
 >    file and stop, and tell me.
 > 3. Unpack with `Expand-Archive` into a new folder. The kit is the nested folder `claude-workbench-v<ver>` (for example
->    `claude-workbench-v0.3.2`); call it `<unpacked>`. Its `bootstrap\install.py` must hold `VERSION = "<ver>"`, the `tag_name` without
+>    `claude-workbench-v0.3.3`); call it `<unpacked>`. Its `bootstrap\install.py` must hold `VERSION = "<ver>"`, the `tag_name` without
 >    the `v`; if not, delete everything and stop. Read `<unpacked>\IMPORT.md`, section "Updating": if it says more than this list,
 >    follow that one.
 > 4. Remember my choices; do not add or change any: `with`, `no_nightly` and `no_update` in `<WB>\state\setup-state.json`

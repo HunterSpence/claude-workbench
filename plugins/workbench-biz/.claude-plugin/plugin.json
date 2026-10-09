@@ -1,7 +1,7 @@
 {
   "name": "workbench-biz",
   "displayName": "Workbench business skills",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Eight portable business skills for Claude on the web, desktop and CLI: requirements to stories, meeting to actions, status reports, test cases, spreadsheet analysis, RFP and SOW drafts, branded decks and policy Q&A. Instructions only: no scripts, hooks, servers or settings.",
   "author": {
     "name": "The claude-workbench contributors"

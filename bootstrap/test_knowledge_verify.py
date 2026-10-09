@@ -38,7 +38,7 @@ def out(o):
     sys.stdout.write(json.dumps(o) + "\n")
 rc = sc.get("rc", {}).get(TOOL, 0)
 if TOOL == "kb_health":
-    res = [{"check": c, "status": s, "detail": c + " fixture"} for c, s in {
+    res = [{"check": c, "status": s, "detail": sc.get("health_detail", {}).get(c, c + " fixture")} for c, s in {
         "layout": "PASS", "caps": "PASS", "frontmatter": "PASS", "index": "PASS", "dead-links": "PASS", "orphans": "PASS",
         "secrets": "PASS", **sc.get("health", {})}.items()]
     if "--eval" in a:
@@ -423,6 +423,27 @@ class Steps(Base):
         self.assertEqual(st, KV.FAIL)
         self.assertIn("2 failure(s)/error(s): test_bad, test_broken", detail, "the failing tests are named")
 
+    def test_kb_machinery_runs_only_the_field_list_when_the_kit_has_one(self):
+        e = self.env()
+        tests = e.kit / "plugins/workbench-kb/tests"
+        (tests / "field-tests.txt").write_text("# comment\n\ntest_fake.Fake.test_ok\n", encoding="utf-8")
+        st, detail, _ = e.step(KV.d3_kb_machinery)
+        self.assertEqual(st, KV.PASS, detail)
+        self.assertIn("1 test(s) from the field list", detail)
+        self.assertIn("0 allowed skip", detail, "test_allowed_skip is not on the list, so it never ran")
+        (tests / "field-tests.txt").write_text("test_fake.Fake.test_ok\ntest_fake.Fake.test_renamed_away\n", encoding="utf-8")
+        st, detail, _ = e.step(KV.d3_kb_machinery)
+        self.assertEqual(st, KV.FAIL, "a listed test that does not exist fails the row, never shrinks it")
+        self.assertIn("test_renamed_away", detail)
+
+    def test_kb_machinery_marks_its_run_as_a_field_check(self):
+        e = self.env()
+        t = e.kit / "plugins/workbench-kb/tests/test_fake.py"
+        t.write_text("import os, unittest\nclass Fake(unittest.TestCase):\n    def test_field(self):\n"
+                     "        self.assertEqual(os.environ.get('WB_FIELD_CHECK'), '1')\n", encoding="utf-8")
+        st, detail, _ = e.step(KV.d3_kb_machinery)
+        self.assertEqual(st, KV.PASS, detail)   # the KB suite skips only its wall-clock budget under this flag
+
     @unittest.skipUnless(os.name == "nt" or REQUIRE, "pythonw exists only on Windows")
     def test_kb_machinery_passes_under_a_detached_pythonw_setup_run(self):
         e = self.env()
@@ -466,6 +487,23 @@ class Steps(Base):
         e.scenario.update(health={"dead-links": "WARN"})
         e.save()
         self.assertEqual(e.step(KV.d5_kb_index)[0], KV.WARN)
+
+    def test_kb_index_warn_counts_dead_links_and_never_names_a_note(self):
+        e = self.env()
+        e.scenario.update(health={"dead-links": "WARN"},
+                          health_detail={"dead-links": "3 dead link(s)\n    ops/some-note.md:4 " + "[" + "[ghost-page]]"})
+        e.save()
+        st, detail, _ = e.step(KV.d5_kb_index)
+        self.assertEqual(st, KV.WARN)
+        self.assertIn("3 dead link(s) in your notes", detail)
+        self.assertIn("kb_health.py --verbose", detail)
+        self.assertNotIn("some-note", detail)
+        self.assertNotIn("ghost-page", detail)
+        e.scenario.update(health={"orphans": "WARN"}, health_detail={})
+        e.save()
+        st, detail, _ = e.step(KV.d5_kb_index)
+        self.assertEqual(st, KV.WARN)
+        self.assertIn("(details: `kb_health.py --verbose`)", detail)
 
     def test_kb_retrieval_reads_the_eval_floor_on_a_template_sandbox(self):
         e = self.env()

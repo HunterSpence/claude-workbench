@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -2005,6 +2006,118 @@ class FieldFixes(unittest.TestCase):
         g = json.loads((e.wb / "state" / "tokensave-mcp.golden.json").read_text(encoding="utf-8"))
         self.assertEqual(g["servers"]["tokensave"]["action"], "park")
         self.assertIn("unpark tokensave", note)
+
+    def test_a_live_entry_for_the_kits_own_binary_that_cannot_start_is_parked(self):
+        e = self.env()
+        e.add_tool("tokensave", exe=True)
+        cfg = e.ch / ".claude.json"
+        live = {"command": str(e.bin / "tokensave.cmd"), "args": ["serve"]}             # a hand registration of the kit's server
+        cfg.write_text(json.dumps({"mcpServers": {"tokensave": live}}), encoding="utf-8")
+        e.run("run", "--with", "tokensave", code=0)
+        got = json.loads(cfg.read_text(encoding="utf-8"))
+        self.assertNotIn("tokensave", got.get("mcpServers") or {}, "a server that exits before the handshake is not left live")
+        self.assertIn("tokensave", got["mcpServersParked"])
+        self.assertTrue([n for n in e.state()["notes"] if "setup PARKED it" in n and "unpark tokensave" in n])
+        led = json.loads((e.wb / "state" / "provision-ledger.json").read_text(encoding="utf-8"))["entries"]
+        self.assertTrue([x for x in led if x.get("key") == "mcp:tokensave"], "uninstall must know setup parked it")
+        self.assertFalse((e.wb / "state" / "tokensave-probe.json").exists(), "the one-entry probe config is removed")
+
+    def _kit_binary_entry(self, e):
+        e.add_tool("tokensave", exe=True)
+        cfg = e.ch / ".claude.json"
+        live = {"command": str(e.bin / "tokensave.cmd"), "args": ["serve"]}
+        cfg.write_text(json.dumps({"mcpServers": {"tokensave": live}}), encoding="utf-8")
+        return cfg, live
+
+    def _registry(self, e, rows=None):
+        db = e.home / ".tokensave" / "global.db"
+        db.parent.mkdir(parents=True, exist_ok=True)
+        if rows is None:
+            return db.write_bytes(b"not a database\n" * 64)
+        con = sqlite3.connect(db)
+        con.execute("create table projects (path text primary key, tokens_saved integer not null default 0)")
+        con.executemany("insert into projects (path) values (?)", [(r,) for r in rows])
+        con.commit()
+        con.close()
+
+    def test_an_empty_registry_still_parks_the_kit_binary_entry(self):
+        e = self.env()
+        cfg, live = self._kit_binary_entry(e)
+        self._registry(e, rows=[])
+        e.run("run", "--with", "tokensave", code=0)
+        got = json.loads(cfg.read_text(encoding="utf-8"))
+        self.assertNotIn("tokensave", got.get("mcpServers") or {}, "the read must see 0, not fail")
+        self.assertIn("tokensave", got["mcpServersParked"])
+
+    def test_an_unreadable_registry_leaves_the_entry_live(self):
+        e = self.env()
+        cfg, live = self._kit_binary_entry(e)
+        self._registry(e, rows=None)
+        e.run("run", "--with", "tokensave", code=0)
+        self.assertEqual(json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"]["tokensave"], live, "unknown is not empty")
+
+    def test_a_kit_binary_entry_stays_live_once_tokensave_has_indexed_a_repository(self):
+        e = self.env()
+        cfg, live = self._kit_binary_entry(e)
+        self._registry(e, rows=["C:/repo"])
+        e.run("run", "--with", "tokensave", code=0)
+        got = json.loads(cfg.read_text(encoding="utf-8"))
+        self.assertEqual(got["mcpServers"]["tokensave"], live, "the healer's empty-folder probe is not proof it is down")
+        note = [n for n in e.state()["notes"] if n.startswith("tokensave:")]
+        self.assertTrue(note and "indexed 1 repository, so setup left it on" in note[0], note)
+        self.assertNotIn("exits until", note[0], "no advice to park a server that is in use")
+
+    def test_a_kit_binary_entry_the_user_unparked_stays_live(self):
+        e = self.env()
+        cfg, live = self._kit_binary_entry(e)
+        seed(e, [{"kind": "mcp", "name": "tokensave", "config": S.fwd(cfg), "key": "mcp:tokensave", "at": S.now()}])
+        e.run("run", "--with", "tokensave", code=0)
+        self.assertEqual(json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"]["tokensave"], live,
+                         "setup parked it once; a live entry now means the user turned it back on")
+
+    def test_tokensave_down_probes_only_that_entry_and_reads_anything_unclear_as_not_down(self):
+        e = self.env()
+        self.in_process(e)
+        ctx = S.Ctx()
+        live = {"command": "tokensave", "args": ["serve"]}
+        seen = []
+
+        def answer(rc, out=b"", exc=None):
+            def py_tool(script, *args, timeout=900):
+                cfg = json.loads(Path(args[args.index("--config") + 1]).read_text(encoding="utf-8"))
+                seen.append((cfg, args, timeout))
+                if exc:
+                    raise exc
+                return rc, out
+            return py_tool
+
+        cases = [(answer(1, json.dumps([{"server": "tokensave", "status": "DOWN"}]).encode()), True),
+                 (answer(0, json.dumps([{"server": "tokensave", "status": "UP"}]).encode()), False),
+                 (answer(1, b"not json"), False),
+                 (answer(2, json.dumps([{"server": "tokensave", "status": "DOWN"}]).encode()), False),
+                 (answer(1, json.dumps({"server": "tokensave"}).encode()), False),
+                 (answer(None, exc=subprocess.TimeoutExpired("healer", 90)), False)]
+        for fake, want in cases:
+            with self.subTest(want=want, n=len(seen)), mock.patch.object(ctx, "py_tool", fake):
+                self.assertEqual(S.tokensave_down(ctx, live), want)
+        self.assertTrue(all(cfg == {"mcpServers": {"tokensave": live}} for cfg, _, _ in seen), "never the user's other servers")
+        self.assertTrue(all("--timeout" in a and a[a.index("--timeout") + 1] == "30" and t <= 120 for _, a, t in seen))
+        self.assertFalse((ctx.state_dir / "tokensave-probe.json").exists())
+
+    def test_a_config_whose_servers_are_not_an_object_does_not_stop_setup(self):
+        e = self.env()
+        e.add_tool("tokensave", exe=True)
+        cfg = e.ch / ".claude.json"
+        cfg.write_text(json.dumps({"mcpServers": ["odd"], "mcpServersParked": 5}), encoding="utf-8")
+        e.run("run", "--with", "tokensave", code=0)          # an exception in a phase would be exit 4
+
+    def test_runs_this_exe_matches_the_path_or_the_bare_name_only(self):
+        exe = str(self.kit / "bin" / "tokensave.exe")
+        self.assertTrue(S.runs_this_exe({"command": exe}, exe))
+        self.assertTrue(S.runs_this_exe({"command": "tokensave"}, exe))
+        self.assertFalse(S.runs_this_exe({"command": "my-own"}, exe))
+        self.assertFalse(S.runs_this_exe({"command": str(self.kit / "other" / "tokensave.exe")}, exe))
+        self.assertFalse(S.runs_this_exe({}, exe))
 
     def report_ask_env(self, ask_only_in_report=False):
         ask = ("Please allow downloads from huggingface.co (a one-time embedding model), or provide an approved internal mirror "

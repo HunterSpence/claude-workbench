@@ -55,7 +55,7 @@ import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-VERSION = "0.3.2"
+VERSION = "0.3.3"
 MARKETPLACE = "workbench"
 PLUGIN_IDS = ("workbench-core@workbench", "workbench-kb@workbench")    # pluginConfigs.<id>.options.python: these only
 DEFAULT_PLUGINS = PLUGIN_IDS + ("workbench-biz@workbench",)

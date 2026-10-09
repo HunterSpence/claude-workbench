@@ -44,6 +44,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -1589,6 +1590,49 @@ def do_ctx_config(ctx):
                          "is. With automatic discovery off, ctx reads only the roots listed there.")
 
 
+def runs_this_exe(entry, exe):
+    """The MCP entry starts this binary: the same path, or the bare name the kit's bin folder resolves."""
+    cmd = str((entry or {}).get("command") or "") if isinstance(entry, dict) else ""
+    if not cmd:
+        return False
+    if os.path.normcase(os.path.basename(cmd)) in ("tokensave", "tokensave.exe", "tokensave.cmd") and os.sep not in cmd and "/" not in cmd:
+        return True
+    return os.path.normcase(os.path.abspath(cmd)) == os.path.normcase(os.path.abspath(str(exe)))
+
+
+def tokensave_projects(ctx):
+    """How many repositories tokensave has indexed (its global registry, ~/.tokensave/global.db): 0 when there is no
+    registry, None when it cannot be read. `serve` exits before the handshake only while this is 0."""
+    db = ctx.home / ".tokensave" / "global.db"
+    if not db.is_file():
+        return 0
+    try:
+        con = sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True, timeout=5)
+        try:
+            return con.execute("select count(*) from projects").fetchone()[0]
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return None
+
+
+def tokensave_down(ctx, live):
+    """The healer's own probe says this one tokensave entry does not start. It probes a config holding only that entry
+    (never the user's other servers), with a short timeout; anything unclear, a timeout included, reads as not down."""
+    probe = ctx.state_dir / "tokensave-probe.json"
+    jwrite(probe, {"mcpServers": {"tokensave": live}})
+    try:
+        rc, out = ctx.py_tool(KIT / "tools" / "mcp-healer" / "mcp_healer.py", "--config", probe, "check", "--json",
+                              "--timeout", "30", timeout=90)
+        rows = json.loads(decode(out))
+    except (subprocess.TimeoutExpired, ValueError, OSError):
+        return False
+    finally:
+        probe.unlink(missing_ok=True)
+    return rc in (0, 1) and isinstance(rows, list) and any(
+        isinstance(r, dict) and r.get("server") == "tokensave" and r.get("status") == "DOWN" for r in rows)
+
+
 def do_tokensave_mcp(ctx):
     """tokensave's `serve` exits while no repository is indexed, so a live entry shows DOWN and warns in every doctor run.
     Register it PARKED instead (mcpServersParked, which Claude Code ignores) through the healer; `unpark` turns it on after
@@ -1602,6 +1646,7 @@ def do_tokensave_mcp(ctx):
         return ctx.notes.append(f"tokensave: {fwd(cfgp)} does not exist yet; start Claude Code once, then run setup.py run "
                                 "again to register the code-graph server (parked)")
     cur = jload(cfgp, {}) or {}
+    cur = cur if isinstance(cur, dict) else {}
     tpl = ((jload(KIT / "mcp" / "golden-config.template.json", {}) or {}).get("servers") or {}).get("tokensave")
     if not tpl:
         return
@@ -1609,12 +1654,30 @@ def do_tokensave_mcp(ctx):
             "reason": "Registered parked by setup: serve exits until a repository is indexed (tokensave init)."}
     g = ctx.state_dir / "tokensave-mcp.golden.json"
     jwrite(g, {"_readme": "Written by setup.py: the tokensave MCP server only, parked.", "servers": {"tokensave": spec}})
-    if "tokensave" in (cur.get("mcpServers") or {}):        # the user's live entry stays; say what it costs and the one command
+    servers = cur.get("mcpServers")
+    live = servers.get("tokensave") if isinstance(servers, dict) else None
+    unparked = any(x.get("key") == "mcp:tokensave" for x in ctx.ledger()["entries"])   # setup parked it before: the user turned it on
+    mine = live is not None and runs_this_exe(live, exe)
+    projects = tokensave_projects(ctx) if mine else None
+    if mine and not unparked and projects == 0 and tokensave_down(ctx, live):
+        # an entry for the kit's own binary that cannot start (no repository indexed yet): park it, unpark after `tokensave init`
+        rc, _ = ctx.py_tool(KIT / "tools" / "mcp-healer" / "mcp_healer.py", "--config", cfgp, "apply", "--golden", g, timeout=120)
+        if rc == 0:
+            ctx.record({"kind": "mcp", "name": "tokensave", "config": fwd(cfgp)}, "mcp:tokensave")
+            return ctx.notes.append("tokensave: its live entry runs the kit's binary and exits until a repository is indexed, so setup "
+                                    "PARKED it. After `tokensave init` in a repo run `mcp_healer.py unpark tokensave` and restart "
+                                    "Claude Code.")
+    if mine and projects:                                   # in use: sessions inside an indexed repository start it there
+        return ctx.notes.append(
+            f"tokensave: registered LIVE in {fwd(cfgp)} and it has indexed {projects} repositor{'y' if projects == 1 else 'ies'}, so "
+            "setup left it on. The doctor's MCP check starts it in an empty folder, where it can exit before answering; Claude Code "
+            "sessions inside an indexed repository use it normally.")
+    if live is not None:                                     # someone else's entry, or one that runs: it stays; say what it costs
         park = show([PY, fwd(KIT / "tools" / "mcp-healer" / "mcp_healer.py"), "--config", fwd(cfgp), "apply", "--golden", fwd(g)])
         return ctx.notes.append(
             f"tokensave: it is registered LIVE in {fwd(cfgp)}, and its serve exits until a repository is indexed, so the MCP check "
             f"shows it DOWN. Setup did not change it. To park it: {park}  (after tokensave init: mcp_healer.py unpark tokensave).")
-    if "tokensave" in (cur.get("mcpServersParked") or {}):
+    if "tokensave" in (cur.get("mcpServersParked") if isinstance(cur.get("mcpServersParked"), dict) else {}):
         return                                              # already parked, by an earlier run or by the user
     rc, _ = ctx.py_tool(KIT / "tools" / "mcp-healer" / "mcp_healer.py", "--config", cfgp, "apply", "--golden", g, timeout=120)
     if rc == 3:

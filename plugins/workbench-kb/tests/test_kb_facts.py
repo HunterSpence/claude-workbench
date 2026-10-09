@@ -203,7 +203,8 @@ class Registry(unittest.TestCase):
         r = subprocess.run([sys.executable, str(SCRIPTS / "kb_facts.py"), "--self-test"], capture_output=True, text=True, timeout=60)
         self.assertEqual((r.returncode, r.stdout.strip().count("\n"), r.stderr), (0, 0, ""), r.stdout)
         self.assertTrue(r.stdout.strip().startswith("kb_facts self-test"), r.stdout)
-        self.assertLess(time.time() - t0, 10)
+        if os.environ.get("WB_FIELD_CHECK") != "1":        # the doctor's D3 checks correctness; a budget measures the machine
+            self.assertLess(time.time() - t0, 10)
 
 
 class Base(unittest.TestCase):

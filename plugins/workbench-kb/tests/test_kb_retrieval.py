@@ -577,6 +577,8 @@ class Latency(unittest.TestCase):
                                encoding="utf-8", env=env, timeout=120)
             ms.append((time.perf_counter() - t0) * 1000)
             self.assertEqual(r.returncode, 0, r.stderr)
+        if os.environ.get("WB_FIELD_CHECK") == "1":
+            return   # the doctor's D3 checks correctness; on a busy laptop with scanning a wall-clock budget measures the machine
         self.assertLess(sorted(ms)[len(ms) // 2], 300, "median of a whole command, Python start-up included")
 
 

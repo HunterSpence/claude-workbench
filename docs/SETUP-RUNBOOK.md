@@ -259,7 +259,7 @@ the failed item `knowledge-verify` and exit 4; a WARN that carries an ask become
 |---|---|---|---|
 | `D1` | `kb-seeded` | the KB has its domain folders with a `HOT.md`, `active-context.md`, `00-index.md` | FAIL: run `install.py --apply` again |
 | `D2` | `kb-state` | the KB state folder is local, outside the KB and not in OneDrive; its lock is free | FAIL |
-| `D3` | `kb-machinery` | the KB unit tests pass under a 1 GB memory cap; skips only if listed in `tools/skips.allow` | FAIL |
+| `D3` | `kb-machinery` | the KB unit tests named in `plugins/workbench-kb/tests/field-tests.txt` (every KB area, no timing test; the release runs the whole suite) pass under a 1 GB memory cap; skips only if listed in `tools/skips.allow` | FAIL |
 | `D4` | `journal` | one journal line is written and `kb_search.py --scope all` finds it | FAIL |
 | `D5` | `kb-index` | `kb_index.py build` works (FTS5) and `kb_health.py` caps, frontmatter and secrets pass | FAIL; WARN without FTS5 |
 | `D6` | `kb-retrieval` | the canned retrieval cases pass their floors on a sandbox KB | FAIL |

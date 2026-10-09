@@ -985,6 +985,29 @@ class Verify(Machine):
         self.assertNotIn("[it-asks]", box)
         self.assertRegex(text, r"hook errors\s+FAIL")
 
+    def test_the_users_own_kb_index_and_capture_rows_stay_out_of_the_author_box(self):
+        self.settings({"enabledPlugins": {"workbench-core@workbench": True, "workbench-kb@workbench": True},
+                       "pluginConfigs": {}})
+        self.run.rows = [{"check": "knowledge: kb-index", "status": "WARN", "detail": "D5 built (fts5); kb_health WARN: dead-links"},
+                         {"check": "knowledge: capture", "status": "WARN", "detail": "D17 the InfoSec acknowledgement is not recorded"},
+                         {"check": "knowledge: kb-machinery", "status": "FAIL", "detail": "D3 1 failure(s)/error(s): test_x"}]
+        code, text = self.verify()        # the row names are the doctor's own: setup.py doctor --json prefixes knowledge rows
+        box = text.split("FOR THE KIT AUTHOR")[1]
+        self.assertNotIn("kb-index", box)
+        self.assertNotIn("capture", box)
+        self.assertIn("[doctor:knowledge: kb-machinery]", box, "a kit defect still reaches the author")
+        self.assertRegex(text, r"doctor: knowledge: kb-index\s+WARN", "the user still sees their own row")
+        self.run.rows = [{"check": "knowledge: kb-index", "status": "FAIL", "detail": "D5 kb_index.py build exit 1"}]
+        code, text = self.verify()
+        self.assertIn("[doctor:knowledge: kb-index]", text.split("FOR THE KIT AUTHOR")[1], "the kit's indexer crashing is the kit's")
+
+    def test_every_knowledge_row_the_filters_name_is_a_real_doctor_row(self):
+        import knowledge_verify as KV
+        real = {"knowledge: " + name for _id, name, _fn in KV.STEPS}
+        named = {n for n in K.NOT_KIT | K.IT_ROWS | K.OWN_ROWS if n.startswith("knowledge")}
+        self.assertTrue(named, "the filters name knowledge rows")
+        self.assertEqual(named - real, set(), "a filter names a row the doctor never prints")
+
     def test_an_entry_in_the_box_never_has_more_than_three_lines_and_a_doctor_row_without_an_ask_is_listed(self):
         rows = [K.R("x-1", "check one", "FAIL", "detail", "cmd one", [f"line {i}" for i in range(8)]),
                 K.R("x-2", "check two", "WARN", "one; two; three; four; five")]

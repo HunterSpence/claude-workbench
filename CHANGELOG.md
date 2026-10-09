@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.3.3
+
+Fixes found while verifying 0.3.2 on locked-down Windows machines.
+
+### Upgrade notes (from 0.3.2)
+- Say "check the new stuff and go". Nothing to do by hand; restart Claude Code when the update asks.
+
+### Fixed
+- **The doctor's KB machinery row (D3) no longer times out on a laptop with slow process starts.** It ran the whole
+  KB test suite, which starts several hundred Python processes. Where endpoint scanning slows every process start, one
+  run could exceed D3's 10-minute limit, and setup and the doctor each run it, so the row failed although nothing was
+  broken. D3 now runs the tests listed in `plugins/workbench-kb/tests/field-tests.txt`, which cover every part of the KB
+  machinery (search, links, journal, locks, the save and its merge, the credential gate, rollover, the secret scanner)
+  with a fraction of the process starts. A listed test that does not exist fails the row; it never shrinks it. No
+  wall-clock budget runs in the field: timing classes are not listed, and a listed test that measures elapsed time
+  skips that budget under the doctor (`WB_FIELD_CHECK=1`), because a budget measures the machine, not the kit. The
+  kit's release gate still runs every KB test with every budget, and never passes that flag to a suite.
+- **setup parks a tokensave server it cannot start.** A `tokensave` MCP entry that runs the kit's own binary exits until
+  a repository is indexed, so the doctor reported it DOWN on every run. setup now parks it, and the report says how to
+  bring it back after `tokensave init`, only when all of these hold: tokensave has no indexed repository yet, a health
+  check of that one server (30-second limit, no other server started) says it does not start, and setup has never
+  parked it before. If setup parked it once, a live entry means you turned it back on, and it stays. Once tokensave has
+  indexed a repository, setup leaves the entry on and its note explains why the doctor can still show it DOWN (the
+  check starts it in an empty folder). An entry that runs some other program is left alone, and a check that times
+  out, answers oddly or cannot read tokensave's registry changes nothing.
+- **The KB index warning says what to do.** A dead-links warning now gives the count and the command that lists them
+  (`kb_health.py --verbose`). It never prints the names of your notes, so the verify table stays safe to paste.
+- **The update verify no longer reports your own KB index or capture state as kit defects** in the "for the kit
+  author" box. A FAIL on those rows (the kit's own indexer crashing, say) still goes to the kit author.
+
 ## 0.3.2
 
 Fixes for managed Windows 11 laptops, a one-phrase update loop and a quieter guard.

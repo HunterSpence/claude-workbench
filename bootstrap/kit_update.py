@@ -57,7 +57,7 @@ SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}")
 SOURCE = Path("plugins/workbench-core/skills/kit-update/release-source.json")     # {"repo": "OWNER/REPO"}
 RESTART = "Restart every Claude Code window, then type: go"
 RUN_FILE, REPORT = "kit-update.json", "field-report.md"
-NOT_KIT = {"backup", "managed policy"}                    # doctor rows that advise the user; never a kit defect
+NOT_KIT = {"backup", "managed policy", "knowledge: kb-index", "knowledge: capture"}   # rows about the user's own data or choices
 IT_ROWS = {"TLS + network"}                                # doctor rows that name blocked hosts or inspected TLS: IT's, once, as NEEDS-IT
 OWN_ROWS = {"plugin python option", "guard heartbeat", "skill listing", "IT asks"}      # the verify has its own row for these
 FILE_EXT = set("py pyc json jsonl md txt log exe cmd bat ps1 sh zip gz tgz tar js mjs cjs ts yml yaml toml ini cfg xml html css "
@@ -732,7 +732,7 @@ def doctor_rows(ctx, res):
             out_rows.append(R(rid, name, status, detail, cmd, public="one or more of the user's own MCP servers are DOWN (names withheld)",
                               kit=False))
         else:
-            out_rows.append(R(rid, name, status, detail, cmd, kit=check not in NOT_KIT))
+            out_rows.append(R(rid, name, status, detail, cmd, kit=check not in NOT_KIT or status == "FAIL"))   # a crash is the kit's
     worst = "FAIL" if any(r["status"] == "FAIL" for r in out_rows) else "WARN" if any(r["status"] == "WARN" for r in out_rows) else "PASS"
     head = R("doctor", "doctor --deep", worst, f"{len(rows)} rows: {ok} OK, {len(out_rows)} not OK, {ask_folded} need IT (listed once below)",
              cmd, kit=False)

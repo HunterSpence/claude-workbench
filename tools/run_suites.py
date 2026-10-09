@@ -116,10 +116,15 @@ class Collect(unittest.TextTestResult):
         self.reasons[test.id()] = reason
 
 
-def child_unittest(directory, out):
-    """Runs in the child: the discover run for one directory, results written as JSON to `out`."""
+def child_unittest(directory, out, names_file=None):
+    """Runs in the child: the discover run for one directory, results written as JSON to `out`. With `names_file` (a
+    JSON list of test ids relative to `directory`) only those run; an id that does not load is a failure, never a skip."""
     sys.path[:] = [p for p in sys.path if Path(p or ".").resolve() != HERE]     # tools/ must not shadow a suite's modules
-    suite = unittest.TestLoader().discover(directory, pattern="test_*.py")
+    if names_file:
+        sys.path.insert(0, str(Path(directory).resolve()))
+        suite = unittest.TestLoader().loadTestsFromNames(json.loads(Path(names_file).read_text(encoding="utf-8")))
+    else:
+        suite = unittest.TestLoader().discover(directory, pattern="test_*.py")
     r = unittest.TextTestRunner(stream=sys.stderr, resultclass=Collect, verbosity=1).run(suite)
     split = lambda i: i.split(".", 1) if "." in i else [i, i]               # noqa: E731
     seen = list(dict.fromkeys(getattr(r, "seen", []) + [t.id() for t, _ in r.skipped]))
@@ -267,9 +272,10 @@ def main(argv=None):
     ap.add_argument("--v020-ref", default=V020_REF)
     ap.add_argument("--child-unittest")
     ap.add_argument("--child-out")
+    ap.add_argument("--child-names")
     a = ap.parse_args(argv)
     if a.child_unittest:
-        return child_unittest(a.child_unittest, a.child_out)
+        return child_unittest(a.child_unittest, a.child_out, a.child_names)
     a.root = str(Path(a.root).resolve())
     suites = discover(a.root, a.only)
     entries, problems = load_allow(a.skips or Path(a.root) / "tools" / "skips.allow")
@@ -287,6 +293,7 @@ def main(argv=None):
               + ") for --require-all; these suites need its packages:\n  " + "\n  ".join(needy))
         return 2
     env = dict(os.environ)
+    env.pop("WB_FIELD_CHECK", None)       # the release run enforces every budget; only the doctor's D3 relaxes them
     if a.require_all:
         env["WB_REQUIRE_ALL"] = "1"
     problems += prepare(a.root, suites) if (a.prepare or a.require_all) else []

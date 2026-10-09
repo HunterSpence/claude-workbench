@@ -1,0 +1,36 @@
+# The KB tests the doctor's D3 row runs on a user's machine (setup run and doctor --deep). One test id per line:
+# module.Class or module.Class.method. Why a list: the full suite starts several hundred Python processes, and on a
+# machine where every process start is slow one run can exceed D3's 10-minute limit. These tests prove each part of the
+# machinery works with this machine's Python (search, links, journal, locks, the save and its merge, the credential
+# gate, rollover, the secret scanner) with a fraction of the process starts. No wall-clock budget runs here: timing
+# classes are not listed, and a listed test that measures elapsed time skips that budget when WB_FIELD_CHECK=1 (the
+# doctor sets it). A budget measures the machine, not the kit. The kit's release gate still runs every test here.
+# test_field_list.py checks all of this: real test names, every module represented, no unguarded timing.
+test_kb.KB.test_search
+test_kb.KB.test_related_walks_two_hops
+test_kb.KB.test_concurrent_journal_appends_lose_nothing
+test_kb.KB.test_ac_write_merges_another_sessions_lines
+test_kb.KB.test_inbox_add_masks_credentials_and_surfaces_in_window
+test_kb.KB.test_health
+test_kb.KB.test_post_credential_gate
+test_kb_facts.FrontmatterTests
+test_kb_facts.Registry
+test_kb_facts.Plugins.test_the_real_tools_answer_in_the_kits_own_layout
+test_kb_facts.Stamp.test_a_changed_named_note_is_stamped_and_nothing_else_moves
+test_kb_retrieval.Canned.test_the_set_meets_its_floors_twice_with_identical_numbers
+test_kb_retrieval.Ranking.test_one_hit_per_note_and_a_long_note_cannot_fill_the_top_five
+test_kb_retrieval.Ranking.test_the_python_api_is_one_hit_per_note_too
+test_kb_retrieval.Health.test_json_shape_and_nothing_else_on_stdout
+test_kb_retrieval.Template.test_the_template_is_healthy_and_has_no_dead_link_or_orphan
+test_kb_state.Location.test_a_full_save_creates_nothing_under_the_kb_except_what_the_save_wrote
+test_kb_state.Migration.test_an_old_base_three_way_merge_keeps_the_other_sessions_lines
+test_save_port.ActiveContextCap.test_a_small_overage_completes_the_save_and_owes_the_trim
+test_save_port.Concurrency.test_parallel_saves_lose_no_metric_row_and_no_daily_line
+test_save_port.Concurrency.test_ac_write_reports_busy_and_leaves_the_file_alone
+test_save_port.CredentialGate.test_journal_masks_the_value_and_keeps_the_name
+test_save_port.RolloverBySize
+test_secretscan.Shapes
+test_secretscan.Output
+test_secretscan.Blocks
+test_secretscan.CommandLine.test_exit_codes_and_masked_output
+test_field_list.FieldList
