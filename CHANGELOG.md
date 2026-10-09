@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.3.1
+
+Fixes for installs on managed Windows 11 laptops.
+
+- **Python 3.14 is accepted.** An installed Python 3.13 or 3.14 now meets the setup's Python requirement and builds the
+  knowledge environment (3.13 is preferred when both exist). Setup installs 3.13 only when neither is found, so a
+  laptop that already has 3.14 no longer fails the run trying to install 3.13. The accepted versions are listed once,
+  in `bootstrap/packages.json` (`python313`, `accept`).
+- **Background setup runs pass the knowledge-base check.** `setup.py run --detach` runs without a console, and the
+  knowledge-base test run (D3) failed only there: its tests lost their output.
+  Every Python program setup starts and reads now uses the console interpreter. When D3 fails, its detail names up to
+  ten failing tests.
+- **Downloads through a TLS-inspecting proxy.** When Windows cannot check a re-signed certificate's revocation
+  (curl exit 35 with `CRYPT_E_NO_REVOCATION_CHECK` or `CRYPT_E_REVOCATION_OFFLINE`), setup retries the download once
+  with curl's `--ssl-revoke-best-effort` and logs it. Only those two errors are ignored: a revoked certificate still
+  fails, and the pinned SHA-256 check still decides. The doctor's `TLS + network` row now names the condition.
+- **The nightly-task check (D15) no longer warns about a task that exists.** It compared the task file with
+  different line endings from the ones setup recorded.
+- **The after-install capability report is current.** It now reads PATH from the registry, so tools the same run
+  installed (Git, Node.js, the Playwright CLI and others) show as ready instead of installable, and no needless
+  "allow Node.js" request is drafted.
+
 ## 0.3.0
 
 ### Upgrade notes (from 0.2.0)

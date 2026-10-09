@@ -118,11 +118,11 @@ class Verifier:
         self.ctx, self.mode, self.kit = ctx, mode, Path(kit)
         self.checks = jload(self.kit / "bootstrap" / "knowledge-checks.json", {}) or {}
         self.sb = Path(tempfile.mkdtemp(prefix="wb-verify-"))
-        self.py = sys.executable
+        self.py = I.console_python()      # setup --detach runs under pythonw: its children would lose their output
         kp = (ctx.cfg or {}).get("knowledge_python")
-        self.kpy = next((str(p) for p in (kp, ctx.venv_python()) if p and Path(p).is_file()), None)
+        self.kpy = next((I.console_python(p) for p in (kp, ctx.venv_python()) if p and Path(p).is_file()), None)
         self.kvenv = self.kpy is not None             # False until setup.py run has made the knowledge venv
-        self.kpy = self.kpy or sys.executable
+        self.kpy = self.kpy or self.py
         self._health, self._sandbox_kb = None, None
         self.find_db = self.sb / "find" / "index.sqlite"
         self.find_built = self.find_timeout = False
@@ -134,7 +134,7 @@ class Verifier:
         memcap = self.kit / "tools" / "memcap" / "memcap.py"
         argv = [str(a) for a in argv]
         if mb and memcap.is_file():
-            argv = [sys.executable, str(memcap), "--mb", str(mb), "--", *argv]
+            argv = [self.py, str(memcap), "--mb", str(mb), "--", *argv]
         e = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", "HF_HUB_DISABLE_TELEMETRY": "1",
              "DO_NOT_TRACK": "1", **(env or {})}
         try:
@@ -257,9 +257,20 @@ def d3_kb_machinery(v):
     entries, _ = allow.load_allow(v.kit / "tools" / "skips.allow")
     odd = [f"{m}::{t}" for m, t, _r in res.get("skipped") or [] if not allow.allowed(entries, m, t)]
     if res.get("failed") or rc != 0 or odd:
-        return FAIL, (f"{res.get('failed')} failure(s)/error(s)" + (f"; skips not in tools/skips.allow: {', '.join(odd[:3])}"
-                                                                   if odd else ""))
+        return FAIL, (f"{res.get('failed')} failure(s)/error(s)" + failing_names(res.get("failures"))
+                      + (f"; skips not in tools/skips.allow: {', '.join(odd[:3])}" if odd else ""))
     return PASS, f"{len(res.get('ids') or [])} test(s), 0 failures, {len(res.get('skipped') or [])} allowed skip(s)"
+
+
+def failing_names(ids, most=10, width=230):
+    """': name, name, ...' for up to `most` failing test ids (method names, each cut to an equal share of `width`, so all
+    of them fit in the 300-character detail), '' when there are none."""
+    names = [str(i).rsplit(".", 1)[-1] for i in (ids or [])[:most]]
+    if not names:
+        return ""
+    w = max(12, width // len(names) - 2)
+    more = f" (+{len(ids) - most} more)" if len(ids) > most else ""
+    return ": " + ", ".join(n if len(n) <= w else n[:w - 1] + "~" for n in names) + more
 
 
 def d4_journal(v):
@@ -573,8 +584,8 @@ def d15_schedule(v):
     led = next((e for e in ctx.ledger()["entries"] if e.get("kind") == "task" and e.get("name") == task), None)
     rc, _ = ctx.run(["schtasks", "/Query", "/TN", task], timeout=60)
     f = ctx.state_dir / "knowledge-refresh.xml"
-    try:
-        digest = hashlib.sha256(f.read_bytes().decode("utf-16").encode("utf-8")).hexdigest()
+    try:     # setup hashes the LF text; Windows text mode wrote the file with CRLF
+        digest = hashlib.sha256(f.read_bytes().decode("utf-16").replace("\r\n", "\n").encode("utf-8")).hexdigest()
     except (OSError, UnicodeDecodeError):
         digest = None
     if rc != 0 or not led or led.get("xml_sha256") != digest:

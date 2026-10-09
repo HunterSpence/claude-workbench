@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -324,6 +325,33 @@ class Rules(unittest.TestCase):
                 self.assertIsNone(KV.stopfailure_floor(f), bad)
             self.assertIsNone(KV.stopfailure_floor(Path(t) / "missing.py"))
 
+    def test_children_get_the_console_interpreter_beside_pythonw(self):
+        with tempfile.TemporaryDirectory() as t:
+            pyw, py = Path(t) / "pythonw.exe", Path(t) / "python.exe"
+            pyw.write_bytes(b"")
+            self.assertEqual(KV.I.console_python(pyw), str(pyw), "no python.exe beside it: unchanged")
+            py.write_bytes(b"")
+            self.assertEqual(KV.I.console_python(pyw), str(py))
+            self.assertEqual(KV.I.console_python(py), str(py))
+            with mock.patch.object(sys, "executable", str(pyw)):
+                v = KV.Verifier(mock.Mock(cfg={}, venv_python=lambda: Path(t) / "none.exe"), "doctor", REPO)
+                shutil.rmtree(v.sb, ignore_errors=True)
+                self.assertEqual((v.py, v.kpy), (str(py), str(py)), "the interpreter and the no-venv fallback")
+                seen = []
+                with mock.patch.object(KV.subprocess, "run", lambda argv, **kw: seen.append(argv) or
+                                       mock.Mock(returncode=0, stdout=b"", stderr=b"")):
+                    v.run(["x"], mb=64)
+                self.assertEqual(seen[0][:2], [str(py), str(REPO / "tools" / "memcap" / "memcap.py")], "memcap too")
+
+    def test_failing_test_names_fit_the_detail(self):
+        self.assertEqual(KV.failing_names([]), "")
+        ids = [f"test_m.Case.test_number_{i}_with_a_rather_long_descriptive_name" for i in range(12)]
+        s = KV.failing_names(ids)
+        self.assertLessEqual(len("12 failure(s)/error(s)" + s), 300)
+        self.assertEqual(s.count("test_number_"), 10)
+        self.assertTrue(s.endswith("(+2 more)"))
+        self.assertIn("test_bad", KV.failing_names(["test_fake.Fake.test_bad"]))
+
 
 class Record(Base):
     def test_the_record_is_written_atomically_and_read_back(self):
@@ -381,9 +409,28 @@ class Steps(Base):
         st, detail, _ = e.step(KV.d3_kb_machinery)
         self.assertEqual(st, KV.FAIL)
         self.assertIn("test_odd_skip", detail)
-        t.write_text("import unittest\nclass Fake(unittest.TestCase):\n    def test_bad(self):\n        self.fail()\n",
-                     encoding="utf-8")
-        self.assertEqual(e.step(KV.d3_kb_machinery)[0], KV.FAIL)
+        t.write_text("import unittest\nclass Fake(unittest.TestCase):\n    def test_bad(self):\n        self.fail()\n"
+                     "    def test_broken(self):\n        raise OSError\n", encoding="utf-8")
+        st, detail, _ = e.step(KV.d3_kb_machinery)
+        self.assertEqual(st, KV.FAIL)
+        self.assertIn("2 failure(s)/error(s): test_bad, test_broken", detail, "the failing tests are named")
+
+    @unittest.skipUnless(os.name == "nt" or REQUIRE, "pythonw exists only on Windows")
+    def test_kb_machinery_passes_under_a_detached_pythonw_setup_run(self):
+        e = self.env()
+        worker, out = e.root / "worker.py", e.root / "d3.json"
+        worker.write_text(
+            "import json, sys\nsys.path.insert(0, sys.argv[1])\nimport knowledge_verify as KV, setup as S\n"
+            "v = KV.Verifier(S.Ctx(), 'setup', sys.argv[2])\n"
+            "open(sys.argv[3], 'w').write(json.dumps([sys.executable] + list(KV.d3_kb_machinery(v))))\n", encoding="utf-8")
+        pyw = Path(sys.executable).with_name("pythonw.exe")
+        self.assertTrue(pyw.is_file(), pyw)
+        subprocess.run([str(pyw), str(worker), str(HERE), str(e.kit), str(out)], env=e.env, stdin=subprocess.DEVNULL,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=0x00000008 | 0x00000200,
+                       timeout=300)       # exactly how setup.py run --detach starts: pythonw, no console, no handles
+        exe, st, detail = json.loads(out.read_text())
+        self.assertTrue(exe.lower().endswith("pythonw.exe"), exe)
+        self.assertEqual(st, KV.PASS, detail)
 
     def test_journal_in_doctor_mode_touches_only_a_sandbox_and_setup_writes_one_live_line(self):
         e = self.env()

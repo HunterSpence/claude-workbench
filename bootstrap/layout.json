@@ -22,7 +22,7 @@
     {"path": "<WB>/USER.md", "kind": "file", "creator": "bootstrap/install.py", "uninstall": "keep", "class": "user-data", "placement": "local-only", "note": "the user's own working-style notes"},
     {"path": "<WB>/config.json", "kind": "file", "creator": "bootstrap/install.py", "uninstall": "remove", "class": "config", "placement": "local-only", "note": "kb_root, data_root, python, knowledge_python, knowledge_db"},
     {"path": "<WB>/profiles.json", "kind": "file", "creator": "bootstrap/profile.py", "uninstall": "keep", "class": "config", "placement": "local-only", "note": "per-client profile registry of the main install"},
-    {"path": "<WB>/venv/", "kind": "dir", "creator": "bootstrap/setup.py", "uninstall": "remove", "class": "runtime", "placement": "local-only", "note": "knowledge-layer virtual environment (Python 3.13)"},
+    {"path": "<WB>/venv/", "kind": "dir", "creator": "bootstrap/setup.py", "uninstall": "remove", "class": "runtime", "placement": "local-only", "note": "knowledge-layer virtual environment (Python 3.13 or 3.14)"},
     {"path": "<WB>/bin/", "kind": "dir", "creator": "bootstrap/setup.py", "uninstall": "remove", "class": "runtime", "placement": "local-only", "note": "node/npm/npx shims for the user-scope Node route and optional tools"},
     {"path": "<WB>/capture/app/", "kind": "dir", "creator": "bootstrap/setup.py", "uninstall": "remove", "class": "runtime", "placement": "local-only", "note": "capture runtime copied from the capture plugin plus its npm install"},
     {"path": "<WB>/capture/profile/", "kind": "dir", "creator": "plugins/workbench-capture/skills/capture/", "uninstall": "remove", "class": "runtime", "placement": "local-only", "note": "dedicated signed-in browser profile; holds cookies, never synced"},

@@ -158,7 +158,7 @@ and `capture-runtime`.
 |---|---|---|
 | `git` | Git for Windows, the shell Claude Code uses | winget, user scope |
 | `gh` | GitHub CLI | winget, user scope |
-| `python313` | Python 3.13 for the knowledge environment | winget, user scope |
+| `python313` | Python for the knowledge environment: an installed 3.13, else 3.14, counts (the one list is `accept` in `bootstrap/packages.json`); 3.13 is installed only when neither is found | winget, user scope |
 | `uv` | Python package manager | winget, user scope |
 | `pwsh` | PowerShell 7 | winget; user scope needs non-admin packaged-app installs, else one UAC prompt |
 | `rg`, `fd`, `jq` | ripgrep, fd, jq | winget, user scope |
@@ -206,7 +206,7 @@ Run it after the setup finishes. Work facts only; never ask for passwords, token
 
 ### 2.6 Knowledge layer and the find MCP
 **Command.** The run's phase `knowledge`: it shows `<KIT>/bootstrap/infosec-note.txt` once (read it to the user), creates the
-knowledge environment `<WB>/venv/` with Python 3.13, installs the pinned requirements of the `find` and `office-render` skills
+knowledge environment `<WB>/venv/` with Python 3.13 or 3.14 (the `python313` row in 2.3), installs the pinned requirements of the `find` and `office-render` skills
 into it, writes `knowledge_python` and `knowledge_db` into `<WB>/config.json`, runs `find discover`, and registers the roots
 (the user's work libraries, `captured`, `howto`, `kb`). The phase `knowledge-verify` then runs D1 to D23 (2.7) and registers
 the find MCP server (D13). Last, with `--with nightly` (or on the permissive profile) a per-user task

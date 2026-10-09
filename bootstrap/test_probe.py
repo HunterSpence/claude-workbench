@@ -161,6 +161,9 @@ class FakeSystem:
             return 0, b"pip (25.0.1)\n"
         if self.find and argv[:len(self.find)] == self.find:
             return 0, json.dumps({"libraries": self.libs} if a[-2:-1] == ["discover"] else {"mode": "keyword", "vectors": 0}).encode()
+        if exe == "py" and getattr(self, "py_versions", None) is not None and a[1:] == ["--version"]:
+            v = next((x for x in self.py_versions if a[:1] == ["-" + x.rsplit(".", 1)[0]]), None)   # py -3.14 --version
+            return (0, ("Python %s" % v).encode()) if v else (103, b"")
         if a and a[-1] == "--version":
             name = "python" if exe == "py" else exe
             v = self.tools.get(name) if exe != "py" else "3.13.1"
@@ -310,6 +313,19 @@ class SectionTests(unittest.TestCase):
         self.assertEqual(doc["sections"]["tools"]["data"]["packages"]["node"]["version"], "20.11.0")
         self.assertEqual(doc["sections"]["capture"]["data"]["edge_version"], "140.0.100")
         self.assertIs(doc["sections"]["capture"]["data"]["automation_allowed"], True)
+
+    def test_an_accepted_python_3_14_counts_as_the_knowledge_python(self):
+        need(self, "Windows", probe.IS_WIN)
+        row = next(p for p in json.loads(rd(os.path.join(KIT, "bootstrap", "packages.json")))["packages"] if p["id"] == "python313")
+        pk = os.path.join(tmpdir(self), "packages.json")
+        with open(pk, "w", encoding="utf-8") as f:
+            json.dump({"packages": FIXTURE_PACKAGES["packages"] + [row]}, f)
+        for have, want in ((["3.14.2"], "3.14.2"), (["3.13.15", "3.14.2"], "3.13.15"), (["3.12.9"], None)):
+            fs = FakeSystem(tmpdir(self))
+            fs.py_versions = have
+            t = collect(fs, packages=pk)["sections"]["tools"]["data"]
+            self.assertEqual((t["packages"]["python313"]["works"], t["packages"]["python313"]["version"]), (bool(want), want))
+            self.assertEqual(t["python313"]["version"], want, have)
 
     def test_hypervisor_makes_virtualization_ok(self):
         need(self, "Windows", probe.IS_WIN)
@@ -580,7 +596,7 @@ class NetworkTests(unittest.TestCase):
         self.assertTrue(hosts)
         self.assertLessEqual(set(hosts), allowed)
         self.assertEqual({u for _h, _m, u, _t in rec.seen}, {probe.UA})
-        self.assertEqual(probe.UA, "claude-workbench-probe/0.3.0")
+        self.assertEqual(probe.UA, "claude-workbench-probe/" + probe.KIT_VERSION)
         self.assertEqual(rec.max_active, 1)
         self.assertEqual(len({t for *_x, t in rec.seen}), 1)
         self.assertEqual({m for _h, m, *_x in rec.seen}, {"HEAD"})

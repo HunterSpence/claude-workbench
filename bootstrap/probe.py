@@ -33,7 +33,7 @@ import time
 import urllib.error
 import urllib.request
 
-KIT_VERSION = "0.3.0"
+KIT_VERSION = "0.3.1"
 UA = "claude-workbench-probe/" + KIT_VERSION
 NET_BUDGET_S = 45
 HTTP_TIMEOUT = 4
@@ -701,8 +701,8 @@ class Probe:
         v = self.wsl()
         d["wsl"].update(found=bool(self.which("wsl")), path=self.which("wsl"), works=v["installed"], version=v["version"])
         if IS_WIN:
-            rc, ver = self.version_of(["py", "-3.13", "--version"])
-            d["python313"].update(found=rc == 0, works=rc == 0 and ver is not None, version=ver, path=self.which("py"))
+            ver = self.accepted_python()
+            d["python313"].update(found=ver is not None, works=ver is not None, version=ver, path=self.which("py"))
         c = self.capture_facts()
         d["edge"].update(found=bool(c["edge_path"]), works=bool(c["edge_version"]), version=c["edge_version"], path=c["edge_path"])
         for p in self.pkgs:
@@ -722,7 +722,20 @@ class Probe:
                     except re.error:
                         m = None
                     e["works"], e["version"] = rc == 0 and m is not None, (m.group(1) if m and m.groups() else None)
+            if p.get("accept") and IS_WIN and not e["works"]:      # Python: any version the kit accepts is present
+                ver = self.accepted_python()
+                if ver:
+                    e.update(found=True, works=True, version=ver)
         return "ok"
+
+    def accepted_python(self):
+        """The version of the first Python the knowledge venv accepts (packages.json python313 "accept"), else None."""
+        acc = next((p["accept"] for p in self.pkgs if p.get("id") == "python313" and p.get("accept")), None) or ["3.13"]
+        for v in acc:
+            rc, ver = self.version_of(["py", "-" + v, "--version"], re.compile(r"(\d+\.\d+\.\d+)"))
+            if rc == 0 and ver and ver.startswith(v + "."):
+                return ver
+        return None
 
     def wsl(self):
         def go():

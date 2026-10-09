@@ -46,7 +46,7 @@ def plugin_files():
 class Portable(unittest.TestCase):
     def test_manifest(self):
         m = json.loads((PLUGIN / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual((m["name"], m["version"]), ("workbench-biz", "0.3.0"))
+        self.assertEqual((m["name"], m["version"]), ("workbench-biz", "0.3.1"))
         self.assertNotIn("userConfig", m)
         for forbidden in ("bin", "hooks", ".mcp.json", "settings.json", "agents"):
             self.assertFalse((PLUGIN / forbidden).exists(), forbidden)

@@ -55,6 +55,8 @@ import install as I  # noqa: E402
 import knowledge_verify as KV  # noqa: E402
 
 fwd, show, sha = I.fwd, I.show, I.sha
+PY = I.console_python()       # never pythonw for a child whose output is read (detached runs start under pythonw)
+NO_WINDOW = 0x08000000 if os.name == "nt" else 0     # CREATE_NO_WINDOW: a console child of pythonw opens no window
 WIN = os.name == "nt"
 PHASES = ("report-pre", "plan", "install", "wsl", "reboot-wait", "resume", "verify", "update", "onboard", "knowledge",
           "capture-runtime", "knowledge-verify", "routing", "report-post", "done")
@@ -180,6 +182,18 @@ def packages():
 
 def pkg(pid):
     return next(p for p in packages() if p["id"] == pid)
+
+
+def find_python(ctx, accept=None):
+    """(argv prefix, version) of the first Python the knowledge venv accepts, in the order of packages.json python313
+    "accept" (the one list of accepted versions: 3.13, then 3.14); (None, None) when none answers."""
+    for v in accept or pkg("python313")["accept"]:
+        argv = ["py", f"-{v}"] if WIN else [f"python{v}"]
+        rc, out = ctx.run([*argv, "--version"], timeout=60)
+        m = re.search(r"(\d+\.\d+\.\d+)", decode(out)) if rc == 0 else None
+        if m and m.group(1).startswith(v + "."):
+            return argv, m.group(1)
+    return None, None
 
 
 def pythonw():
@@ -414,8 +428,8 @@ class Ctx:
             + [self.state_dir / "probe.json"]
         d = next((x for x in (jload(c) for c in cands) if isinstance(x, dict)), None)
         if d is None and run and (HERE / "probe.py").exists():
-            subprocess.run([sys.executable, str(HERE / "probe.py"), "--out", str(self.state_dir), "--packages",
-                            str(HERE / "packages.json")], capture_output=True, timeout=300)
+            subprocess.run([PY, str(HERE / "probe.py"), "--out", str(self.state_dir), "--packages",
+                            str(HERE / "packages.json")], capture_output=True, timeout=300, creationflags=NO_WINDOW)
             d = jload(self.state_dir / "probe.json")
         if d is None:
             self.notes.append("no probe.json: admin rights, TLS inspection and model policy are treated as unknown")
@@ -496,7 +510,11 @@ class Ctx:
         return rc, (r.stdout or b"") + (r.stderr or b"")
 
     def verify(self, p):
-        """(works | found | absent, version) from the package's own verify argv; the PATH is re-read first."""
+        """(works | found | absent, version) from the package's own verify argv; the PATH is re-read first. A package
+        with "accept" (Python) works when any accepted version answers."""
+        if p.get("accept"):
+            argv, ver = find_python(self, p["accept"])
+            return ("works", ver) if argv else ("absent", None)
         if not self.which(p["verify"][0]):
             return "absent", None
         rc, out = self.run(p["verify"], timeout=120)
@@ -515,11 +533,13 @@ class Ctx:
                                                                 / "policy_snapshot.py")
 
     def py_tool(self, script, *args, timeout=900):
-        """(exit code, stdout bytes) of a kit Python CLI run with this interpreter; (None, b"") when it is missing."""
+        """(exit code, stdout bytes) of a kit Python CLI run with this interpreter; (None, b"") when it is missing. PATH is
+        re-read from the registry, so a report after the installs sees the tools this run put on the user Path."""
         if not Path(script).is_file():
             return None, b""
-        r = subprocess.run([sys.executable, str(script), *[str(a) for a in args]], capture_output=True,
-                           timeout=timeout, env={**os.environ, **TELEMETRY_ENV}, stdin=subprocess.DEVNULL)
+        r = subprocess.run([PY, str(script), *[str(a) for a in args]], capture_output=True, timeout=timeout,
+                           env={**os.environ, "PATH": self.fresh_path(), **TELEMETRY_ENV}, stdin=subprocess.DEVNULL,
+                           creationflags=NO_WINDOW)
         self.log(f"$ {Path(script).name} {' '.join(str(a) for a in args)} -> {r.returncode}")
         return r.returncode, r.stdout or b""
 
@@ -587,7 +607,7 @@ def detach(ctx, argv):
     else:
         p = subprocess.Popen(cmd, start_new_session=True, **kw)
     print(f"setup is running in the background (pid {p.pid}); log: {fwd(ctx.state_dir / 'setup.log')}")
-    print("poll: " + show([sys.executable, fwd(HERE / "setup.py"), "status", "--json", "--wait", "60"]))
+    print("poll: " + show([PY, fwd(HERE / "setup.py"), "status", "--json", "--wait", "60"]))
     return 0
 
 
@@ -615,6 +635,8 @@ def make_plan(ctx):
         status, it["version"] = ctx.verify(p)
         if status == "works":
             it["tag"] = "works"
+            if p.get("accept") and not it["version"].startswith(p["accept"][0] + "."):
+                it["note"] = f"Python {it['version']} is accepted; {p['accept'][0]} is not installed"
             continue
         node = next((x for x in items if x["item"] == "node"), None) if p["source"] == "npm" else None
         if p["source"] == "npm" and (not node or node["tag"] in ("ask-IT", "opt-in-off")):
@@ -875,14 +897,32 @@ def tls_fixes(ctx):
                            "git:http.sslBackend")
 
 
+# Schannel's "could not check revocation" (no reachable revocation point, or it is offline): what a TLS-inspecting proxy's
+# re-signed certificates give. Matched on the error codes curl prints with --show-error, never on English text.
+REVOCATION_UNCHECKED = re.compile(rb"CRYPT_E_NO_REVOCATION_CHECK|CRYPT_E_REVOCATION_OFFLINE|0x8009201[23]", re.I)
+
+
+def curl(ctx, args, timeout):
+    """ctx.run(curl args) with ONE logged retry for that Windows case only (exit 35 + one of those codes), adding
+    --ssl-revoke-best-effort: it ignores just those two errors and keeps the revocation check, so a revoked certificate
+    still fails. Never --ssl-no-revoke or -k. The retry is recorded for the doctor's TLS row."""
+    rc, out = ctx.run(["curl", *args], timeout=timeout)
+    if WIN and rc == 35 and REVOCATION_UNCHECKED.search(out or b""):
+        ctx.log("curl exit 35: Schannel could not check the certificate's revocation (CRYPT_E_NO_REVOCATION_CHECK or "
+                "CRYPT_E_REVOCATION_OFFLINE); retrying once with --ssl-revoke-best-effort")
+        ctx.save(tls_revocation={"at": now(), "url": args[-1]})
+        rc, out = ctx.run(["curl", "--ssl-revoke-best-effort", *args], timeout=timeout)
+    return rc, out
+
+
 def fetch_release(ctx, it):
     """A pinned vendor release zip: download, SHA-256 check, extract the one executable, switch telemetry off."""
     p = pkg(it["item"])
     dl = ctx.state_dir / "downloads"
     dl.mkdir(parents=True, exist_ok=True)
     z = dl / p["url"].rsplit("/", 1)[-1]
-    rc, out = ctx.run(["curl", "--fail", "--location", "--silent", "--show-error", "--proto", "=https", "-o", str(z),
-                       "-w", "%{http_code}", p["url"]], timeout=900)
+    rc, out = curl(ctx, ["--fail", "--location", "--silent", "--show-error", "--proto", "=https", "-o", str(z),
+                         "-w", "%{http_code}", p["url"]], timeout=900)
     if rc != 0:
         code = (re.findall(r"\d{3}", decode(out)) or [""])[-1]
         if code in ("403", "407"):
@@ -1040,7 +1080,7 @@ def do_wsl(ctx, plan):
 
 def schedule_resume(ctx):
     cmd = runonce_command(pythonw(), HERE / "setup.py")
-    by_hand = show([sys.executable, fwd(HERE / "setup.py"), "resume"])
+    by_hand = show([PY, fwd(HERE / "setup.py"), "resume"])
     if cmd:
         reg_set(RUNONCE_KEY, RUNONCE_NAME, cmd, 1)
         ctx.record({"kind": "runonce", "name": RUNONCE_NAME}, "runonce")
@@ -1081,7 +1121,7 @@ def wait_network(ctx, budget_s=600):
     """True once any HTTP answer comes back (curl exit 0, even a proxy's 407); False after the budget."""
     end = time.time() + budget_s
     while True:
-        rc, _ = ctx.run(["curl", "--head", "--silent", "--max-time", "10", "-o", os.devnull, NET_URL], timeout=30)
+        rc, _ = curl(ctx, ["--head", "--silent", "--show-error", "--max-time", "10", "-o", os.devnull, NET_URL], timeout=30)
         if rc == 0:
             return True
         if time.time() + NET_POLL_S > end:
@@ -1142,7 +1182,7 @@ def update_row(ctx, p, led, check):
     # update_argv: the tool's own updater, for a package whose winget catalogue lags its releases (Claude Code)
     argv = (list(p["update_argv"]) if p.get("update_argv") else winget_cmd(p, scope, target) if p["source"] == "winget"
             else npm_cmd(p, target, e.get("prefix")) if p["source"] == "npm"
-            else [sys.executable, fwd(HERE / "setup.py"), "update"])
+            else [PY, fwd(HERE / "setup.py"), "update"])
     row["command"] = show([str(a) for a in argv])
     if p["source"] == "winget" and any(blocked(k) for k in p["policy_keys"]):
         return {**row, "action": "skipped-policy", "note": "an App Installer policy value blocks winget; ask IT"}
@@ -1319,12 +1359,11 @@ def do_knowledge(ctx):
         return ctx.fail("knowledge", f"the find CLI is not in this kit ({fwd(find)})")
     kpy = ctx.venv_python()
     if not kpy.exists():
-        rc, out = ctx.run(["py", "-3.13", "-c", "import sys; print(sys.executable)"] if WIN else
-                          ["python3.13", "-c", "import sys; print(sys.executable)"], timeout=60)
-        py313 = decode(out).strip().splitlines()[-1] if rc == 0 and decode(out).strip() else None
-        if not py313:
-            return ctx.fail("knowledge", "Python 3.13 was not found: the knowledge venv needs it")
-        rc, _ = ctx.run([py313, "-m", "venv", str(ctx.wb / "venv")], alias="venv", timeout=600)
+        argv, _ver = find_python(ctx)
+        if not argv:
+            return ctx.fail("knowledge", f"no Python {' or '.join(pkg('python313')['accept'])} was found: the knowledge "
+                                         "venv needs one")
+        rc, _ = ctx.run([*argv, "-m", "venv", str(ctx.wb / "venv")], alias="venv", timeout=600)
         if rc != 0:
             return ctx.fail("knowledge", f"creating the venv failed ({hx(rc)})")
     skills = KIT / "plugins" / "workbench-core" / "skills"
@@ -1385,7 +1424,7 @@ def relay_hooks(ctx):
     elif managed.get("allowManagedHooksOnly") is True:
         ctx.notes.append("StopFailure relay: managed allowManagedHooksOnly is on, so user hooks never run; nothing installed")
     else:
-        py = ctx.cfg.get("python") or sys.executable
+        py = ctx.cfg.get("python") or PY
         frag = {"hooks": {ev: [{"hooks": [{"type": "command", "command": py, "args": ["-S", fwd(script), *extra],
                                            "timeout": 10}]}] for ev, extra in (("StopFailure", []),
                                                                                ("UserPromptSubmit", ["--pending"]))}}
@@ -1571,7 +1610,7 @@ def guarded(ctx, body):
 
 def cmd_run(ctx):
     def body():
-        ctx.st.update(ask_it=[], failed=[], reboot_pending=False)
+        ctx.st.update(ask_it=[], failed=[], reboot_pending=False, tls_revocation=None)
         ctx.phase("report-pre")
         if not (ctx.state_dir / "capability-pre.json").exists():
             rc, out = ctx.py_tool(ctx.report_cli(), "run", "--phase", "pre", "--packages", HERE / "packages.json",
@@ -1600,7 +1639,7 @@ def make_plan_posix(ctx):
     """Linux, WSL and macOS: no packages are installed (use the distribution's package manager); the knowledge layer,
     routing and reports still run."""
     plan = {"version": 1, "generated": now(), "admin_capable": False, "store_blocked": False, "configure_off": False,
-            "notes": ctx.notes + ["not Windows: install git, gh, node, python3.13, rg, fd and jq with your package manager"],
+            "notes": ctx.notes + ["not Windows: install git, gh, node, python3.13 (or 3.14), rg, fd and jq with your package manager"],
             "items": [{"item": "update", "tag": "opt-in-off", "source": "winget", "scope": "user", "hosts": [],
                        "note": "use your package manager"},
                       {"item": "nightly", "tag": "opt-in-off", "source": "pypi", "scope": "user", "hosts": [], "note": "use cron"},
@@ -1891,17 +1930,21 @@ def cmd_doctor(ctx, as_json=False, bundle=None, deep=False):
     else:
         prc, pout = ctx.py_tool(HERE / "probe.py", "--only", "tls,network", "--json", timeout=180)
         pj = jparse(pout) if prc == 0 else None
+    rev = (jload(ctx.state_dir / "setup-state.json", {}) or {}).get("tls_revocation")
+    rev = [f"curl could not check certificate revocation (CRYPT_E_NO_REVOCATION_CHECK: a TLS-inspecting proxy's "
+           f"certificates name no reachable revocation point); setup's downloads retried with --ssl-revoke-best-effort "
+           f"({rev.get('at')})"] if isinstance(rev, dict) else []
     if pj is None:
-        add("TLS + network", "WARN", "probe.py is not in this kit")
+        add("TLS + network", "WARN", "; ".join(["probe.py is not in this kit"] + rev))
     else:
         outputs["probe.json"] = pj
         sec = pj.get("sections") or {}
         bad_rt = [r["runtime"] for r in ((sec.get("tls") or {}).get("data") or {}).get("runtimes") or [] if not r.get("ok")]
         blocked_ep = [e["name"] for e in ((sec.get("network") or {}).get("data") or {}).get("endpoints") or []
                       if e.get("result") in ("blocked", "error", "proxy-auth")]
-        add("TLS + network", "WARN" if bad_rt or blocked_ep else "OK",
-            ", ".join([f"TLS fails: {', '.join(bad_rt)}"] * bool(bad_rt) + [f"blocked: {', '.join(blocked_ep)}"] * bool(blocked_ep))
-            or "every runtime verifies TLS; every endpoint answers")
+        add("TLS + network", "WARN" if bad_rt or blocked_ep or rev else "OK",
+            ", ".join([f"TLS fails: {', '.join(bad_rt)}"] * bool(bad_rt) + [f"blocked: {', '.join(blocked_ep)}"] * bool(blocked_ep)
+                      + rev) or "every runtime verifies TLS; every endpoint answers")
     hb = jload(ctx.state_dir / "guard-heartbeat.json")
     if not hb:
         add("guard heartbeat", "WARN", "no heartbeat yet: start Claude Code and run any tool once")
@@ -1991,7 +2034,8 @@ def make_bundle(ctx, out, outputs):
             if not Path(src).is_file():
                 continue
             dst = Path(t) / name
-            r = subprocess.run([sys.executable, str(redact), str(src), str(dst)], capture_output=True, timeout=120)
+            r = subprocess.run([PY, str(redact), str(src), str(dst)], capture_output=True, timeout=120,
+                               creationflags=NO_WINDOW)
             if r.returncode == 0 and dst.exists():
                 z.write(dst, name)
     print(f"support bundle (redacted): {fwd(out)}")
@@ -2045,8 +2089,8 @@ def cmd_backup(ctx, out=None, if_older_days=None):
         sp = ctx.ch / "settings.json"
         if sp.is_file():
             red = out.with_name(out.name + ".settings.tmp")
-            r = subprocess.run([sys.executable, str(KIT / "tools" / "redact-settings" / "redact_settings.py"),
-                                str(sp), str(red)], capture_output=True, timeout=120)
+            r = subprocess.run([PY, str(KIT / "tools" / "redact-settings" / "redact_settings.py"),
+                                str(sp), str(red)], capture_output=True, timeout=120, creationflags=NO_WINDOW)
             if r.returncode == 0 and red.exists():
                 z.write(red, "CH/settings.redacted.json")
             red.unlink(missing_ok=True)
@@ -2185,7 +2229,7 @@ def main(argv=None):
         if not Path(ctx.report_cli()).is_file():
             print("report.py is not in this kit")
             return 2
-        return subprocess.run([sys.executable, ctx.report_cli(), *argv[1:]]).returncode
+        return subprocess.run([PY, ctx.report_cli(), *argv[1:]]).returncode
     try:
         a = ap.parse_args(argv)
     except SystemExit as e:

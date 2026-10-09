@@ -102,6 +102,11 @@ if tool.startswith("exe:"):
         out("v24.20.0\n"); done(0)
     if name == "node" and any(x.endswith("capture.mjs") for x in args):
         out("capture 0.3.0\n"); done(0)
+    if name == "py" and "py_versions" in sc:      # scenario py_versions: the Pythons this py launcher finds, e.g. ["3.14.2"]
+        v = next((x for x in sc["py_versions"] if args[:1] == ["-" + x.rsplit(".", 1)[0]]), None)
+        if v:
+            out(f"Python {v}\n"); done(0)
+        done(103)
     base = next(t for w, (n, t) in sc["ids"].items() if n == name)
     v = st.get("versions", {}).get(name)       # a version an upgrade or an npm install set: replaces the number in the text
     out((re.sub(r"\d+\.\d+\.\d+", v, base, count=1) if v else base) + "\n")
@@ -140,7 +145,11 @@ if tool == "schtasks":
     if args[0] == "/Delete":
         f.unlink(missing_ok=True); done(0)
     done(0)
-if tool == "curl":
+if tool == "curl":       # scenario curl_35: the stderr of an exit 35 without --ssl-revoke-best-effort (or always: curl_35_always)
+    if sc.get("curl_35") and ("--ssl-revoke-best-effort" not in args or sc.get("curl_35_always")):
+        if "--show-error" in args or "--silent" not in args:      # curl prints the reason only then
+            sys.stderr.write("curl: (35) schannel: next InitializeSecurityContext failed: " + sc["curl_35"] + "\n")
+        done(35)
     if "--head" in args:
         st["net"] += 1
         done(7 if st["net"] <= sc.get("net_fail", 0) else 0)
@@ -183,7 +192,7 @@ import json, os, sys, time
 from pathlib import Path
 TOOL = "{tool}"
 with open(Path(os.environ["WB_FAKE_DIR"]) / "calls.jsonl", "a") as f:
-    f.write(json.dumps({{"tool": TOOL, "argv": sys.argv[1:], "t": time.time(), "env": {{}}}}) + "\n")
+    f.write(json.dumps({{"tool": TOOL, "argv": sys.argv[1:], "t": time.time(), "env": {{}}, "path": os.environ.get("PATH")}}) + "\n")
 a = sys.argv[1:]
 if TOOL == "find":
     if a[0] == "discover":
@@ -201,6 +210,8 @@ else:
     print("report " + " ".join(a))
 '''
 
+REVOCATION_ERR = ("CRYPT_E_NO_REVOCATION_CHECK (0x80092012) - The revocation function was unable to check revocation for "
+                  "the certificate.")
 PACKAGES = json.loads((HERE / "packages.json").read_text(encoding="utf-8"))["packages"]
 VERSION_TEXT = {"git": "git version 2.55.0", "gh": "gh version 2.102.0 (stable)", "py": "Python 3.13.15",
                 "uv": "uv 0.12.21", "pwsh": "PowerShell 7.6.6", "rg": "ripgrep 15.2.0", "fd": "fd 10.5.0",
@@ -666,6 +677,54 @@ class Flows(unittest.TestCase):
         e.run("run", "--with", "nightly", code=0)
         self.assertEqual(len([x for x in e.calls("schtasks") if x["argv"][0] == "/Create"]), 1)
         self.assertTrue([x for x in e.calls("schtasks") if x["argv"][0] == "/Run"])
+
+    def test_the_schedule_check_passes_on_the_task_setup_registered(self):
+        e = self.env(scenario={"wsl": "installed", "distros": ["Ubuntu-24.04"]})
+        e.run("run", "--with", "nightly", code=0)
+        with mock.patch.dict(os.environ, e.env, clear=True):
+            v = KV.Verifier(S.Ctx(), "doctor", e.kit)
+            try:
+                st, detail = KV.d15_schedule(v)[:2]
+            finally:
+                shutil.rmtree(v.sb, ignore_errors=True)
+        self.assertEqual(st, KV.PASS, detail)      # the XML file is CRLF on Windows; setup recorded the LF text's hash
+
+    def test_the_post_report_sees_the_path_as_a_new_sign_in_would(self):
+        e = self.env(scenario={"wsl": "installed", "distros": ["Ubuntu-24.04"]})
+        e.run("run", code=0)
+        post = [c for c in e.calls("report") if "post" in c["argv"]]
+        self.assertEqual(len(post), 1)
+        parts = [x.lower() for x in post[0]["path"].split(os.pathsep)]
+        for want in (e.lad / "Microsoft" / "WinGet" / "Links", e.lad / "Tools", e.wb / "bin"):    # Links, the user Path
+            self.assertIn(str(want).lower(), parts)
+
+    def test_an_installed_python_3_14_is_accepted_and_3_13_is_installed_only_when_none_is(self):
+        e = self.env(scenario={"wsl": "installed", "distros": ["Ubuntu-24.04"], "py_versions": ["3.14.2"]},
+                     preinstalled=("Python.Python.3.13",))                    # puts a `py` launcher on the fake PATH
+        e.clear_calls()
+        e.run("run", code=0)
+        plan = {it["item"]: it for it in json.loads((e.wb / "state" / "plan.json").read_text(encoding="utf-8"))["items"]}
+        self.assertEqual((plan["python313"]["tag"], plan["python313"]["version"]), ("works", "3.14.2"))
+        self.assertIn("3.14.2", plan["python313"]["note"])
+        self.assertFalse([c for c in e.calls("winget") if "Python.Python.3.13" in c["argv"]], "3.13 is not installed")
+        self.assertNotIn("Python.Python.3.13", (e.wb / "state" / "workbench.winget").read_text(encoding="utf-8"))
+        venv = [c["argv"][:4] for c in e.calls("venv")]
+        self.assertEqual((len(venv), venv[0]), (1, ["py", "-3.14", "-m", "venv"]), "the venv is made from it")
+        e = self.env(scenario={"wsl": "installed", "distros": ["Ubuntu-24.04"], "py_versions": ["3.13.15", "3.14.2"]},
+                     preinstalled=("Python.Python.3.13",))
+        e.clear_calls()
+        e.run("run", code=0)
+        venv = [c["argv"][:4] for c in e.calls("venv")]
+        self.assertEqual(venv[0], ["py", "-3.13", "-m", "venv"], "with both installed, 3.13 is preferred")
+        e = self.env(scenario={"wsl": "installed", "distros": ["Ubuntu-24.04"], "py_versions": ["3.12.9"]},
+                     preinstalled=("Python.Python.3.13",))
+        e.run("plan", code=0)
+        plan = {it["item"]: it for it in json.loads((e.wb / "state" / "plan.json").read_text(encoding="utf-8"))["items"]}
+        self.assertEqual(plan["python313"]["tag"], "no-admin", "no accepted Python: 3.13 is installed")
+        self.assertIn("Python.Python.3.13", (e.wb / "state" / "workbench.winget").read_text(encoding="utf-8"))
+        e.run("run", code=4)
+        failed = {x["item"]: x["error"] for x in e.state()["failed"]}
+        self.assertIn("no Python 3.13 or 3.14 was found", failed["knowledge"])
 
     def test_lying_winget_is_a_verify_failure(self):
         e = self.env(scenario={"lie": True, "wsl": "installed", "distros": ["Ubuntu-24.04"]})
@@ -1365,6 +1424,41 @@ class UpdateFlows(unittest.TestCase):
         reg = e.registry()["HKCU\\Environment"]
         for k in S.CTX_ENV:
             self.assertNotIn(k, reg)
+
+    def test_a_proxy_certificate_without_revocation_points_is_retried_once_best_effort_and_still_checksummed(self):
+        e = self.ctx_env(curl_35=REVOCATION_ERR)
+        e.run("run", "--with", "ctx", code=0)
+        dl = [c["argv"] for c in e.calls("curl") if "-o" in c["argv"]]
+        self.assertEqual(len(dl), 2)
+        self.assertNotIn("--ssl-revoke-best-effort", dl[0])
+        self.assertEqual(dl[1], ["--ssl-revoke-best-effort", *dl[0]], "the same command, with only that flag added")
+        self.assertEqual((e.wb / "bin" / "ctx.exe").read_bytes(), b"ctx-fixture-bytes")
+        self.assertIn("--ssl-revoke-best-effort", (e.wb / "state" / "setup.log").read_text(encoding="utf-8"))
+        for c in e.calls("curl"):
+            self.assertFalse({"-k", "--insecure", "--ssl-no-revoke"} & set(c["argv"]), c["argv"])
+        rows = {x["check"]: x for x in json.loads(e.run("doctor", "--json").stdout)["rows"]}
+        self.assertEqual(rows["TLS + network"]["status"], "WARN")
+        self.assertIn("CRYPT_E_NO_REVOCATION_CHECK", rows["TLS + network"]["detail"])
+        e = self.ctx_env(curl_35=REVOCATION_ERR, sha="0" * 64, curl_shim=[])     # the pinned checksum still decides
+        e.run("run", "--with", "ctx", code=4)
+        self.assertFalse((e.wb / "bin" / "ctx.exe").exists())
+        self.assertIn("SHA-256 mismatch", {x["item"]: x["error"] for x in e.state()["failed"]}["ctx"])
+
+    def test_any_other_tls_failure_is_not_retried(self):
+        for err, always in (("SEC_E_UNTRUSTED_ROOT (0x80090325) - The certificate chain was issued by an authority that "
+                             "is not trusted.", False), (REVOCATION_ERR, True)):
+            e = self.ctx_env(curl_35=err, curl_35_always=always)
+            e.run("run", "--with", "ctx", code=4)
+            self.assertEqual(len([c for c in e.calls("curl") if "-o" in c["argv"]]), 1 if not always else 2, err)
+            self.assertIn("download exit 35", {x["item"]: x["error"] for x in e.state()["failed"]}["ctx"])
+            self.assertEqual(bool(e.state().get("tls_revocation")), always)
+
+    def test_the_network_wait_retries_best_effort_too(self):
+        e = self.env(scenario={"curl_35": REVOCATION_ERR})
+        with mock.patch.dict(os.environ, e.env, clear=True):
+            self.assertTrue(S.wait_network(S.Ctx(), budget_s=5))
+        heads = [c["argv"] for c in e.calls("curl")]
+        self.assertEqual([("--ssl-revoke-best-effort" in a, "--head" in a) for a in heads], [(False, True), (True, True)])
 
     def test_ctx_with_a_wrong_checksum_is_deleted_unused(self):
         e = self.ctx_env(sha="0" * 64, curl_shim=[])

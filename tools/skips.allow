@@ -22,3 +22,4 @@ test_run_suites::Prepare.test_the_real_packages_node_modules_are_gitignored  # n
 test_setup::DayOne.test_the_run_records_the_checks_then_starts_the_full_refresh  # Windows-only: fake .cmd programs; skips on other platforms
 test_setup::DayOne.test_a_named_fail_fails_the_run_and_a_warning_with_an_ask_is_an_it_item  # Windows-only: fake .cmd programs; skips on other platforms
 test_knowledge_verify::Steps.test_browser_cli_opens_and_closes_headless_edge_and_a_policy_block_is_a_warn_with_the_ask  # Windows-only: fake .cmd programs; skips on other platforms
+test_knowledge_verify::Steps.test_kb_machinery_passes_under_a_detached_pythonw_setup_run  # Windows-only: pythonw exists only there

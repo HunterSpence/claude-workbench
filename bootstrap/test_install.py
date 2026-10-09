@@ -340,7 +340,7 @@ class Upgrade(unittest.TestCase):
         self.assertEqual(s["env"]["WB_UPGRADE_PROBE"], "1", "new kit keys are added")
         self.assertEqual(s["cleanupPeriodDays"], self.old_cleanup + 1, "a value still equal to the old kit's is updated")
         cfg = json.loads((self.home / ".claude" / "workbench" / "config.json").read_text(encoding="utf-8"))
-        self.assertEqual((cfg["version"], cfg["kb_root"]), ("0.3.0", I.fwd(kb)))
+        self.assertEqual((cfg["version"], cfg["kb_root"]), (I.VERSION, I.fwd(kb)))
         man = json.loads(sorted((self.home / ".claude" / "workbench" / "backups").glob("*/manifest.json"))[-1].read_text())
         seeded = {Path(x["path"]).name: x["sha256"] for x in man["kb_seeded"]}
         self.assertLessEqual({"upgrade-a.md", "upgrade-b.md"}, set(seeded))      # plus whatever this release added

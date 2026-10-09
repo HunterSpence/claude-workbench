@@ -32,7 +32,7 @@ release is tagged). `<EXTRAS>` is a comma-separated list of opt-ins (for example
 or empty; `<GIT-HOSTS>` is your organisation's git hosts, comma-separated, or empty. The prompt drives
 `docs/SETUP-RUNBOOK.md`, which gives the session the exact command, check, denial step and ask for every component.
 
-> Set up claude-workbench `v0.3.0` on this machine, end to end, following `docs\SETUP-RUNBOOK.md` from the release. This
+> Set up claude-workbench `v0.3.1` on this machine, end to end, following `docs\SETUP-RUNBOOK.md` from the release. This
 > message is my authorisation for every step in it; do not stop to ask me except where step 11 says.
 > 1. Download `<ZIP-URL>` over HTTPS, without credentials, into a new empty temp folder. Check its SHA-256 with
 >    `(Get-FileHash <file> -Algorithm SHA256).Hash`. If it is not `<SHA256>`, stop and tell me. Unpack it with

@@ -675,6 +675,20 @@ def egress_missing(text, kit_root=KIT):
             [f"host {h}" for h in hosts if f"`{h}`" not in text])
 
 
+class Version(Fixture):
+    def test_one_version_everywhere(self):
+        """The installer, the probe, the four plugins, the marketplace, IMPORT.md and the newest CHANGELOG heading agree."""
+        v = re.search(r'^VERSION = "([^"]+)"', (KIT / "bootstrap" / "install.py").read_text(encoding="utf-8"), re.M).group(1)
+        self.assertIn(f'KIT_VERSION = "{v}"', (KIT / "bootstrap" / "probe.py").read_text(encoding="utf-8"))
+        manifests = [KIT / ".claude-plugin" / "marketplace.json", *sorted(KIT.glob("plugins/*/.claude-plugin/plugin.json"))]
+        self.assertEqual(len(manifests), 5)
+        for m in manifests:
+            j = json.loads(m.read_text(encoding="utf-8"))
+            self.assertEqual(j.get("version") or j["metadata"]["version"], v, m)
+        self.assertIn(f"claude-workbench `v{v}`", (KIT / "IMPORT.md").read_text(encoding="utf-8"))
+        self.assertEqual(re.search(r"^## (\S+)", (KIT / "CHANGELOG.md").read_text(encoding="utf-8"), re.M).group(1), v)
+
+
 class Egress(Fixture):
     def test_the_security_overview_names_every_server_and_setup_host(self):
         text = (KIT / "docs" / "security-overview.md").read_text(encoding="utf-8")

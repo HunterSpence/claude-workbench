@@ -126,7 +126,9 @@ def child_unittest(directory, out):
     Path(out).write_text(json.dumps({
         "ids": [split(i) for i in seen],
         "skipped": [[*split(t.id()), reason] for t, reason in r.skipped],
-        "failed": len(r.failures) + len(r.errors) + len(r.unexpectedSuccesses)}), encoding="utf-8")
+        "failed": len(r.failures) + len(r.errors) + len(r.unexpectedSuccesses),
+        "failures": [t.id() for t, _ in r.failures + r.errors] + [t.id() for t in r.unexpectedSuccesses]}),
+        encoding="utf-8")
     return 0 if r.wasSuccessful() else 1
 
 

@@ -53,7 +53,7 @@ import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 MARKETPLACE = "workbench"
 PLUGIN_IDS = ("workbench-core@workbench", "workbench-kb@workbench")    # pluginConfigs.<id>.options.python: these only
 DEFAULT_PLUGINS = PLUGIN_IDS + ("workbench-biz@workbench",)
@@ -123,6 +123,14 @@ def short_path(p):
         return buf.value if 0 < n < 32768 else str(p)
     except Exception:
         return str(p)
+
+
+def console_python(exe=None):
+    """python.exe beside pythonw.exe (else exe unchanged), for every Python child whose output is read. A pythonw
+    process hands its own children no standard handles, so under a detached (pythonw) setup run their output is lost."""
+    p = Path(exe or sys.executable)
+    c = p.with_name("python.exe")
+    return str(c) if p.name.lower() == "pythonw.exe" and c.is_file() else str(p)
 
 
 def statusline_command(python, script):

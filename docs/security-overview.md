@@ -73,7 +73,7 @@ versions where the kit chooses the version.
 |---|---|---|---|---|
 | Git | winget | user | `cdn.winget.microsoft.com`, `github.com`, `release-assets.githubusercontent.com` | setup, when missing |
 | GitHub CLI | winget | user | `cdn.winget.microsoft.com`, `github.com`, `release-assets.githubusercontent.com` | setup, when missing |
-| Python 3.13 | winget | user | `cdn.winget.microsoft.com`, `www.python.org` | setup, when missing |
+| Python 3.13 | winget | user | `cdn.winget.microsoft.com`, `www.python.org` | setup, when neither Python 3.13 nor 3.14 is installed |
 | uv | winget | user | `cdn.winget.microsoft.com`, `github.com`, `release-assets.githubusercontent.com` | setup, when missing |
 | PowerShell 7 | winget | user | `cdn.winget.microsoft.com`, `github.com`, `release-assets.githubusercontent.com` | setup, when missing |
 | ripgrep | winget | user | `cdn.winget.microsoft.com`, `github.com`, `release-assets.githubusercontent.com` | setup, when missing |
