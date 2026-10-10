@@ -33,7 +33,7 @@ import time
 import urllib.error
 import urllib.request
 
-KIT_VERSION = "0.3.3"
+KIT_VERSION = "0.3.4"
 UA = "claude-workbench-probe/" + KIT_VERSION
 NET_BUDGET_S = 45
 HTTP_TIMEOUT = 4

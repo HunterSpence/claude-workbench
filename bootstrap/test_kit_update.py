@@ -169,6 +169,76 @@ class Machine(unittest.TestCase):
         return S.jload(self.state / S.MARKER)
 
 
+class SetChoices(Machine):
+    """`kit_update.py set --approvals off|ask --guard minimal|...`: the installed installer again, same profile and opt-ins."""
+    def setUp(self):
+        super().setUp()
+        inst = self.wb / "kit" / "bootstrap" / "install.py"
+        inst.parent.mkdir(parents=True)
+        inst.write_text("# the installed kit's installer (never run: the Run fake answers)\n", encoding="utf-8")
+
+    class Plan(Run):
+        def __call__(self, ctx, script, *args, timeout=0):
+            super().__call__(ctx, script, *args, timeout=timeout)
+            if "off" in args:
+                return 0, ("[settings] profile corporate; approvals: off (new windows start in acceptEdits)\n"
+                           "WARNING approvals off: your organisation's managed settings keep bypass mode off\n"), ""
+            return 0, "[settings] profile corporate; approvals: ask\n", ""
+
+    def go(self, run, **kw):
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            code = K.cmd_set(self.ctx(), run=run, **kw)
+        return code, out.getvalue()
+
+    def test_approvals_off_and_guard_minimal_rerun_the_installed_installer_once_with_the_same_choices(self):
+        run = self.Plan()
+        code, text = self.go(run, approvals="off", guard="minimal")
+        self.assertEqual(code, 0)
+        (name, args), = run.calls
+        self.assertEqual(name, "install.py")
+        self.assertEqual(args, ("--apply", "--profile", "corporate", "--with", "ctx,tokensave", "--approvals", "off", "--guard", "minimal"))
+        self.assertEqual(Path(run.install_cwd).resolve(), self.state.resolve(), "never from inside the kit folder")
+        self.assertIn("Approvals OFF", text)
+        self.assertIn("new windows start in acceptEdits", text)
+        self.assertIn("approvals off: your organisation's managed settings keep bypass mode off", text)
+        self.assertIn("Guard MINIMAL: it refuses nothing", text)
+        self.assertIn("Restart every Claude Code window", text)
+
+    def test_each_choice_alone_and_back(self):
+        run = self.Plan()
+        code, text = self.go(run, approvals="ask")
+        self.assertEqual((code, run.calls[-1][1][-2:]), (0, ("--approvals", "ask")))
+        self.assertIn("Approvals back ON", text)
+        code, text = self.go(run, guard="standard")
+        self.assertEqual((code, run.calls[-1][1][-2:]), (0, ("--guard", "standard")))
+        self.assertNotIn("--approvals", run.calls[-1][1])
+
+    def test_the_permissive_profile_keeps_its_approvals_and_a_missing_kit_or_choice_is_a_usage_error(self):
+        S.jwrite(self.wb / "config.json", {"profile": "permissive"})
+        run = self.Plan()
+        code, text = self.go(run, approvals="off")
+        self.assertEqual((code, run.calls), (0, []))
+        self.assertIn("already runs commands without asking", text)
+        code, text = self.go(run, approvals="off", guard="minimal")
+        self.assertEqual(run.calls[-1][1][-2:], ("--guard", "minimal"), "the guard part still applies")
+        self.assertNotIn("--approvals", run.calls[-1][1])
+        S.jwrite(self.wb / "config.json", {"profile": "corporate"})
+        with mock.patch("sys.stdout", new_callable=io.StringIO):
+            self.assertEqual(K.main(["set"]), 2)
+        (self.wb / "kit" / "bootstrap" / "install.py").unlink()
+        with mock.patch("sys.stdout", new_callable=io.StringIO):
+            self.assertEqual(K.main(["set", "--approvals", "off"]), 2)
+
+    def test_a_policy_stop_is_exit_3_and_a_bad_value_is_a_usage_error(self):
+        with mock.patch.object(K, "run_py", Run(install_rc=3)), mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            self.assertEqual(K.main(["set", "--guard", "minimal"]), 3)
+        self.assertIn("policy stopped it", out.getvalue())
+        with mock.patch("sys.stdout", new_callable=io.StringIO), mock.patch("sys.stderr", new_callable=io.StringIO):
+            self.assertEqual(K.main(["set", "--approvals", "maybe"]), 2)
+            self.assertEqual(K.main(["set", "--guard", "none"]), 2)
+            self.assertEqual(K.main(["set", "--appr", "off"]), 2)                # no abbreviations: the guard reads the full words
+
+
 class Update(Machine):
     def test_a_newer_release_is_downloaded_checked_installed_and_set_up_with_the_remembered_opt_ins(self):
         net, run = Net(), Run()

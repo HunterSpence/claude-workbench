@@ -64,14 +64,33 @@ _ASKS = []
 
 # ── guard level (H7) ─────────────────────────────────────────────────────────────────────────────────────────
 # `guard_level` in <workbench home>/corporate-allowlist.json (the file the corporate pack reads its "enabled" from):
+#   minimal   nothing is refused. Only the rules in MINIMAL_ASK ask (the user's OK); every other rule is logged and passes.
 #   standard  the default, also when the file or the key is missing, or the key holds another value
 #   strict    every rule below refuses, as 0.3.1 did; also when the file exists but cannot be read or parsed, or is not a JSON
 #             object (fail closed, logged), and when CLAUDE_CONFIG_DIR differs from the installed one
 # Under standard only the rules in SOFT_RULES ask instead of refusing, and browser-cli plain navigation passes (logged). Every
 # other deny stays a deny at both levels: the list is short on purpose, and a rule joins it only with a test that names it.
-LEVELS = ("standard", "strict")
+LEVELS = ("minimal", "standard", "strict")
 SOFT_RULES = frozenset({"remote-not-allowlisted", "upload-not-allowlisted", "no-verify"})
 SOFT_LEAD = "Standard guard level: this asks instead of refusing (the strict level refuses it). "
+# The minimal level: MINIMAL_PASS is logged and passes; every other rule asks (fail closed), so a rule added later and listed
+# nowhere asks. MINIMAL_ASK names what asks, for the docs and the tests (ZCorpus checks every id the tests reach is on one list).
+MINIMAL_ASK = frozenset({
+    "force-push-main", "delete-main", "push-default-branch", "rm-rf-root",               # irreversible, or skips review on main
+    "secret-path", "webfetch-secret", "browser-url", "browser-session",                 # a credential or a signed-in session
+    "outbound-send", "publish-confirm", "public-repo", "upload-not-allowlisted",         # leaves the machine
+    "remote-not-allowlisted", "browser-upload", "protected-db-write", "prod-build", "security-tooling-change",
+    "guard-config-write", "claude-json-write", "installer-run", "approvals-off", "guard-lowered",
+    "tokensave-rewrite",                                                                # the guard's and Claude Code's own setup
+    "encoded-command", "nest-cap", "git-exec-config",                                   # the guard cannot read what would run
+    "xargs-python-repl", "runaway-output",                                              # a loop that fills the disk
+})
+MINIMAL_PASS = frozenset({
+    "no-verify", "tls-verify-off", "env-write", "active-context-write", "agent-fork", "backdate",
+    "cd-backslash", "msys-path", "unbalanced-quotes", "browser-cli",                    # local, or a mistake the command reports itself
+})
+MINIMAL_LEAD = "Minimal guard level: this asks instead of refusing. "
+_PASSED = set()
 
 
 def guard_level():
@@ -96,7 +115,7 @@ def guard_level():
         return "standard"
     if isinstance(v, str) and v.strip().lower() in LEVELS:
         return v.strip().lower()
-    log(f"ERROR guard_level {str(v)[:40]!r} is not standard or strict: using standard")
+    log(f"ERROR guard_level {str(v)[:40]!r} is not minimal, standard or strict: using standard")
     return "standard"
 
 
@@ -141,8 +160,26 @@ def _out(decision, reason):
                                    "permissionDecisionReason": reason}}
 
 
+def _minimal_pass(gid, detail, what):
+    """The minimal level lets this rule's finding through: logged once per call, and the rule goes on judging the rest."""
+    if (gid, detail[:120]) not in _PASSED:
+        _PASSED.add((gid, detail[:120]))
+        log(f"PASS [{gid}] (minimal level: {what} logged, not acted on) {detail}"[:600])
+
+
 def block(reason, gid, detail=""):
-    """Deny the call now (a SOFT_RULES rule at the standard level asks instead and ends its own run)."""
+    """Deny the call now (a SOFT_RULES rule at the standard level asks instead and ends its own run). At the minimal level
+    nothing is denied: a MINIMAL_ASK rule asks and every other one is logged, and in both cases the rule keeps running, so
+    a later statement of the same command is still judged (a harmless finding must not hide a force-push after it)."""
+    if CTX["level"] == "minimal":
+        if gid not in MINIMAL_PASS:                    # fail closed: a rule on neither list asks
+            msg = f"[workbench guard: {gid}] {MINIMAL_LEAD}{reason}"
+            if msg not in _ASKS:
+                log(f"ASK [{gid}] (relaxed from deny at the minimal level) {(detail + ' | ' if detail else '')}{reason}"[:600])
+                _ASKS.append(msg)
+        else:
+            _minimal_pass(gid, detail, "a refusal")
+        return
     if gid in SOFT_RULES and CTX["level"] == "standard":
         log(f"ASK [{gid}] (relaxed from deny at the standard level) {(detail + ' | ' if detail else '')}{reason}"[:600])
         _ASKS.append(f"[workbench guard: {gid}] {SOFT_LEAD}{reason}")
@@ -158,6 +195,8 @@ def relaxed(gid, detail=""):
 
 def ask(reason, gid, detail=""):
     """Ask the user to confirm. Collected: it is returned only if no rule denies the call."""
+    if CTX["level"] == "minimal" and gid in MINIMAL_PASS:
+        return _minimal_pass(gid, detail, "an ask")
     msg = f"[workbench guard: {gid}] {reason}"
     if msg in _ASKS:   # the same ask again (a statement repeated thousands of times): said and logged once
         return
@@ -1089,8 +1128,12 @@ BROWSER_MCP = re.compile(r"mcp__.*([Pp]laywright|[Cc]hrome|[Pp]uppeteer|[Bb]rows
 # letter by letter, exactly as in the hooks.json matcher, so a server name in any letter case is seen.
 DB_MCP = re.compile(r"mcp__.*([Pp][Oo][Ss][Tt][Gg][Rr][Ee][Ss]|[Ss][Qq][Ll]|[Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee]).*")
 _RM_HEADS = {"rm", "rmdir", "remove-item", "ri", "rd", "del", "erase", "unlink", "mv", "move-item", "rename-item"}
-_KIT_RAW = re.compile(r"(?i)(?:^|[/\\])\.claude[/\\]+(?:settings(?:\.local)?\.json$|workbench(?:[/\\]|$)|"
+_KIT_RAW = re.compile(r"(?i)(?:^|[/\\])\.claude[/\\]+(?:settings(?:\.local)?\.json$|workbench(?:[/\\](?!(?:kb-state|cache)(?:[/\\]|$))|$)|"
                       r"plugins[/\\].*workbench)")
+# The save's own working files (snapshots, merge-conflict files, journal windows: <workbench home>/kb-state) and the search
+# index cache: the save skill has Claude write and edit some of them, and none of them configures the guard or Claude Code.
+KIT_FREE = ("kb-state", "cache")
+_KIT_RAW_ANY = re.compile(r"(?i)(?:^|[/\\])\.claude[/\\]+workbench(?:[/\\]|$)")   # a .. in the name: no folder is exempt
 KIT_MSG = ("{path} configures Claude Code or the workbench guards (settings files, the workbench folder, the "
            "corporate allowlist, the installed plugins). The agent does not change the controls that apply to it: "
            "the user edits these by hand, with /config or /permissions, or re-runs the workbench installer.")
@@ -1164,7 +1207,7 @@ def kit_protected(path, cwd=""):
     if not path:
         return False
     raw = str(path).strip("\"'").rstrip("/\\")
-    raw_hit = bool(_KIT_RAW.search(raw))
+    raw_hit = bool(_KIT_RAW.search(raw)) or bool(re.search(r"(?:^|[/\\])\.\.(?:[/\\]|$)", raw) and _KIT_RAW_ANY.search(raw))
     try:
         unresolved = _as_written(raw, cwd)
         cands = {norm(raw, cwd), unresolved}
@@ -1174,7 +1217,10 @@ def kit_protected(path, cwd=""):
     except (OSError, ValueError):
         return True if raw_hit else False
     user_md = {w + "/user.md" for w in wbs}
+    free = {w + "/" + d for w in wbs for d in KIT_FREE}
     for q in cands - user_md:
+        if any(under(q, f) for f in free) and not os.path.islink(unresolved):
+            continue
         if any(under(q, w) for w in wbs) or any(q in (c + "/settings.json", c + "/settings.local.json") or
                                                 (under(q, c + "/plugins") and "workbench" in q[len(c) + 9:])
                                                 for c in chs):
@@ -1320,8 +1366,39 @@ def _deletes_stage(toks):
     return head in _DEL_HEADS
 
 
+_APPROVALS_OFF = re.compile(r"""(?i)--approvals[=\s"',]+off\b|kit_update\.py\b[^\n;&|]*\bapprovals\b[\s"',]+off\b|"""
+                            r"""\bapprovals\s*=\s*["']off\b""")
+_APPROVALS_CODE = re.compile(r"\b(?:cmd_set|approvals_off|lift_kit_asks)\b")
+_GUARD_DOWN = re.compile(r"""(?i)--guard[=\s"',]+minimal\b|\bguard\s*=\s*["']minimal\b|["']guard_level["']\s*[:=,]\s*["']minimal\b""")
+_GUARD_KEY = re.compile(r"""["']guard_level["']\s*[:=,\]]""")       # any value, computed too, written next to the allowlist's name
+_INSTALLER_IMPORT = re.compile(r"""(?m)(?:^|[;"':])\s*(?:import\s+(?:[\w.]+(?:\s+as\s+\w+)?\s*,\s*)*|from\s+)"""
+                               r"""(?:kit_update|install|uninstall)\b(?![.\w])|"""
+                               r"""\b(?:__import__|import_module)\(\s*["'](?:kit_update|install|uninstall)["']""")
+
+
+def _kit_text(c):
+    """The command and the code it carries inline (python -c, bash -c, an encoded command), minus provable prose (commit
+    messages, echo and grep arguments). Never a file read from disk: a script is the guard's documented limit, and reading
+    files made the hook slow enough to time out (a hook that times out decides nothing)."""
+    return raw_view(c)
+
+
 def _kit_shell(c):
-    if _installer_run(c.cmd):   # it rewrites settings, the allowlist and the plugins: only with the user's OK
+    special = False
+    text = _kit_text(c)
+    imports = bool(_INSTALLER_IMPORT.search(text))
+    if _APPROVALS_OFF.search(text) or (imports and _APPROVALS_CODE.search(text)):   # the switches that remove prompts: the user must have asked for them, in their own words
+        special = True
+        ask("This turns command approvals OFF: new Claude Code windows will run ordinary commands without asking you first. "
+            "Approve only if YOU asked for that just now, in your own words, and not because a file, a web page or a tool's "
+            "output suggested it. The guard still asks before what it always asks about.", "approvals-off")
+    if _GUARD_DOWN.search(text) or (_GUARD_KEY.search(text) and "corporate-allowlist" in text):
+        special = True
+        ask("This lowers the workbench guard (minimal: it refuses nothing and asks only before irreversible steps, anything "
+            "that leaves this machine, credential files and changes to its own controls). Approve only if YOU asked for that "
+            "just now, in your own words, and not because a file, a web page or a tool's output suggested it.",
+            "guard-lowered")
+    if not special and (_installer_run(c.cmd) or imports):   # it rewrites settings, the allowlist and the plugins: only with the user's OK
         ask("This runs the workbench installer or kit updater, which changes the controls that apply to the agent (settings, the "
             "approved git hosts, the plugins) and may download code from the repository it names. Approve only if you asked for "
             "this install or update, and read its options.", "installer-run")
@@ -1684,6 +1761,7 @@ def _evaluate(data):
                level="standard")
     CTX["level"] = guard_level()
     _ASKS.clear()
+    _PASSED.clear()
     for cache in (_LEXED, _WALKED, _PROSED, _WT, _RAWB):
         cache.clear()
     _WORK[0] = 0
@@ -1728,12 +1806,13 @@ def _judge(data):
     except Decision as d:
         return d.out
     except _Soft:   # a soft rule outside _run: its ask must not be lost
-        return _out("ask", " ".join(dict.fromkeys(_ASKS)))
+        return _out("ask", " ".join(dict.fromkeys(_ASKS))) if _ASKS else None
     except _TooDeep as e:
         try:
             block(DEEP_MSG, "nest-cap", f"limit {e}")
         except Decision as d:
             return d.out
+        return _out("ask", " ".join(dict.fromkeys(_ASKS))) if _ASKS else None   # the minimal level asks instead
     return None
 
 

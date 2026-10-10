@@ -759,6 +759,48 @@ class Kit(Case):
         self.blocked("python bootstrap/install.py --apply; echo x > ~/.claude/workbench/corporate-allowlist.json",
                      "guard-config-write")   # a deny elsewhere in the command still wins over the ask
 
+    def test_turning_approvals_off_asks_with_its_own_warning_in_every_spelling(self):
+        for tool, cmd in [("Bash", "py -3 ~/.claude/workbench/kit/bootstrap/kit_update.py set --approvals off"),
+                          ("PowerShell", r'& "C:\Py\python.exe" "$HOME\.claude\workbench\kit\bootstrap\kit_update.py" approvals off'),
+                          ("Bash", "python bootstrap/install.py --apply --approvals off"),
+                          ("Bash", "python bootstrap/install.py --apply --approvals=off"),
+                          ("Bash", 'python -c "import kit_update as K, setup as S; K.cmd_set(S.Ctx(), approvals=\'off\')"'),
+                          ("Bash", 'python -c "import kit_update as K; K.main([\'set\', \'--approvals\', \'off\'])"')]:
+            out = ev(tool, {"command": cmd})
+            self.assertEqual((decision(out), gid(out)), ("ask", "approvals-off"), cmd)
+            self.assertIn("in your own words", out["hookSpecificOutput"]["permissionDecisionReason"])
+        out = ev("Bash", {"command": "py -3 kit/bootstrap/kit_update.py set --approvals ask"})
+        self.assertEqual((decision(out), gid(out)), ("ask", "installer-run"), "turning them back on is an ordinary installer run")
+        self.assertIsNone(ev("Bash", {"command": "echo the approvals workflow is off today"}))
+
+    def test_a_switch_in_inline_code_or_an_import_asks_and_ordinary_work_does_not(self):
+        for cmd, guard in [('python -c "from install import main"', "installer-run"),
+                           ('python -c "import json; json.dump({\'guard_level\': \'minimal\'}, open(\'corporate-allowlist.json\', \'w\'))"',
+                            "guard-lowered"),
+                           ("python bootstrap/install.py --apply --guard standard", "installer-run")]:   # standard is not a lowering
+            out = ev("Bash", {"command": cmd})
+            self.assertEqual((decision(out), gid(out)), ("ask", guard), cmd)
+        for cmd, guard in [('py -3 -c "k=__import__(\'kit_update\'); k.cmd_set(None, \'off\')"', "approvals-off"),
+                           ('py -3 -c "import importlib; importlib.import_module(\'kit_update\').cmd_set(None, \'off\')"', "approvals-off"),
+                           ('py -3 -c "import os, kit_update; kit_update.cmd_set(None, \'off\')"', "approvals-off"),
+                           ('py -3 -c "if True: import kit_update; kit_update.cmd_set(None, approvals=\'off\')"', "approvals-off"),
+                           ('py -3 -c "import json,sys; json.dump({\'guard_level\':\'minimal\'}, open(sys.argv[1],\'w\'))" x/corp*.json',
+                            "guard-lowered"),
+                           ('py -3 -c "import json; lvl=input(); json.dump({\'guard_level\': lvl}, open(\'corporate-allowlist.json\', \'w\'))"',
+                            "guard-lowered")]:                                     # a computed value, next to the file's name
+            out = ev("Bash", {"command": cmd})
+            self.assertEqual(decision(out), "ask", cmd)
+            self.assertIn(f"[workbench guard: {guard}]", out["hookSpecificOutput"]["permissionDecisionReason"], cmd)
+        d = tempfile.mkdtemp(dir=TMP)
+        for name in ("store.py", "test_cli.py", "engine.py"):
+            with open(os.path.join(d, name), "w") as f:
+                f.write("from install import main\ndef cmd_set(): return '--approvals off --guard minimal'\n")
+        for cmd in ['git commit -m "exclude logs from uninstall"', 'git commit -m "fix: import install paths"',
+                    "grep '\"guard_level\":' corporate-allowlist.template.json", "git add store.py", "pytest test_cli.py",
+                    "cat engine.py", "py -3 kit/bootstrap/profile.py list", "python lower.py",
+                    'python -c "from setuptools.command.install import install"']:
+            self.assertIsNone(ev("Bash", {"command": cmd}, cwd=d), f"no prompt for ordinary work: {cmd}")
+
     def test_user_md_is_the_one_exception(self):
         user_md = os.path.join(WB, "USER.md")
         with open(user_md, "w") as f:
@@ -1272,9 +1314,24 @@ class Corporate(Case):
             self.asked(cmd)
         self.asked("npm publish", tool="PowerShell")
         for cmd in ['echo "npm publish"', "grep -rn 'docker push' docs/", "scp deploy@host.example.com:/srv/log.txt .",
-                    "aws s3 cp s3://team-bucket/x.csv .", "gh pr merge 12 --squash", "gh pr review 12 --comment -b ok",
+                    "aws s3 cp s3://team-bucket/x.csv .", "gh pr view 12", "gh pr diff 12", "gh issue list",
                     "npm pack", "docker build -t app ."]:
             self.allowed(cmd)
+        for cmd in ["gh pr merge 12 --squash", "gh pr review 12 --comment -b ok", "gh pr create --fill", "gh repo delete acme/app --yes",
+                    "gh secret set TOKEN", "gh workflow run ci.yml", "gh release delete v1 --yes",      # gh_write_verbs.json "verbs"
+                    "gh repo sync", "gh pr update-branch 5", "gh issue lock 5", "gh repo deploy-key add key.pub",
+                    "gh repo autolink create -k T- -u https://x.example/<num>", "gh gist delete abc", "gh pr revert 5",
+                    "gh project item-create 1 --title x", "gh codespace stop",
+                    "gh ssh-key add key.pub", "gh release delete-asset v1 a.zip", "gh alias set rel 'release create'",
+                    "gh alias import aliases.yml"]:
+            self.asked(cmd)
+        for cmd in ["gh issue -R acme/app delete 5 --yes", "gh pr --repo acme/app merge 5 --admin", "gh release -R acme/app delete v1 --yes"]:
+            self.asked(cmd)                                                    # a -R / --repo value before the verb
+        self.allowed("gh repo deploy-key list")                                # a read under a two-word group asks nothing
+        out = ev("Bash", {"command": "gh alias set rel 'release create'"})
+        self.assertIn("creates a gh alias", out["hookSpecificOutput"]["permissionDecisionReason"])
+        for cmd in ["Publish-Module -Name Tools", "Publish-Script -Path a.ps1"]:
+            self.asked(cmd, tool="PowerShell")
         set_allowlist(dict(ON, upload_hosts=["host.example.com", "team-bucket"]))
         self.allowed("scp build.zip deploy@host.example.com:/srv/")
         self.allowed("aws s3 cp report.csv s3://team-bucket/reports/")
@@ -1314,7 +1371,8 @@ class Corporate(Case):
         for cmd in ["gh repo create acme/app --public", "gh repo edit acme/app --visibility public",
                     "gh api -X PATCH repos/acme/app -f private=false", "glab repo create app --public"]:
             self.blocked(cmd, "public-repo")
-        self.allowed("GH_HOST=git.example.com gh repo create acme/app --private")
+        out = ev("Bash", {"command": "GH_HOST=git.example.com gh repo create acme/app --private"})
+        self.assertEqual((decision(out), gid(out)), ("ask", "publish-confirm"), "a private repo on an approved host: asked, not refused")
 
     def test_push_urls(self):
         for cmd in ["git push https://github.com/someone/app.git feature", "git push git@gitlab.com:someone/app.git",
@@ -1759,7 +1817,7 @@ class Hardening(Case):
     def test_gh_write_verbs_file_is_the_one_list(self):
         with open(os.path.join(GUARDS, "gh_write_verbs.json"), encoding="utf-8") as f:
             d = json.load(f)
-        self.assertEqual(sum(len(v) for v in d["verbs"].values()), 39)
+        self.assertEqual(sum(len(v) for v in d["verbs"].values()), 84)
         self.assertIn("transfer", d["verbs"]["issue"])
         self.assertEqual(d["api"]["methods"], ["POST", "PUT", "PATCH", "DELETE"])
         self.assertEqual(d["api"]["field_flags"], ["-f", "-F", "--field", "--raw-field", "--input"])
@@ -1834,17 +1892,21 @@ class BrowserCli(Case):
     CONF = ON
 
     def asked(self, cmd, tool="Bash"):
+        self.asked_as("browser-cli", cmd, tool)
+
+    def asked_as(self, guard, cmd, tool="Bash"):
+        """browser-upload: a file into the page; browser-session: a signed-in identity or stored session values; browser-cli: the rest."""
         out = ev(tool, {"command": cmd})
-        self.assertEqual((decision(out), gid(out)), ("ask", "browser-cli"), cmd)
+        self.assertEqual((decision(out), gid(out)), ("ask", guard), cmd)
 
     def test_upload_and_file_drops_ask(self):
         for cmd in ["playwright-cli upload report.pdf", "playwright-cli upload a.txt b.txt", "playwright-cli drop e12 --path=a.zip",
                     "playwright-cli -s=work upload a.txt", "npx playwright-cli upload a.txt", "npx --no-install playwright cli drop e3 --path=x",
                     "playwright-cli.cmd upload a.txt", "cd app && playwright-cli upload a.txt", "FOO=1 playwright-cli upload a.txt",
                     "playwright-cli --config c.json upload a.txt", "UPLOAD=1 playwright-cli UPLOAD a.txt"]:
-            self.asked(cmd)
-        self.asked("& playwright-cli upload a.txt", tool=PS)
-        self.asked("playwright-cli.ps1 drop e1 --path=a.zip", tool=PS)
+            self.asked_as("browser-upload", cmd)
+        self.asked_as("browser-upload", "& playwright-cli upload a.txt", tool=PS)
+        self.asked_as("browser-upload", "playwright-cli.ps1 drop e1 --path=a.zip", tool=PS)
 
     def test_eval_and_run_code_ask(self):
         for cmd in ["playwright-cli eval \"document.cookie\"", "playwright-cli eval \"el => el.value\" e5", "playwright-cli run-code \"async page => {}\"",
@@ -1860,32 +1922,32 @@ class BrowserCli(Case):
                     "playwright-cli -s=a attach", "playwright-cli --session a attach --cdp=msedge", "npx playwright-cli attach",
                     "npx --no-install playwright cli attach --extension=chrome", "playwright-cli.cmd attach", "cd app && playwright-cli attach",
                     "FOO=1 playwright-cli ATTACH"]:
-            self.asked(cmd)
-        self.asked("& playwright-cli attach --cdp=msedge", tool=PS)
+            self.asked_as("browser-session", cmd)
+        self.asked_as("browser-session", "& playwright-cli attach --cdp=msedge", tool=PS)
 
     def test_loading_saved_cookies_and_logins_asks(self):
         for cmd in ["playwright-cli state-load auth.json", "playwright-cli state-load ./state/work.json", "playwright-cli -s=a state-load a.json",
                     "playwright-cli --config c.json state-load a.json", "npx playwright-cli state-load a.json",
                     "npx playwright cli state-load a.json", "playwright-cli.cmd state-load a.json", "cd app && playwright-cli state-load a.json",
                     "FOO=1 playwright-cli STATE-LOAD a.json"]:
-            self.asked(cmd)
-        self.asked("& playwright-cli state-load auth.json", tool=PS)
+            self.asked_as("browser-session", cmd)
+        self.asked_as("browser-session", "& playwright-cli state-load auth.json", tool=PS)
 
     def test_calling_a_tool_the_page_registered_asks(self):
         for cmd in ["playwright-cli webmcp-call search", "playwright-cli webmcp-call search --params='{\"query\":\"cats\"}'",
                     "playwright-cli webmcp-call search --frame=f1", "playwright-cli -s=a webmcp-call t", "npx playwright-cli webmcp-call t",
                     "npx playwright cli webmcp-call t --params={}", "playwright-cli.cmd webmcp-call t", "cd app && playwright-cli webmcp-call t",
                     "FOO=1 playwright-cli WEBMCP-CALL t"]:
-            self.asked(cmd)
-        self.asked("& playwright-cli webmcp-call search", tool=PS)
+            self.asked_as("browser-session", cmd)
+        self.asked_as("browser-session", "& playwright-cli webmcp-call search", tool=PS)
 
     # ── options that reach a real profile or browser ──
     def forms(self, tail, *extra):
         """tail = a command line without the program name; asked in every way the program can be spelled."""
         for cmd in [f"playwright-cli {tail}", f"npx playwright-cli {tail}", f"npx --no-install playwright cli {tail}",
                     f"playwright-cli.cmd {tail}", f"cd app && playwright-cli {tail}", f"FOO=1 playwright-cli {tail}", *extra]:
-            self.asked(cmd)
-        self.asked(f"& playwright-cli {tail}", tool=PS)
+            self.asked_as("browser-session", cmd)
+        self.asked_as("browser-session", f"& playwright-cli {tail}", tool=PS)
 
     def test_a_profile_folder_asks(self):
         self.forms("open --profile=./p")
@@ -1893,13 +1955,13 @@ class BrowserCli(Case):
                     "playwright-cli open https://localhost:3000 --profile=p", "playwright-cli --profile=p open", "playwright-cli --profile p open",
                     "playwright-cli -s=a open --profile=p", "playwright-cli snapshot --profile=p", "playwright-cli open --profile",
                     "playwright-cli --config c.json open --profile=p"]:
-            self.asked(cmd)
+            self.asked_as("browser-session", cmd)
 
     def test_a_persistent_profile_asks(self):
         self.forms("open --persistent")
         for cmd in ["playwright-cli -s=example open https://localhost:3000 --persistent", "playwright-cli --persistent open",
                     "playwright-cli open --persistent=true", "playwright-cli snapshot --persistent"]:
-            self.asked(cmd)
+            self.asked_as("browser-session", cmd)
 
     def test_cdp_to_a_target_that_is_not_localhost_asks(self):
         self.forms("open --cdp=msedge")
@@ -1907,35 +1969,35 @@ class BrowserCli(Case):
                     "playwright-cli open --cdp=ws://dev-box.example.net:9222/devtools/browser/abc", "playwright-cli open --cdp=http://localhost.evil.example.net:9222",
                     "playwright-cli open --cdp=http://user@dev-box.example.net:9222", "playwright-cli open --cdp=$ENDPOINT", "playwright-cli open --cdp",
                     "playwright-cli --cdp=msedge snapshot", "playwright-cli snapshot --cdp=file:///C:/x"]:
-            self.asked(cmd)
+            self.asked_as("browser-session", cmd)
 
     def test_the_extension_option_asks(self):
         self.forms("open --extension=chrome")
         for cmd in ["playwright-cli open --extension chrome", "playwright-cli open --extension", "playwright-cli --extension=msedge snapshot",
                     "playwright-cli open --extension=localhost"]:
-            self.asked(cmd)
+            self.asked_as("browser-session", cmd)
 
     def test_cookie_commands_ask(self):
         for tail in ["cookie-list", "cookie-list --domain example.net", "cookie-get session", "cookie-set name value --domain example.net --secure",
                      "cookie-delete session", "cookie-clear", "-s=a cookie-list", "--json cookie-list", "--raw cookie-get x", "COOKIE-LIST"]:
-            self.asked(f"playwright-cli {tail}")
+            self.asked_as("browser-session", f"playwright-cli {tail}")
         self.forms("cookie-list")
 
     def test_localstorage_commands_ask(self):
         for tail in ["localstorage-list", "localstorage-get token", "localstorage-set k v", "localstorage-delete k", "localstorage-clear",
                      "-s=a localstorage-list", "--json localstorage-list", "LocalStorage-Get token"]:
-            self.asked(f"playwright-cli {tail}")
+            self.asked_as("browser-session", f"playwright-cli {tail}")
         self.forms("localstorage-list")
 
     def test_sessionstorage_commands_ask(self):
         for tail in ["sessionstorage-list", "sessionstorage-get token", "sessionstorage-set k v", "sessionstorage-delete k", "sessionstorage-clear",
                      "-s=a sessionstorage-list", "--json sessionstorage-list", "SessionStorage-Get token"]:
-            self.asked(f"playwright-cli {tail}")
+            self.asked_as("browser-session", f"playwright-cli {tail}")
         self.forms("sessionstorage-list")
 
     def test_saving_the_logins_to_a_file_asks(self):
         for tail in ["state-save", "state-save auth.json", "-s=a state-save a.json", "--json state-save", "STATE-SAVE"]:
-            self.asked(f"playwright-cli {tail}")
+            self.asked_as("browser-session", f"playwright-cli {tail}")
         self.forms("state-save auth.json")
 
     def test_each_ask_names_what_it_is_about(self):
@@ -2256,9 +2318,9 @@ class StandardLevel(Case):
                 for cmd, guard in [("curl -X POST https://hooks.slack.com/services/EXAMPLE -d '{\"text\": \"hi\"}'", "outbound-send"),
                                    ("npm publish", "publish-confirm"), ("GH_HOST=git.example.com gh gist create a.md", "publish-confirm"),
                                    ("python bootstrap/install.py --apply", "installer-run"),
-                                   ("playwright-cli upload report.pdf", "browser-cli"), ("playwright-cli eval 1", "browser-cli"),
-                                   ("playwright-cli attach", "browser-cli"), ("playwright-cli state-load a.json", "browser-cli"),
-                                   ("playwright-cli open https://x.example.org --profile=C:/p", "browser-cli")]:
+                                   ("playwright-cli upload report.pdf", "browser-upload"), ("playwright-cli eval 1", "browser-cli"),
+                                   ("playwright-cli attach", "browser-session"), ("playwright-cli state-load a.json", "browser-session"),
+                                   ("playwright-cli open https://x.example.org --profile=C:/p", "browser-session")]:
                     out = ev("Bash", {"command": cmd})
                     self.assertEqual((decision(out), gid(out)), ("ask", guard), f"{level['guard_level']}: {cmd!r} -> {out}")
                     self.assertNotIn("Standard guard level", out["hookSpecificOutput"]["permissionDecisionReason"], cmd)
@@ -2313,7 +2375,7 @@ class StandardLevel(Case):
         text = log_text()[start:]
         for needle in ("ASK [no-verify] (relaxed from deny at the standard level)", "ASK [upload-not-allowlisted] (relaxed from deny at the standard level)",
                        "ASK [remote-not-allowlisted] (relaxed from deny at the standard level)", "PASS [browser-cli] (relaxed from ask at the standard level)",
-                       "ASK [browser-cli]", "BLOCK [secret-path]"):
+                       "ASK [browser-upload]", "BLOCK [secret-path]"):
             self.assertIn(needle, text)
         lines = [ln for ln in text.splitlines() if " ASK [" in ln or " BLOCK [" in ln or " PASS [" in ln]
         self.assertGreaterEqual(len(lines), 6)
@@ -2332,7 +2394,8 @@ class StandardLevel(Case):
         self.assertNotIn("every push to a remote host is refused", d["_readme"])           # at the standard level it asks
         self.assertIn("asked about at the standard one", d["_readme"])
         self.assertIn("a file that cannot be parsed", d["_readme"])
-        self.assertEqual(sorted(engine.LEVELS), ["standard", "strict"])
+        self.assertEqual(sorted(engine.LEVELS), ["minimal", "standard", "strict"])
+        self.assertIn("minimal refuses nothing", d["_readme"])
         self.assertEqual(sorted(engine.SOFT_RULES), ["no-verify", "remote-not-allowlisted", "upload-not-allowlisted"])
 
 
@@ -2536,6 +2599,21 @@ class Performance(Case):
 class ZCorpus(unittest.TestCase):
     """Runs last (classes run in name order): every call the other tests made, again, under both pack states."""
 
+    def test_every_rule_id_the_tests_reach_is_on_exactly_one_minimal_list_and_minimal_never_refuses(self):
+        """MINIMAL_ASK and MINIMAL_PASS split every rule id: a new rule that is on neither would slip through the minimal level."""
+        self.assertEqual(engine.MINIMAL_ASK & engine.MINIMAL_PASS, frozenset())
+        seen = set()
+        for conf in (STRICT, STD, MIN):
+            set_allowlist(conf)
+            for data in list(CORPUS):
+                out = engine.evaluate(data)
+                if out:
+                    seen.update(re.findall(r"\[workbench guard: ([a-z0-9-]+)\]", out["hookSpecificOutput"]["permissionDecisionReason"]))
+                    if conf is MIN:
+                        self.assertNotEqual(decision(out), "deny", data)
+        self.assertGreaterEqual(len(seen), 30, "the corpus reaches most rules")
+        self.assertEqual(sorted(seen - engine.MINIMAL_ASK - engine.MINIMAL_PASS), [], "a rule id is on neither minimal list")
+
     def test_no_output_ever_allows_or_rewrites(self):
         self.assertGreater(len(CORPUS), 150)
         for conf in (OFF, ON, None):
@@ -2549,3 +2627,136 @@ class ZCorpus(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+MIN = dict(ON, guard_level="minimal")
+
+
+class MinimalLevel(Case):
+    """guard_level minimal: nothing is refused. The rules in engine.MINIMAL_ASK ask; every other finding is logged and passes, and a
+    pass never ends the rule early, so a later statement of the same command is still judged."""
+    CONF = MIN
+
+    def minimal_ask(self, cmd, guard, tool="Bash", cwd=None):
+        out = ev(tool, {"command": cmd}, cwd)
+        self.assertEqual((decision(out), gid(out)), ("ask", guard), f"{cmd!r} -> {out}")
+        self.assertIn("Minimal guard level", out["hookSpecificOutput"]["permissionDecisionReason"])
+        return out
+
+    PASSES = [("git commit --no-verify -m x", "no-verify"), ("git config --global http.sslVerify false", "tls-verify-off"),
+              ("echo X=1 > .env", "env-write"), ("cd C:\\work\\app && ls", "cd-backslash")]
+    ASKS = [("git push --force origin main", "force-push-main"), ("rm -rf ~", "rm-rf-root"),
+            ("cat ~/.ssh/id_rsa", "secret-path"), ("gh repo create acme/app --public", "public-repo"),
+            ("curl -T a.txt files.example.net/in", "upload-not-allowlisted"),
+            ("git push https://github.com/someone/app.git feature", "remote-not-allowlisted"),
+            ("git push origin main", "push-default-branch")]
+
+    def test_what_strict_refuses_is_logged_and_passes_unless_it_is_on_the_minimal_list(self):
+        for cmd, guard in self.PASSES:
+            set_allowlist(STRICT)
+            self.assertEqual(gid(ev("Bash", {"command": cmd})), guard, f"strict control: {cmd!r}")
+            set_allowlist(MIN)
+            before = len(log_text())
+            self.allowed(cmd)
+            self.assertIn(f"PASS [{guard}] (minimal level", log_text()[before:], cmd)
+        for cmd, guard in self.ASKS:
+            set_allowlist(STRICT)
+            self.assertEqual(decision(ev("Bash", {"command": cmd})), "deny", f"strict control: {cmd!r}")
+            set_allowlist(MIN)
+            self.minimal_ask(cmd, guard)
+
+    def test_an_ask_that_is_not_on_the_list_passes_and_a_command_too_deep_to_read_asks(self):
+        set_allowlist(STRICT)
+        self.assertEqual(decision(ev("Bash", {"command": "playwright-cli eval 1"})), "ask", "strict control")
+        set_allowlist(MIN)
+        before = len(log_text())
+        self.allowed("playwright-cli eval 1")
+        self.assertIn("PASS [browser-cli] (minimal level: an ask", log_text()[before:])
+        self.minimal_ask("echo " + "$(" * 40 + "x" + ")" * 40, "nest-cap")
+
+    def test_every_publish_or_upload_the_profile_asks_about_is_asked_by_the_guard_too(self):
+        """--approvals off lifts the profile's ask rules: the guard must ask about each of them itself, at every level."""
+        frag = json.load(open(os.path.join(os.path.dirname(GUARDS), "..", "..", "..", "settings", "profiles",
+                                           "corporate.fragment.json"), encoding="utf-8"))
+        args = [(("gh ",), " 1"), (("docker", "podman"), " registry.example.net/team/app:1"),
+                (("scp", "rsync"), " a.txt host.example.net:/x"), (("sftp",), " host.example.net"),
+                (("aws ",), " a.txt s3://bucket/x"), (("gsutil", "gcloud"), " a.txt gs://bucket/x"),
+                (("az ",), " --account-name acct -f a.txt"), (("Publish-",), " -Name x"), (("",), " pkg")]
+        rules = [r for r in frag["permissions"]["ask"] if r.endswith(" *)")]
+        self.assertGreater(len(rules), 100)
+        for conf in (MIN, STD):
+            set_allowlist(dict(conf, upload_hosts=[]))
+            for rule in rules:
+                tool, inner = rule[:-3].split("(", 1)
+                cmd = inner + next(a for heads, a in args if inner.startswith(heads))
+                out = ev(tool, {"command": cmd})
+                self.assertEqual(decision(out), "ask", f"{conf['guard_level']}: {rule} -> {cmd!r} -> {out}")
+
+    def test_a_rule_on_neither_list_asks_at_the_minimal_level(self):
+        engine.CTX["level"] = "minimal"
+        engine._ASKS.clear()
+        try:
+            engine.block("a rule added after this release", "brand-new-rule")
+            engine.ask("another one", "brand-new-ask")
+            engine.block("a listed pass", "no-verify")
+            self.assertEqual([a.split("]")[0] for a in engine._ASKS],
+                             ["[workbench guard: brand-new-rule", "[workbench guard: brand-new-ask"])
+        finally:
+            engine._ASKS.clear()
+            engine.CTX["level"] = "standard"
+
+    def test_a_pass_never_hides_a_later_force_push_in_the_same_command(self):
+        for cmd in ["cd C:\\work\\app; git push --force origin main",
+                    "git commit --no-verify -m x && git push --force origin main",
+                    "git push origin main; git push --force origin main"]:
+            out = ev("Bash", {"command": cmd})
+            self.assertEqual(decision(out), "ask", cmd)
+            self.assertIn("force-push-main", out["hookSpecificOutput"]["permissionDecisionReason"], cmd)
+
+    def test_the_level_reads_minimal_and_the_installer_switches_ask_with_their_own_words(self):
+        for value in ("minimal", " Minimal ", "MINIMAL"):
+            set_allowlist({"guard_level": value})
+            self.assertEqual(engine.guard_level(), "minimal", value)
+        set_allowlist(MIN)
+        out = ev("Bash", {"command": "py -3 ~/.claude/workbench/kit/bootstrap/kit_update.py set --approvals off --guard minimal"})
+        reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertEqual(decision(out), "ask")
+        self.assertIn("[workbench guard: approvals-off]", reason)
+        self.assertIn("[workbench guard: guard-lowered]", reason)
+        set_allowlist(STRICT)
+        out = ev("Bash", {"command": "python bootstrap/install.py --apply --guard=minimal"})
+        self.assertEqual((decision(out), gid(out)), ("ask", "guard-lowered"), "the strict level asks too: it is the user's switch")
+
+
+class SaveStateFolder(Case):
+    """The save's working files (<workbench home>/kb-state: snapshots, merge-conflict files, journal windows) and the search cache
+    are not guard configuration: the save skill writes them through Claude. Everything else in the workbench home still is."""
+    CONF = STRICT
+
+    def test_the_save_can_write_its_snapshot_and_conflict_files_at_every_level(self):
+        for conf in (STRICT, STD, MIN):
+            set_allowlist(conf)
+            for rel in ("kb-state/1a2b3c4d/snapshots/ac-merge-conflict-20261010.md", "kb-state/1a2b3c4d/ac-draft.md",
+                        "cache/kb-1a2b3c4d.db"):
+                p = os.path.join(WB, *rel.split("/"))
+                self.assertIsNone(ev("Write", {"file_path": p, "content": "# x\n"}), f"{conf['guard_level']}: {rel}")
+                self.assertIsNone(ev("Edit", {"file_path": p, "old_string": "a", "new_string": "b"}), rel)
+            self.allowed(f"echo x >> {os.path.join(WB, 'kb-state', 'k', 'inbox-window.jsonl')}")
+
+    def test_the_raw_name_check_frees_only_the_two_folders_and_never_through_dot_dot(self):
+        other = "D:/elsewhere/profile/.claude/workbench/"          # a .claude/workbench the guard knows only by its name
+        self.assertFalse(engine.kit_protected(other + "kb-state/1a2b3c4d/snapshots/ac-merge-conflict-1.md"))
+        self.assertFalse(engine.kit_protected(other + "cache/kb-1a2b3c4d.db"))
+        for p in ("corporate-allowlist.json", "kit/plugins/x.py", "kb-state/../corporate-allowlist.json",
+                  "cache/../kit/x.py", "kb-statex/a.md"):
+            self.assertTrue(engine.kit_protected(other + p), p)
+
+    def test_the_rest_of_the_workbench_home_stays_protected_and_dot_dot_does_not_escape(self):
+        for p in (os.path.join(WB, "corporate-allowlist.json"), os.path.join(WB, "kb-state", "..", "corporate-allowlist.json"),
+                  os.path.join(WB, "kb-state", "..", "kit", "x.py"), os.path.join(WB, "config.json")):
+            set_allowlist(STRICT)
+            out = ev("Write", {"file_path": p, "content": "{}"})
+            self.assertEqual((decision(out), gid(out)), ("deny", "guard-config-write"), p)
+            set_allowlist(MIN)
+            out = ev("Write", {"file_path": p, "content": "{}"})
+            self.assertEqual((decision(out), gid(out)), ("ask", "guard-config-write"), p)

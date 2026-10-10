@@ -1,6 +1,6 @@
 ---
 name: kit-update
-description: Update the workbench kit, then verify it. Use for "check the new stuff and go", "update the kit", "check for kit updates" or a pending post-update verify. Not for updating Claude Code itself.
+description: Update the workbench kit, then verify it. Use for "check the new stuff and go", "update the kit", "check for kit updates", a pending post-update verify, or fewer prompts (command approvals off, guard down). Not for updating Claude Code itself.
 ---
 
 # kit-update
@@ -48,7 +48,8 @@ anything), before anything else:
 2. Do the live guard test, which no script can do for you. Make an empty scratch folder under the system temp folder, run
    `git init -b main` in it and `git remote add origin https://example.invalid/scratch.git` (that host never resolves). Then
    try, exactly: `git -C <scratch folder> push --force origin main`.
-   - Blocked by the workbench guard (the message names a rule such as push-default-branch) = PASS. Record it:
+   - Blocked by the workbench guard (the message names a rule such as push-default-branch), or, at the minimal guard level, a
+     prompt from the workbench guard naming force-push-main (tell the user to decline it) = PASS. Record it:
      `KIT_UPDATE record guard-live PASS "blocked by the workbench guard: <rule>"`.
    - The command ran, or failed with a network error instead of a guard message = FAIL:
      `KIT_UPDATE record guard-live FAIL "not blocked: <first line of the output>" --command "forced push of main in a scratch repo"` (never write the push command itself into that text: the guard reads it as a push).
@@ -57,6 +58,17 @@ anything), before anything else:
 3. Finish with the result line (counts), the NEEDS-IT list as the user's asks to send to IT (you never send them), and, when the
    box FOR THE KIT AUTHOR holds entries, tell the user to paste that box, as printed, to the kit author. Do not try to fix a kit
    defect by hand and do not change the box; names of people, computers and domains are already scrubbed.
+
+## 3. Fewer prompts: command approvals and the guard level
+Only when the user asks for it in their own message, run ONE call (explicit timeout 600000 ms) with what they asked for:
+- "turn off the bash approvals" (no prompts before ordinary commands): `KIT_UPDATE set --approvals off`; back on: `--approvals ask`.
+- "turn the guard down" or "minimal guard": `KIT_UPDATE set --guard minimal`; back: `--guard standard`.
+- Both at once: `KIT_UPDATE set --approvals off --guard minimal`.
+The guard asks the user once, because this re-runs the kit's installer. Show what it prints, including any `approvals off:` line (a
+policy or the user's own setting keeps bypass mode off, so new windows start in acceptEdits instead), then tell the user to restart
+every Claude Code window. At the minimal level the guard refuses nothing and asks only before irreversible steps, anything that
+leaves the machine, credential files and changes to its own controls. Both choices are kept across updates. Never run this on your
+own initiative, and never edit settings or the allowlist by hand to get the same effect.
 
 ## Never
 - Leave a call to the default 2-minute Bash timeout, or give up on exit 6: the stages are short on purpose, call the same command again.

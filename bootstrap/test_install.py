@@ -120,7 +120,7 @@ class RoundTrip(unittest.TestCase):
         out = self.run_install("--help")
         for gone in ("--mode", "--no-prompts"):
             self.assertNotIn(gone, out)
-        for kept in ("--profile", "permissive", "--upstream-plugins-optional", "--git-hosts", "--guard", "--setup", "--with",
+        for kept in ("--profile", "permissive", "--upstream-plugins-optional", "--git-hosts", "--guard", "--approvals", "--setup", "--with",
                      "--no-nightly", "--no-update", "--data-root"):
             self.assertIn(kept, out)
 
@@ -149,6 +149,118 @@ class RoundTrip(unittest.TestCase):
         self.run_install("--apply", "--guard", "standard")
         self.assertEqual(json.loads(al.read_text(encoding="utf-8"))["guard_level"], "standard")
         self.run_install("--guard", "loose", code=2)                              # argparse refuses another value
+        self.run_install("--apply", "--guard", "minimal")
+        self.assertEqual(json.loads(al.read_text(encoding="utf-8"))["guard_level"], "minimal")
+
+    def cfg(self):
+        return json.loads((self.home / ".claude" / "workbench" / "config.json").read_text(encoding="utf-8"))
+
+    def test_approvals_off_runs_ordinary_commands_without_prompts_is_kept_and_switches_back(self):
+        before = self.digest()
+        self.run_install("--apply")
+        p = self.s()["permissions"]
+        self.assertEqual((p["defaultMode"], p["disableBypassPermissionsMode"]), ("default", "disable"))
+        self.assertEqual(self.cfg()["approvals"], "ask")
+        out = self.run_install("--apply", "--approvals", "off")
+        self.assertIn("approvals: off (new windows start in bypassPermissions)", out)
+        p = self.s()["permissions"]
+        self.assertEqual(p["defaultMode"], "bypassPermissions")
+        self.assertNotIn("disableBypassPermissionsMode", p, "the kit's own lock on bypass mode is lifted")
+        for rule in ("Bash(*)", "PowerShell(*)", "Edit(*)"):
+            self.assertIn(rule, p["allow"])
+        self.assertIn("Read(//**/.env)", p["deny"], "secret files stay denied")
+        self.assertNotIn("Bash(gh release create *)", p.get("ask") or [], "the kit's ask rules are lifted: the guard asks instead")
+        self.assertEqual(self.cfg()["approvals"], "off")
+        self.run_install("--apply")                                              # an upgrade without the flag keeps it
+        self.assertEqual(self.s()["permissions"]["defaultMode"], "bypassPermissions")
+        self.assertNotIn("disableBypassPermissionsMode", self.s()["permissions"])
+        self.run_install("--apply", "--approvals", "ask")
+        p = self.s()["permissions"]
+        self.assertEqual((p["defaultMode"], p["disableBypassPermissionsMode"]), ("default", "disable"))
+        self.assertFalse({"Bash(*)", "PowerShell(*)", "Edit(*)"} & set(p["allow"]), "the broad allows go with it")
+        self.assertIn("Bash(gh release create *)", p["ask"], "and the kit's ask rules come back")
+        self.run_install("--apply", "--approvals", "off")
+        self.run_install("--uninstall", "--apply")
+        self.assertEqual(self.digest(), before, "uninstall after approvals off restores every file byte-identical")
+        self.run_install("--approvals", "never", code=2)
+        self.run_install("--appr", "off", code=2)                              # no abbreviations: the guard reads the full words
+        self.run_install("--gua", "minimal", code=2)
+        self.settings.write_text(json.dumps({"permissions": {"ask": ["Bash(my-own-deploy *)"]}}), encoding="utf-8")
+        self.run_install("--apply")
+        self.run_install("--apply", "--approvals", "off")
+        self.assertEqual(self.s()["permissions"]["ask"], ["Bash(my-own-deploy *)"], "the user's own ask rule stays")
+        self.run_install("--apply", "--guard", "minimal")
+        al = self.home / ".claude" / "workbench" / "corporate-allowlist.json"
+        self.assertEqual(json.loads(al.read_text(encoding="utf-8"))["guard_level"], "minimal")
+        self.assertEqual(self.s()["permissions"]["defaultMode"], "bypassPermissions", "the other choice is kept")
+
+    def test_approvals_ask_gives_back_the_users_own_mode_and_uninstall_is_still_clean(self):
+        self.settings.write_text(json.dumps({"permissions": {"defaultMode": "acceptEdits"}}), encoding="utf-8")
+        before = self.digest()
+        self.run_install("--apply")
+        self.assertEqual(self.s()["permissions"]["defaultMode"], "acceptEdits", "the kit keeps a mode the user set")
+        self.run_install("--apply", "--approvals", "off")
+        self.assertEqual(self.s()["permissions"]["defaultMode"], "bypassPermissions")
+        self.assertEqual(self.cfg()["approvals_user_mode"], "acceptEdits")
+        self.run_install("--apply", "--approvals", "off")                         # again: the remembered mode is not lost
+        self.run_install("--apply", "--approvals", "ask")
+        self.assertEqual(self.s()["permissions"]["defaultMode"], "acceptEdits", "the user's own mode comes back")
+        self.assertNotIn("approvals_user_mode", self.cfg())
+        self.run_install("--apply", "--approvals", "off")                         # a second full cycle keeps it too
+        self.run_install("--apply", "--approvals", "ask")
+        self.assertEqual(self.s()["permissions"]["defaultMode"], "acceptEdits", "the second cycle gives it back as well")
+        self.run_install("--apply", "--approvals", "off")
+        s = self.s()
+        s["permissions"]["defaultMode"] = "plan"                                 # the user picks a mode while approvals are off
+        self.settings.write_text(json.dumps(s), encoding="utf-8")
+        self.run_install("--apply", "--approvals", "ask")
+        self.assertEqual(self.s()["permissions"]["defaultMode"], "plan", "a mode picked since is not overwritten")
+        self.settings.write_text(json.dumps(dict(s, permissions=dict(s["permissions"], defaultMode="bypassPermissions"))),
+                                 encoding="utf-8")
+        self.run_install("--apply", "--approvals", "off")
+        self.run_install("--uninstall", "--apply")
+        self.assertEqual(json.loads(self.settings.read_text(encoding="utf-8")).get("permissions", {}).get("defaultMode"),
+                         "acceptEdits", "uninstall still ends on the user's original mode")
+
+    def test_approvals_off_records_the_lock_it_lifts_and_undo_puts_back_only_what_is_missing(self):
+        self.run_install("--apply")
+        self.run_install("--apply", "--approvals", "off")
+        latest = sorted((self.home / ".claude" / "workbench" / "backups").glob("*/manifest.json"))[-1]
+        ops = json.loads(latest.read_text(encoding="utf-8"))["settings_ops"]
+        self.assertIn({"op": "del", "path": ["permissions", "disableBypassPermissionsMode"], "old": "disable"}, ops)
+        user = {"permissions": {"defaultMode": "bypassPermissions"}}
+        I.undo_settings(user, [{"op": "del", "path": ["permissions", "disableBypassPermissionsMode"], "old": "disable"}])
+        self.assertEqual(user["permissions"]["disableBypassPermissionsMode"], "disable")
+        mine = {"permissions": {"disableBypassPermissionsMode": "mine"}}
+        I.undo_settings(mine, [{"op": "del", "path": ["permissions", "disableBypassPermissionsMode"], "old": "disable"}])
+        self.assertEqual(mine["permissions"]["disableBypassPermissionsMode"], "mine", "a value set since is left alone")
+
+    def test_approvals_off_falls_back_to_accept_edits_when_bypass_mode_is_locked(self):
+        managed = self.home / "managed-settings.json"
+        managed.write_text(json.dumps({"permissions": {"disableBypassPermissionsMode": "disable"}}), encoding="utf-8")
+        self.env["WORKBENCH_MANAGED_SETTINGS"] = str(managed)
+        out = self.run_install("--apply", "--approvals", "off")
+        self.assertIn("managed settings keep bypass mode off", out)
+        p = self.s()["permissions"]
+        self.assertEqual(p["defaultMode"], "acceptEdits")
+        self.assertIn("Bash(*)", p["allow"])
+        del self.env["WORKBENCH_MANAGED_SETTINGS"]
+        self.run_install("--apply", "--approvals", "off")                         # the lock is gone: bypass now
+        self.assertEqual(self.s()["permissions"]["defaultMode"], "bypassPermissions")
+        self.run_install("--apply", "--approvals", "ask")
+        self.assertEqual(self.s()["permissions"]["defaultMode"], "default", "acceptEdits was the kit's, not the user's")
+        self.run_install("--uninstall", "--apply")
+        self.settings.write_text(json.dumps({"permissions": {"disableBypassPermissionsMode": "disable"}}), encoding="utf-8")
+        out = self.run_install("--apply", "--approvals", "off")                  # the user's own lock, before any kit
+        self.assertIn("you set permissions.disableBypassPermissionsMode yourself", out)
+        p = self.s()["permissions"]
+        self.assertEqual((p["disableBypassPermissionsMode"], p["defaultMode"]), ("disable", "acceptEdits"))
+
+    def test_approvals_do_not_change_the_permissive_profile(self):
+        self.run_install("--apply", "--profile", "permissive", "--approvals", "ask")
+        p = self.s()["permissions"]
+        self.assertEqual(p["defaultMode"], "bypassPermissions")
+        self.assertNotIn("PowerShell(*)", p["allow"])
 
     def test_corporate_apply_then_uninstall_restores(self):
         before = self.digest()

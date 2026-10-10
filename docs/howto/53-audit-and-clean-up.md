@@ -61,8 +61,9 @@ repository holds scripts and documents nobody uses. Both tools only read until y
   appear, and the refusals never depend on a prompt.
 - **A guard asks or refuses more than you want, or less:** the guard level decides for three rules and for plain browser navigation.
   `guard_level` in `<CH>/workbench/corporate-allowlist.json` is `standard` by default (a push or upload to an unapproved host and
-  skipping git hooks ask; `playwright-cli` to an ordinary web address passes) or `strict` (they are refused or asked about, as in 0.3.1).
-  Change it by hand or with the installer's `--guard` option. The other refusals do not move. `<CH>/workbench/logs/guards.log` shows
+  skipping git hooks ask; `playwright-cli` to an ordinary web address passes), `strict` (they are refused or asked about, as in 0.3.1) or
+  `minimal` (nothing is refused; only irreversible, outward, credential and guard-control steps ask). Change it by hand, with the
+  installer's `--guard` option, or by asking Claude to "turn the guard down". At standard and strict the other refusals do not move. `<CH>/workbench/logs/guards.log` shows
   each decision with its rule id and level. Details: `settings/SETTINGS.md`.
 - **A script is listed but is in use:** a scheduler or the CI starts it without any file naming it. Leave it, and add `--keep`.
 - **A script you expected is missing from the list:** its name appears somewhere, even in a comment or a changelog, or it

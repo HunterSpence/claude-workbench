@@ -84,7 +84,8 @@ read the plan first.) Drop `--with` or `--git-hosts` when the user gave none. Th
 | `--upstream-plugins`, `--upstream-plugins-optional` | register upstream plugin marketplaces (the optional set is never implied) |
 | `--kb-root PATH`, `--data-root PATH` | where the knowledge base and the data folder live |
 | `--git-hosts a,b` | git hosts company code may be pushed to; until set, a push to another host asks first (refused at the strict guard level) |
-| `--guard standard\|strict` | guard level, default `standard` (asks instead of refusing for unlisted push or upload hosts and `--no-verify`; plain browser navigation runs); `strict` refuses; kept across upgrades |
+| `--guard minimal\|standard\|strict` | guard level, default `standard` (asks instead of refusing for unlisted push or upload hosts and `--no-verify`; plain browser navigation runs); `strict` refuses; `minimal` refuses nothing and asks only before irreversible, outward, credential and guard-control steps; kept across upgrades |
+| `--approvals ask\|off` | corporate profile: `off` runs ordinary commands without a prompt (bypass mode; the kit's ask rules lifted; deny rules and the guard stay); kept across upgrades |
 | `--with LIST` | opt-ins, below |
 | `--no-nightly`, `--no-update` | no nightly refresh task (permissive profile); skip the update phase |
 | `--force`, `--no-cli` | replace settings keys the user set; print the `claude` plugin commands instead of running them |

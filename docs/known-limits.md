@@ -117,6 +117,16 @@ an approver. Fixes for things that should work are in `docs/troubleshooting.md`.
   instead of being refused: when you approve, the code or file goes. The ask is for that one command and is not remembered. Plain
   `playwright-cli` navigation to an ordinary address passes without a question (it is in the guard log). The strict level (`guard_level`
   in `corporate-allowlist.json`, see `settings/SETTINGS.md`) refuses them. A missing file or key, or a value that is neither word, means `standard`; a file that exists but does not parse means `strict`.
+- **The guard reads text, so a switch assembled at run time gets past it.** The prompts before turning approvals off or
+  lowering the guard catch the switch written out in a command, in inline code (`python -c`) or in an import of the
+  installer; a script file, a program that builds the words from pieces (`'--appro' + 'vals'`), or one that writes the
+  settings file itself is not seen, like any other step done inside a program. This check reads no files from disk:
+  a hook that runs past its time limit decides nothing. A `gh` alias made before the kit was installed runs whatever it names
+  under its own name; making a new one asks.
+- **The minimal level refuses nothing.** It asks only before the steps `settings/SETTINGS.md` lists (irreversible, outward, credential
+  and guard-control steps, and commands it cannot read). Everything else it would have refused or asked about runs, and is in the
+  guard log as `PASS [rule] (minimal level ...)`. With command approvals off too, nothing else asks: the guard's few questions are the
+  only stop, and a guard that is not running (the doctor's plugin rows FAIL) means none at all.
 - **Deleting or moving the guards' folders is judged the same way.** `rm`, `mv`, `rmdir`, `Remove-Item`, `Move-Item`, `rd` and `del`
   typed as the command are refused when the target is, or holds, the workbench plugins, the workbench folder or the settings files
   (so `rm -rf <config folder>/plugins` is refused and a stale cache is refreshed with the `claude plugin` commands instead). So are a

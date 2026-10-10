@@ -12,13 +12,16 @@ want to know whether it is a prompt you can tune or a block you cannot.
 2. Know the two kit profiles (`settings/SETTINGS.md`). **corporate** (default) asks before anything beyond reads and
    turns bypass mode off. **permissive** starts in bypass mode with broad allow rules; your organisation may disable that mode,
    and then Claude Code will not enter it.
-3. Know what never changes: deny rules (secret files such as `.env` and key files) apply in every mode, and ask rules for
+3. Want no prompts for ordinary commands on the corporate profile? Tell Claude "turn off the bash approvals": the
+   kit-update skill runs `kit_update.py set --approvals off` (the guard asks you once), and new windows start without command
+   prompts. "Turn on approvals again" undoes it. Details: `settings/SETTINGS.md`, "Command approvals".
+4. Know what never changes: deny rules (secret files such as `.env` and key files) apply in every mode, and ask rules for
    publishing verbs (gists, releases, package publishes, uploads, PR comments and merges) prompt even in bypass mode.
-4. Cut routine prompts the safe way: allow only read-only commands, one pattern at a time, in your user settings, for example
+5. Cut routine prompts the safe way: allow only read-only commands, one pattern at a time, in your user settings, for example
    `Bash(git status *)`, `Bash(git diff *)`, `Bash(git log *)`. Edit the file by hand or with `/permissions` or `/config`.
    The guards refuse agent edits to settings files on purpose.
-5. Keep every prompt for writes, publishing and anything outward.
-6. Treat a guard message differently from a prompt: it is a stop. Read it, do what it says, and never retry the same
+6. Keep every prompt for publishing and anything outward.
+7. Treat a guard message differently from a prompt: it is a stop. Read it, do what it says, and never retry the same
    action in another shape.
 
 ## Verify

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""kit_update.py: "check the new stuff and go". One script, three verbs (Python 3.10+, stdlib; never elevates, never touches
+"""kit_update.py: "check the new stuff and go". One script, four verbs (Python 3.10+, stdlib; never elevates, never touches
 policy, never runs `claude update`):
 
   kit_update.py [update] [--repo OWNER/REPO [--new-repo]] [--check] [--wait SECONDS]
@@ -19,6 +19,12 @@ policy, never runs `claude update`):
       else 0; 6 while its `doctor --deep` job is still running (run the same command again).
   kit_update.py record ID PASS|WARN|FAIL TEXT [--command CMD]
       Adds one row (the live guard test, which only Claude can do) to the saved report.
+  kit_update.py set [--approvals off|ask] [--guard minimal|standard|strict]
+      Re-runs the installed kit's `install.py --apply` with the same profile and opt-ins and only these changed.
+      --approvals (corporate profile) off: ordinary commands run without a prompt (new windows start in bypass mode, or
+      acceptEdits where policy keeps bypass off; the kit's own ask rules are lifted); ask: a prompt before each command again.
+      --guard minimal: the guard refuses nothing and asks only before irreversible, outward, credential and guard-control
+      steps. Both are kept across updates. Restart afterwards.
 Exit codes of update: 0 done and clean, 1 done with warnings, 2 usage or environment, 3 blocked by policy or a proxy (ask IT),
 4 a step failed, 5 waiting on a reboot, 6 not finished (run the same command again).
 """
@@ -464,6 +470,49 @@ def spawn(ctx, out, run):
     return subprocess.Popen(cmd, start_new_session=True, **kw).pid
 
 
+def cmd_set(ctx, approvals=None, guard=None, run=run_py):
+    """`set`: the installed kit's installer again, same profile and opt-ins, only --approvals and/or --guard changed."""
+    if not approvals and not guard:
+        raise I.Stop(2, "set what? Add --approvals off|ask and/or --guard minimal|standard|strict")
+    if approvals and ctx.profile != "corporate":
+        print(f"This install uses the {ctx.profile} profile, which already runs commands without asking: approvals unchanged.")
+        approvals = None
+        if not guard:
+            return 0
+    inst = ctx.wb / "kit" / "bootstrap" / "install.py"
+    if not inst.is_file():
+        raise I.Stop(2, f"{fwd(inst)} is missing: install the kit first")
+    opts = sorted(ctx.with_)
+    keep = ["--with", ",".join(opts)] if opts else []
+    change = (["--approvals", approvals] if approvals else []) + (["--guard", guard] if guard else [])
+    here = os.getcwd()
+    os.chdir(ctx.state_dir)
+    try:
+        rc, out, err = run(ctx, inst, "--apply", "--profile", ctx.profile, *keep, *change, timeout=1800)
+    finally:
+        os.chdir(here)
+    if rc != 0:
+        tail = " | ".join((out + err).strip().splitlines()[-3:])
+        raise I.Stop(3 if rc == 3 else 4, f"install.py --apply {' '.join(change)} exited {rc}: {tail}" + (
+            ". Your organisation's policy stopped it: quote this to IT, do not retry another way." if rc == 3 else ""))
+    if approvals == "off":
+        m = re.search(r"approvals: off \(new windows start in (\w+)\)", out)
+        print("Approvals OFF: ordinary commands run without asking" + (f" (new windows start in {m.group(1)})." if m else "."))
+        for line in out.splitlines():
+            if "approvals off:" in line:
+                print(line.strip())
+    elif approvals == "ask":
+        print("Approvals back ON: Claude Code asks before each command that is not on your allow list.")
+    if guard == "minimal":
+        print("Guard MINIMAL: it refuses nothing and asks only before irreversible steps (force-push or delete of main, wiping a "
+              "home folder or drive), anything that leaves this machine (sending, publishing, uploads, pushes to an unapproved "
+              "host), credential files and changes to its own controls.")
+    elif guard:
+        print(f"Guard {guard.upper()}.")
+    print("Restart every Claude Code window: the change applies to new windows.")
+    return 0
+
+
 def doctor_job_main(ctx, out, run):
     """The background job: `setup.py doctor --deep --json`, its answer written whole (and atomically) to `out`."""
     rc, text, err = run(ctx, setup_py(ctx), "doctor", "--deep", "--json", timeout=3600)
@@ -860,7 +909,7 @@ def main(argv=None):
         pass
     if not argv or argv[0].startswith("-"):
         argv = ["update", *argv]
-    ap = argparse.ArgumentParser(description="claude-workbench kit update (see the module docstring)")
+    ap = argparse.ArgumentParser(allow_abbrev=False, description="claude-workbench kit update (see the module docstring)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("update")
     p.add_argument("--repo")
@@ -875,6 +924,9 @@ def main(argv=None):
     p.add_argument("status", choices=["PASS", "WARN", "FAIL"])
     p.add_argument("text")
     p.add_argument("--command", default="")
+    p = sub.add_parser("set", allow_abbrev=False)          # no --appr off: the guard reads the full words
+    p.add_argument("--approvals", choices=["off", "ask"])
+    p.add_argument("--guard", choices=["minimal", "standard", "strict"])
     try:
         a = ap.parse_args(argv)
     except SystemExit as e:
@@ -887,6 +939,8 @@ def main(argv=None):
             return cmd_verify(ctx, budget=a.wait)
         if a.cmd == "record":
             return cmd_record(ctx, a.id, a.status, a.text, a.command)
+        if a.cmd == "set":
+            return cmd_set(ctx, a.approvals, a.guard, run=run_py)  # looked up at call time: the seam tests replace
         return cmd_update(ctx, a.repo, a.check, a.wait, new_repo=a.new_repo)
     except I.Stop as s:
         print(("STOP: " if s.code == 3 else "ERROR: ") + str(s))

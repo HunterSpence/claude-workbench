@@ -119,6 +119,14 @@ class Rows(unittest.TestCase):
         "upload the file to the server", "what is the capital of France", "brand new laptop arrived today",
     )
 
+    def test_kit_update_row_fires_for_turning_approvals_off_or_on_and_nothing_else(self):
+        for q in ("turn off the bash approvals", "please switch off command approvals on this laptop", "turn on approvals again",
+                  "turn the guard way down", "set the guard to minimal", "I want the minimal guard"):
+            self.assertIn("kit-update", self.named(q), q)
+        for q in ("the approvals workflow in our PR process", "who approves the budget", "turn off the lights",
+                  "switch on dark mode", "the security guard was down the hall", "a minimal example"):
+            self.assertNotIn("kit-update", self.named(q), q)
+
     def test_the_new_hint_alternatives_stay_quiet_on_ordinary_prompts(self):
         self.assertEqual(len(self.QUIET), len(set(self.QUIET)))
         self.assertGreaterEqual(len(self.QUIET), 20)

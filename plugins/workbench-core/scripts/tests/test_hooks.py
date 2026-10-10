@@ -591,7 +591,7 @@ class Hooks(unittest.TestCase):
     def test_every_github_write_verb_is_an_ask_rule_in_both_profiles(self):
         verbs = json.loads((SCRIPTS / "guards" / "gh_write_verbs.json").read_text(encoding="utf-8"))["verbs"]
         want = {f"{sh}(gh {n} {v} *)" for n, vs in verbs.items() for v in vs for sh in ("Bash", "PowerShell")}
-        self.assertEqual(len(want), 78)
+        self.assertEqual(len(want), 168)
         for name in ("corporate", "permissive"):
             perms = self.profile(name)["permissions"]
             self.assertEqual(want - set(perms["ask"]), set(), name)

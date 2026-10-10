@@ -32,7 +32,7 @@ release is tagged). `<EXTRAS>` is a comma-separated list of opt-ins (for example
 or empty; `<GIT-HOSTS>` is your organisation's git hosts, comma-separated, or empty. The prompt drives
 `docs/SETUP-RUNBOOK.md`, which gives the session the exact command, check, denial step and ask for every component.
 
-> Set up claude-workbench `v0.3.3` on this machine, end to end, following `docs\SETUP-RUNBOOK.md` from the release. This
+> Set up claude-workbench `v0.3.4` on this machine, end to end, following `docs\SETUP-RUNBOOK.md` from the release. This
 > message is my authorisation for every step in it; do not stop to ask me except where step 11 says.
 > 1. Download `<ZIP-URL>` over HTTPS, without credentials, into a new empty temp folder. Check its SHA-256 with
 >    `(Get-FileHash <file> -Algorithm SHA256).Hash`. If it is not `<SHA256>`, stop and tell me. Unpack it with
@@ -155,7 +155,8 @@ Guide `docs/howto/02-read-the-capability-report.md` walks through it.
 | `--data-root PATH` | Your data folder (`<DATA>`): default the work OneDrive's `Workbench` folder when exactly one verified work OneDrive exists, else `Workbench` in your profile |
 | `--kb-root PATH` | Where your knowledge base lives (default `<DATA>/kb`; an upgrade keeps the previous one) |
 | `--git-hosts host1,host2` | Git hosts the corporate guard pack lets you push to. Until set, a push to another host asks you first (refused at the strict guard level) |
-| `--guard standard\|strict` | Guard level. `standard` (default): a push or upload to an unlisted host and `--no-verify` ask instead of being refused, and plain browser navigation runs without a prompt; `strict` refuses them. Kept across upgrades; `settings/SETTINGS.md` lists what each level does |
+| `--guard minimal\|standard\|strict` | Guard level. `standard` (default): a push or upload to an unlisted host and `--no-verify` ask instead of being refused, and plain browser navigation runs without a prompt; `strict` refuses them; `minimal` refuses nothing and asks only before irreversible, outward, credential and guard-control steps. Kept across upgrades; `settings/SETTINGS.md` lists what each level does |
+| `--approvals ask\|off` | Corporate profile: `off` runs ordinary commands without a prompt (new windows start in bypass mode; the kit's own ask rules are lifted, deny rules and the guard stay). Kept across upgrades |
 | `--force` | Overwrite keys you already set |
 | `--no-cli` | Don't call the `claude` CLI; print the plugin commands for you to run instead |
 | `--uninstall` | Undo everything the installer and setup recorded, newest first (dry run unless `--apply`) |
@@ -268,7 +269,7 @@ else ask me once. `<PY>` is the `python` in `<WB>\config.json` (the installer wr
 >    `sha256:`) or the value in the checksum table of `body`; either one is enough. Neither given, or two different values: delete the
 >    file and stop, and tell me.
 > 3. Unpack with `Expand-Archive` into a new folder. The kit is the nested folder `claude-workbench-v<ver>` (for example
->    `claude-workbench-v0.3.3`); call it `<unpacked>`. Its `bootstrap\install.py` must hold `VERSION = "<ver>"`, the `tag_name` without
+>    `claude-workbench-v0.3.4`); call it `<unpacked>`. Its `bootstrap\install.py` must hold `VERSION = "<ver>"`, the `tag_name` without
 >    the `v`; if not, delete everything and stop. Read `<unpacked>\IMPORT.md`, section "Updating": if it says more than this list,
 >    follow that one.
 > 4. Remember my choices; do not add or change any: `with`, `no_nightly` and `no_update` in `<WB>\state\setup-state.json`

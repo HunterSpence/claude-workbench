@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.3.4
+
+Far fewer prompts on request, and a save the guard no longer stops.
+
+### Upgrade notes (from 0.3.3)
+- Say "check the new stuff and go". Nothing about prompts changes until you ask.
+- Then, for the fewest prompts, tell Claude: "turn off the bash approvals and set the guard to minimal". The guard asks you
+  once; restart Claude Code when it says so. "Turn on approvals again" and "set the guard to standard" undo it.
+
+### Fixed
+- **The guard stopped a save.** The save keeps its working files (snapshots, merge-conflict files, journal windows) in
+  `<workbench home>/kb-state`, which the guard protected as part of its own folder, so a save that had Claude touch one of
+  them failed. `kb-state` and the search `cache` folder are no longer protected; the rest of the workbench folder is, also
+  when a path tries to reach it through `kb-state/..`. The save skill now writes its draft to the system temp folder.
+
+### Added
+- **Guard level `minimal`** (`--guard minimal`, or `kit_update.py set --guard minimal`). It refuses nothing. It asks
+  only before irreversible steps (force-push, delete of or a push straight to main; wiping a root, home or config folder),
+  anything that leaves the machine (sending, publishing including every GitHub write command, public repositories, uploads,
+  browser uploads, pushes to a host that is not approved), credential files and signed-in browser sessions, configured
+  production builds and protected-table writes, security-tooling changes, changes to the guards' and Claude Code's own setup,
+  commands it cannot read, and loops that fill the disk. Every other finding is logged and passes, and never hides a later
+  step of the same command. Only the rules on its pass list pass: one added later and listed nowhere asks.
+- **The guard asks about GitHub write commands itself** (`gh pr create`, `gh repo delete`, `gh secret set` and the rest of
+  `gh_write_verbs.json`, now also SSH and GPG keys, deploy keys, autolinks, `gh repo sync`, locks, pins, gist edits and
+  deletes, PR reverts, projects, codespaces, cache deletes and new `gh alias` definitions, also with `-R <repo>` before the
+  verb), and `Publish-Module`, at every level, so they still ask when the settings ask rules are lifted. Both settings
+  profiles carry the new commands as ask rules too, so the permissive profile also asks before them now.
+- **Command approvals off** (`--approvals off`, or `kit_update.py set --approvals off`) on the corporate profile: new
+  windows start in bypass mode, so ordinary commands run without a prompt; the kit's own ask rules are lifted (the guard
+  asks before outward steps instead) and `Bash(*)`, `PowerShell(*)` and `Edit(*)` are allowed for when bypass mode is
+  unavailable (a managed policy, or a `disableBypassPermissionsMode` you set, is kept and windows start in `acceptEdits`).
+  Deny rules for secret files stay. Both choices are kept across updates; `--approvals ask` (which also gives back a
+  permission mode you had set yourself), `--guard standard` and uninstall restore the earlier settings. The kit-update skill
+  runs them only when you ask, and the guard asks you first, in words that say what is being switched off, also when the
+  switch is in inline code (`python -c`) or an import of the installer; the installer and the update script no longer accept
+  abbreviated options. A script file that does it is the guard's known limit (`docs/known-limits.md`).
+
 ## 0.3.3
 
 Fixes found while verifying 0.3.2 on locked-down Windows machines.

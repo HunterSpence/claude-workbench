@@ -20,7 +20,7 @@ Placeholders the installer substitutes: `{{PYTHON}}` (the quoted path of the Pyt
 the installer ran with), `{{WORKBENCH_HOME}}` (`<claude config dir>/workbench`) and `{{KB_ROOT}}`
 (the knowledge-base folder you choose).
 
-## Guard level: standard and strict
+## Guard level: minimal, standard and strict
 One value, `guard_level` in `<claude config dir>/workbench/corporate-allowlist.json` (the file the corporate pack reads its `enabled`
 and approved hosts from), sets how firm the guards are. It applies with the corporate pack on or off.
 
@@ -39,7 +39,9 @@ changes to security tooling, TLS checks switched off, a bad Windows path (`msys-
 protected-table writes. Asked at both: sending messages, publishing and sharing, the installer, a `skillOverrides` change in your
 settings, and `playwright-cli` upload, drop, eval, run-code, attach, state-load and profile use.
 
-Set it by hand, or with the installer's `--guard strict` or `--guard standard`; the agent cannot, because the file is one of the guards'
+`minimal` refuses nothing. It asks before: force-push, delete of or a push straight to main; recursive delete of a root, home or config folder; credential files, a credential in a WebFetch or browser URL, and a browser's signed-in session (attach, saved logins, cookies and storage, a real profile); sending messages, publishing (every GitHub write command in `gh_write_verbs.json` included), public repositories, uploads, browser uploads and pushes to a host that is not approved; production builds and protected-table writes you configured; changes to security tooling; changes to the guards' own files, settings and plugins, the installer and tokensave's settings rewrites; commands it cannot read (encoded, too deeply nested, git running an outside program); and the two loops that fill the disk. Everything else is logged in the guard log and passes: skipping git hooks, TLS checks switched off, `.env` writes, backdated commits, forked subagents, Windows path and quoting mistakes, direct writes to `active-context.md`, browser page scripts and plain browsing. Any rule not on that pass list asks, so one added later and listed nowhere asks too. A finding that passes never stops the rule, so a force-push later in the same command is still asked about.
+
+Set it by hand, with the installer's `--guard minimal|standard|strict`, or from an installed kit with `kit_update.py set --guard minimal` (the kit-update skill runs it when you ask for a lower guard); the agent cannot change it on its own, because the file is one of the guards'
 own. A missing file, a missing key or any other value of the key means `standard`. A file that exists but cannot be read or parsed, or is not a JSON
 object, means `strict` (the guard log says so): a damaged file must not quieten the guards. A `CLAUDE_CONFIG_DIR` that differs from the installed
 one means `strict` too, as the corporate pack's own fail-closed rule does. Every decision is written to the guard log (`<claude config dir>/workbench/logs/
@@ -118,6 +120,20 @@ before the command ran; the refusals never depend on a prompt. A key joins the l
 | `autoUpdatesChannel` | `stable` | `latest` | Corporate takes a build about a week old that skips releases with major regressions. | IT may pin a version or channel. |
 | `theme` | not set | `dark` | Also the default. | — |
 | `includeGitInstructions` | not set (`true`) | `false` | Drops the built-in commit/PR instructions and git status snapshot to save context; `rules/git.md` carries the git rules instead. Corporate keeps the built-ins. | — |
+
+## Command approvals on the corporate profile (`--approvals off`)
+The corporate profile asks before every command that is not on the allow list. `install.py --apply --approvals off` (or,
+from an installed kit, `kit_update.py set --approvals off`, which repeats your profile and opt-ins) keeps the corporate profile
+and changes only this:
+- `permissions.defaultMode` becomes `bypassPermissions`, so new windows run ordinary commands without a prompt;
+- the kit's own `permissions.disableBypassPermissionsMode` is removed (recorded, so uninstall or `--approvals ask` puts it back);
+- `Bash(*)`, `PowerShell(*)` and `Edit(*)` join `permissions.allow`. They matter when bypass mode is not available: a managed
+  `disableBypassPermissionsMode`, or one you set yourself, is kept, and new windows then start in `acceptEdits` instead.
+
+The kit's own `permissions.ask` entries (publishing and upload commands) are lifted too, recorded, so the guard is the one
+thing that asks before outward steps; an ask rule you added yourself stays. What does not change: every deny rule (secret files
+such as `.env` and key files) and the guard, which refuses or asks at your guard level. The choice is kept across upgrades (`config.json` `approvals`); `--approvals ask` restores the prompts. The permissive profile
+already runs without prompts and ignores this option.
 
 ## Upstream plugins
 Applied only with `--upstream-plugins` (or `--profile permissive`). Each marketplace sets

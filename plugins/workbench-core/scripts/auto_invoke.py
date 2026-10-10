@@ -135,8 +135,10 @@ SKILLS = [
      "read-only health check"),
     ("onboard", r"\b(?:onboard(?:ing)?|set me up|fill in (?:my )?user\.md|who i am|my work identity)\b",
      "a short interview that fills in USER.md"),
-    ("kit-update", r"\b(?:check (?:for )?(?:the )?new stuff|(?:update|upgrade) the (?:workbench )?kit|check for kit updates)\b",
-     "updates the kit from its latest release, then verifies it after the restart"),
+    ("kit-update", r"\b(?:check (?:for )?(?:the )?new stuff|(?:update|upgrade) the (?:workbench )?kit|check for kit updates|"
+                   r"(?:turn|switch) (?:off|on) (?:the |all )?(?:bash |command )?approvals|"
+                   r"(?:turn|set) (?:the )?(?:workbench )?guard (?:way )?(?:down|to minimal)|minimal guard)\b",
+     "updates the kit from its latest release and verifies it after the restart, or sets fewer prompts (approvals, guard level)"),
     ("vdi-drive", r"\b(?:remote desktop|vdi|citrix|horizon client|virtual desktop|novnc|guacamole)\b",
      "needs the desktop owner's written authorisation and an authorisation note"),
 ]

@@ -1,17 +1,25 @@
 {
   "version": 1,
-  "_readme": "The one list of GitHub CLI commands that change something others can see. Read by the publish-confirm guard (gh api) and mirrored as ask rules in both settings profiles (a test keeps them equal). Edit here, then regenerate the profile rules.",
+  "_readme": "The one list of GitHub CLI commands (a key of two words, like \"repo deploy-key\", is a group under a group) that change something others can see. Read by the publish-confirm guard (every verb here, and gh api) and mirrored as ask rules in both settings profiles (a test keeps them equal). Edit here, then regenerate the profile rules.",
   "verbs": {
-    "pr": ["create", "close", "edit", "ready", "reopen", "merge", "review", "comment"],
-    "issue": ["create", "close", "edit", "reopen", "delete", "transfer", "comment"],
-    "repo": ["create", "edit", "delete", "fork", "rename", "archive"],
-    "label": ["create", "edit", "delete"],
+    "pr": ["create", "close", "edit", "ready", "reopen", "merge", "review", "comment", "lock", "unlock", "update-branch", "revert"],
+    "issue": ["create", "close", "edit", "reopen", "delete", "transfer", "comment", "lock", "unlock", "pin", "unpin"],
+    "repo": ["create", "edit", "delete", "fork", "rename", "archive", "sync", "unarchive"],
+    "label": ["create", "edit", "delete", "clone"],
     "workflow": ["run", "enable", "disable"],
     "run": ["cancel", "rerun", "delete"],
     "secret": ["set", "delete"],
     "variable": ["set", "delete"],
-    "release": ["create", "upload", "edit", "delete"],
-    "gist": ["create"]
+    "release": ["create", "upload", "edit", "delete", "delete-asset"],
+    "gist": ["create", "delete", "edit", "rename"],
+    "ssh-key": ["add", "delete"],
+    "gpg-key": ["add", "delete"],
+    "cache": ["delete"],
+    "codespace": ["create", "delete", "stop", "edit"],
+    "alias": ["set", "import"],
+    "repo deploy-key": ["add", "delete"],
+    "repo autolink": ["create", "delete"],
+    "project": ["create", "delete", "edit", "close", "copy", "link", "unlink", "mark-template", "item-create", "item-edit", "item-delete", "item-add", "item-archive", "field-create", "field-delete"]
   },
   "api": {
     "methods": ["POST", "PUT", "PATCH", "DELETE"],

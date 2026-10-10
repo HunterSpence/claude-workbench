@@ -431,7 +431,7 @@ def remotes(c):
         if urls is None or any(re.search(r"[$%`\s]", u) for u in urls):
             E.block("The guard cannot tell where this push goes (no repository here, git names no push URL for that "
                     "remote, or the URL holds a variable). " + PLAIN_PUSH, "remote-not-allowlisted", c.cmd[:160])
-        for url in urls:
+        for url in urls or ():                                         # None was asked about above (the minimal level goes on)
             check(url, "Pushing to", c.cmd)
 
 
@@ -571,6 +571,19 @@ def _gh_api_rules():
         return {}
 
 
+def _gh_verbs():
+    """The "verbs" part of gh_write_verbs.json ({group: [verbs that change something others see]}), {} when unreadable (logged).
+    The guard asks about these itself, so they are covered also when the settings ask rules are lifted (approvals off)."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "gh_write_verbs.json"),
+                  encoding="utf-8-sig") as f:
+            v = json.load(f).get("verbs") or {}
+        return v if isinstance(v, dict) else {}
+    except (OSError, ValueError, AttributeError) as e:
+        E.log(f"ERROR gh_write_verbs.json unreadable, gh write verbs are not asked about: {e!r}"[:300])
+        return {}
+
+
 def _gh_api_writes(args):
     """True when `gh api` args carry a write method (-X POST, -XPOST, --method=DELETE ...) or any field / body flag."""
     api = _gh_api_rules()
@@ -590,7 +603,8 @@ def _publish_what(toks):
     """What a statement publishes or shares, and the host/bucket it goes to (None when it names none), or None."""
     h = os.path.basename(toks[0]).lower().removesuffix(".exe") if toks else ""
     a = [t.strip("\"'") for t in toks[1:]]
-    pos = [t for t in a if not t.startswith("-")]
+    pos = [t for i, t in enumerate(a) if not t.startswith("-")
+           and not (h == "gh" and i and a[i - 1] in ("-R", "--repo", "--hostname"))]   # gh -R acme/app delete: the value is not a verb
     w = " ".join(a)
     if h == "gh":
         if pos[:2] == ["gist", "create"]:
@@ -605,6 +619,15 @@ def _publish_what(toks):
             return "posts a comment others will read", None
         if pos[:1] == ["api"] and _gh_api_writes(a):
             return "calls the GitHub API with a write method or fields", None
+        if pos[:1] == ["alias"] and pos[1:2] in (["set"], ["import"]):
+            return "creates a gh alias, which can later run a write command under a name the guard does not know", None
+        verbs = _gh_verbs()
+        if len(pos) >= 3 and pos[2] in (verbs.get(f"{pos[0]} {pos[1]}") or ()):   # a group of two words: repo deploy-key add
+            return f"runs gh {pos[0]} {pos[1]} {pos[2]}, which changes something other people see", None
+        if len(pos) >= 2 and pos[1] in (verbs.get(pos[0]) or ()):
+            return f"runs gh {pos[0]} {pos[1]}, which changes something other people see", None
+    if h in ("publish-module", "publish-script", "publish-psresource"):
+        return "publishes to a PowerShell gallery", None
     if (h in ("npm", "pnpm") and pos[:1] == ["publish"]) or (h == "yarn" and (pos[:1] == ["publish"] or pos[:2] == ["npm", "publish"])):
         return "publishes a package to a registry", None
     if (h == "twine" and pos[:1] == ["upload"]) or (h in ("poetry", "cargo") and pos[:1] == ["publish"]) \
@@ -1014,39 +1037,39 @@ def browser_cli(c):
         for name, val in flags:
             if name in _CLI_FLAG_ASK:
                 E.ask(f"playwright-cli {name} {_CLI_FLAG_ASK[name]}. Approve only if you meant to and your organisation "
-                      "approves that use.", "browser-cli", seg[:160])
+                      "approves that use.", "browser-session", seg[:160])
             elif name == "--cdp":
                 host = _url_host(val) if val else None
                 if host is None or not _local(host):
                     where = host or "a target the guard cannot read"
                     E.ask(f"playwright-cli --cdp connects to a browser that is already running ({where}), which is not "
                           "localhost, with everything that browser is signed in to. Approve only if you meant to and your "
-                          "organisation approves that use.", "browser-cli", seg[:160])
+                          "organisation approves that use.", "browser-session", seg[:160])
         if not words:
             continue
         cmd = words[0].lower()
         if cmd in _CLI_UPLOAD:
             E.ask(f"playwright-cli {cmd} puts a file from this machine into the page the browser is on, and that site can "
-                  "read it. Approve only if you meant to and your organisation approves that site.", "browser-cli", seg[:160])
+                  "read it. Approve only if you meant to and your organisation approves that site.", "browser-upload", seg[:160])
         elif cmd in _CLI_CODE:
             E.ask(f"playwright-cli {cmd} runs code inside the browser page, with everything that page and its signed-in "
                   "session can reach. Read the code first; approve only if you meant to run it.", "browser-cli", seg[:160])
         elif cmd in _CLI_SESSION:
             E.ask(f"playwright-cli {cmd} {_CLI_SESSION[cmd]}. Approve only if you meant to and your organisation approves "
-                  "that use.", "browser-cli", seg[:160])
+                  "that use.", "browser-session", seg[:160])
         elif cmd == "state-save":
             E.ask("playwright-cli state-save writes the browser's cookies and logins to a file on disk. Approve only if you "
-                  "meant to and know where that file will be kept.", "browser-cli", seg[:160])
+                  "meant to and know where that file will be kept.", "browser-session", seg[:160])
         elif any(cmd.startswith(pre) for pre in _CLI_STORED):
             what = next(w for pre, w in _CLI_STORED.items() if cmd.startswith(pre))
             E.ask(f"playwright-cli {cmd} reads or changes {what}, which hold session tokens and logins, and what it prints "
                   "is copied into the transcript. Approve only if you meant to and nothing secret will be shown.",
-                  "browser-cli", seg[:160])
+                  "browser-session", seg[:160])
         elif cmd in _CLI_NAV and len(words) > 1 and words[1].lower() != "about:blank":
             host = _url_host(words[1])
             if host is not None and (_local(host) or _allowed(host, conf, "git_remote_hosts", "upload_hosts")):
                 pass                                                       # localhost or an approved host
-            elif E.CTX["level"] == "standard" and _plain_http_url(words[1]):
+            elif E.CTX["level"] in ("standard", "minimal") and _plain_http_url(words[1]):
                 E.relaxed("browser-cli", f"playwright-cli {cmd} {host}")   # standard level: plain navigation passes, logged
             else:
                 E.ask(f"playwright-cli {cmd} opens {host or 'a URL the guard cannot read'}, which is not localhost and not an "

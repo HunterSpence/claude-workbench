@@ -12,8 +12,12 @@
   --data-root PATH              workbench data folder (default: the last install's, else <work OneDrive>/Workbench
                                 when exactly one verified work OneDrive exists, else ~/Workbench)
   --git-hosts h1,h2             the git hosts company code may be pushed to (written to the corporate allowlist)
-  --guard standard|strict       guard level (default standard: a push or upload to an unlisted host and --no-verify ask
-                                instead of being refused; strict refuses them). Kept across upgrades
+  --guard minimal|standard|strict  guard level (default standard: a push or upload to an unlisted host and --no-verify ask
+                                instead of being refused; strict refuses them; minimal refuses nothing and asks only before
+                                irreversible, outward, credential and guard-control steps). Kept across upgrades
+  --approvals ask|off           corporate profile: ask before each command (default) or run ordinary commands without
+                                asking (new windows start in bypass mode, the kit's own ask rules are lifted; deny rules
+                                and the guard still apply). Kept across upgrades
   --force                       replace settings keys you already set to something else
   --no-cli                      never call the claude CLI; print its commands instead
   --setup auto|plan             after --apply: show the capability report, then provision this machine in the
@@ -55,7 +59,7 @@ import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-VERSION = "0.3.3"
+VERSION = "0.3.4"
 MARKETPLACE = "workbench"
 PLUGIN_IDS = ("workbench-core@workbench", "workbench-kb@workbench")    # pluginConfigs.<id>.options.python: these only
 DEFAULT_PLUGINS = PLUGIN_IDS + ("workbench-biz@workbench",)
@@ -505,6 +509,9 @@ def undo_settings(user, ops):
             cur.setdefault(last, [])
             cur[last] += [x for x in op["items"] if x not in cur[last]]
             continue
+        if op["op"] == "del":                               # a key the install removed comes back, unless set since
+            cur.setdefault(last, copy.deepcopy(op["old"]))
+            continue
         if last not in cur:
             continue
         if op["op"] == "list-add" and isinstance(cur[last], list):
@@ -568,6 +575,7 @@ class Installer:
         self.kb = Path(os.path.abspath(os.path.expanduser(kb)))
         self.prior = [json.loads(p.read_text(encoding="utf-8")) for p in sorted((self.wb / "backups").glob("*/manifest.json"))]
         self.upstream = a.upstream_plugins or a.profile == "permissive"
+        self.approvals = getattr(a, "approvals", None) or (self.prev.get("approvals") if self.prev.get("approvals") in ("ask", "off") else "ask")
         self.values = {"CLAUDE_HOME": fwd(self.claude_home), "WORKBENCH_HOME": fwd(self.wb), "KB_ROOT": fwd(self.kb),
                        "PYTHON": f'"{self.python}"' if " " in self.python else self.python}
         self.sources = managed_sources()
@@ -714,10 +722,14 @@ class Installer:
                                  "statusline are updated")
         cfg = self.wb / "config.json"
         mine = {"version": VERSION, "kb_root": fwd(self.kb), "data_root": fwd(self.data), "python": self.python,
-                "profile": self.a.profile, "kit": fwd(self.kit)}
+                "profile": self.a.profile, "kit": fwd(self.kit), "approvals": self.approvals,
+                "approvals_user_mode": None, "approvals_wrote_mode": None}   # filled at write time: plan_settings runs after this
         # keys setup.py and profile.py own (knowledge_python, knowledge_db, ...) survive a re-install
-        body = lambda: json.dumps({**{k: v for k, v in self.prev.items() if k not in mine},  # noqa: E731
-                                   **mine, "statusLine": self.statusline()}, indent=2) + "\n"
+        body = lambda: json.dumps({k: v for k, v in {**{k: v for k, v in self.prev.items() if k not in mine},  # noqa: E731
+                                                     **mine, "approvals_user_mode": getattr(self, "user_mode", None),
+                                                     "approvals_wrote_mode": getattr(self, "wrote_mode", None),
+                                                     "statusLine": self.statusline()}.items() if v is not None},
+                                  indent=2) + "\n"
         self.todo(f"[files] write {fwd(cfg)} (kb_root, data_root, python, statusLine)", lambda: self.write_file(cfg, body()))
         self.plan_allowlist()
 
@@ -884,13 +896,77 @@ class Installer:
         ops, notes = [], []
         prev = {tuple(op["path"]): op["value"] for m in self.prior for op in m.get("settings_ops") or []
                 if op.get("op") == "set" and not op.get("container")}
+        kit_default = (frag.get("permissions") or {}).get("defaultMode")
+        mode = self.approvals_off(settings, frag, ops, prev) if self.approvals == "off" and self.a.profile == "corporate" else None
         merge_settings(settings, frag, self.managed, self.a.force, ops, notes, prev=prev)
+        path = ("permissions", "defaultMode")
+        cur = (settings.get("permissions") or {}).get("defaultMode") if isinstance(settings.get("permissions"), dict) else None
+        self.user_mode, self.wrote_mode = self.prev.get("approvals_user_mode"), None
+        if mode:
+            if cur not in (None, mode, kit_default, self.prev.get("approvals_wrote_mode")):   # the user's own: --approvals ask gives it back
+                self.user_mode = cur
+            own(settings, list(path), mode, self.managed, ops, notes, self.warnings)
+            self.wrote_mode = mode
+        elif self.user_mode and self.a.profile == "corporate":
+            if cur == kit_default:                                         # the merge put the kit's default back: give theirs
+                own(settings, list(path), self.user_mode, self.managed, ops, notes, self.warnings)
+            self.user_mode = None                                          # a mode they picked since is theirs to keep
         self.retire_permissions(settings, frag, ops)
         self.plan.append(f"[settings] profile {self.a.profile} ({fwd(src.relative_to(REPO))}); upstream plugins: "
                          f"{'yes' if self.upstream else 'no'}; optional upstream plugins: "
-                         f"{'yes' if self.a.upstream_plugins_optional else 'no'}")
+                         f"{'yes' if self.a.upstream_plugins_optional else 'no'}"
+                         + (f"; approvals: off (new windows start in {mode})" if mode else
+                            "; approvals: ask" if self.a.profile == "corporate" else ""))
         self.manifest["settings_ops"] = ops
         return settings, ops, notes
+
+    def approvals_off(self, settings, frag, ops, prev):
+        """--approvals off on the corporate profile: ordinary commands run without a prompt. Changes the profile before the
+        merge: no disableBypassPermissionsMode, and Bash(*), PowerShell(*) and Edit(*) allowed (they matter when bypass mode is
+        unavailable, and deny and ask rules still win over them). Removes the disableBypassPermissionsMode an earlier kit
+        install wrote, recorded so uninstall or `--approvals ask` puts it back. Returns the mode new windows start in:
+        bypassPermissions, or acceptEdits when a managed policy or the user's own setting keeps bypass mode off."""
+        perms = frag.setdefault("permissions", {})
+        perms.pop("disableBypassPermissionsMode", None)
+        perms.pop("defaultMode", None)                     # owned below, after the merge
+        perms.pop("ask", None)                             # the guard asks before what matters; these would ask again
+        self.lift_kit_asks(settings, ops)
+        perms["allow"] = list(dict.fromkeys((perms.get("allow") or []) + ["Bash(*)", "PowerShell(*)", "Edit(*)"]))
+        key = ("permissions", "disableBypassPermissionsMode")
+        if managed_has(self.managed, key):
+            self.warnings.append("approvals off: your organisation's managed settings keep bypass mode off, so new windows "
+                                 "start in acceptEdits and the allow rules run ordinary commands without a prompt")
+            return "acceptEdits"
+        cur = settings.get("permissions") if isinstance(settings.get("permissions"), dict) else {}
+        if key[1] in cur:
+            if prev.get(key) == cur[key[1]]:               # the value an earlier kit install wrote: the kit's to remove
+                ops.append({"op": "del", "path": list(key), "old": cur[key[1]]})
+                del cur[key[1]]
+            else:
+                self.warnings.append(f"approvals off: you set permissions.disableBypassPermissionsMode yourself, so it is kept; "
+                                     "new windows start in acceptEdits and the allow rules run ordinary commands without a prompt")
+                return "acceptEdits"
+        return "bypassPermissions"
+
+    def lift_kit_asks(self, settings, ops):
+        """--approvals off: remove the permissions.ask entries an earlier kit install added (its manifests record them), never
+        one the user added or a managed source sets. Recorded as list-remove: uninstall or `--approvals ask` adds them back."""
+        mine = []
+        for m in self.prior:
+            for op in m.get("settings_ops") or []:
+                if tuple(op.get("path") or ()) != ("permissions", "ask"):
+                    continue
+                if op.get("op") == "list-add":
+                    mine += op.get("items") or []
+                elif op.get("op") == "set" and op.get("old") == ABSENT and isinstance(op.get("value"), list):
+                    mine += op["value"]
+        cur = (settings.get("permissions") or {}).get("ask") if isinstance(settings.get("permissions"), dict) else None
+        if not isinstance(cur, list) or managed_has(self.managed, ("permissions", "ask"), []):
+            return
+        gone = [x for x in dict.fromkeys(mine) if x in cur]
+        if gone:
+            cur[:] = [x for x in cur if x not in gone]
+            ops.append({"op": "list-remove", "path": ["permissions", "ask"], "items": gone})
 
     def retire_permissions(self, settings, frag, ops):
         """merge_settings only ever adds to a list, so an entry a newer profile dropped would stay for ever (0.3.1's permissive
@@ -1059,7 +1135,13 @@ class Installer:
             self.failures.append("guard self-test")
 
     def self_test(self):
-        """Hooks fail open, so prove the installed guard denies a known-bad call with this interpreter."""
+        """Hooks fail open, so prove the installed guard stops a known-bad call with this interpreter: a deny, or at the minimal
+        level (which refuses nothing) the ask that level answers with."""
+        try:
+            conf = read_json(self.wb / "corporate-allowlist.json")
+        except (OSError, ValueError):
+            conf = {}
+        want = "ask" if str(conf.get("guard_level") or "").strip().lower() == "minimal" else "deny"
         root = self.kit if self.kit.exists() else REPO
         guard = root / "plugins" / "workbench-core" / "scripts" / "guards" / "pretooluse.py"
         ok = False
@@ -1070,18 +1152,17 @@ class Installer:
                 ev = {"tool_name": "Bash", "tool_input": {"command": "git push --force origin main"}, "cwd": logs}
                 r = subprocess.run([sys.executable, "-S", str(guard)], input=json.dumps(ev).encode(),
                                    capture_output=True, timeout=60, env=env)
-                ok = json.loads(r.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+                ok = json.loads(r.stdout)["hookSpecificOutput"]["permissionDecision"] == want
             except Exception:
                 ok = False
-        print("Guard self-test (installed kit, this interpreter): " + ("PASS" if ok else "FAIL: the guards would not block"))
-        try:
-            conf = read_json(self.wb / "corporate-allowlist.json")
-        except (OSError, ValueError):
-            conf = {}
+        print("Guard self-test (installed kit, this interpreter): " + ("PASS" if ok else "FAIL: the guards would not "
+                                                                       + ("ask" if want == "ask" else "block")))
         hosts = conf.get("git_remote_hosts") or []
+        strict = str(conf.get("guard_level") or "").strip().lower() == "strict"
         print("Corporate guard pack: " + ("OFF (enabled is false in corporate-allowlist.json)" if conf.get("enabled") is False
               else f"ON, approved git hosts: {', '.join(hosts)}" if hosts
-              else "ON, no approved git hosts yet: every push to a remote host is refused until you add them"))
+              else "ON, no approved git hosts yet: every push to a remote host is "
+                   + ("refused" if strict else "asked about") + " until you add them"))
         print("Next: start Claude Code, run /status and /hooks, then ask Claude to `git push --force origin main` in a "
               "scratch repo; it must be blocked. That is the only proof the installed hooks run.")
         return ok
@@ -1303,7 +1384,7 @@ def purge_backups(a, wb, failed):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="claude-workbench installer: a dry run unless --apply. "
+    ap = argparse.ArgumentParser(allow_abbrev=False, description="claude-workbench installer: a dry run unless --apply. "
                                              "Run it as: py -3 bootstrap\\install.py (Windows) or python3 "
                                              "bootstrap/install.py (Linux, WSL).")
     ap.add_argument("--apply", action="store_true", help="write the plan (default: print it only)")
@@ -1316,7 +1397,9 @@ def main(argv=None):
     ap.add_argument("--data-root", help="workbench data folder (default: the last install's, else <work OneDrive>/"
                                         "Workbench when exactly one verified work OneDrive exists, else ~/Workbench)")
     ap.add_argument("--git-hosts", help="comma-separated git hosts company code may be pushed to")
-    ap.add_argument("--guard", choices=["standard", "strict"], help="guard level (default standard; kept across upgrades)")
+    ap.add_argument("--guard", choices=["minimal", "standard", "strict"], help="guard level (default standard; kept across upgrades)")
+    ap.add_argument("--approvals", choices=["ask", "off"], help="corporate profile: ask before each command (default) or run "
+                                                                 "ordinary commands without asking; kept across upgrades")
     ap.add_argument("--setup", choices=["auto", "plan"], help="after --apply: capability report, then provision "
                                                                "(auto, in the background) or only plan")
     ap.add_argument("--with", dest="with_", help="opt-ins, comma-separated: " + ", ".join(EXTRAS))

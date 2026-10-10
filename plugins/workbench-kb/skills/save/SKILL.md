@@ -57,7 +57,7 @@ Work facts stay inside the knowledge base your organisation allows. Never write 
   `kb_health.py facts` (same `scripts/` folder) if you moved a value.
 
 ## Step 3: active-context.md (through the driver only)
-Write your full new version to a scratch file (stay within `ac_bytes_left` bytes; in-flight items only, no rules).
+Write your full new version to a scratch file in the system temp folder (stay within `ac_bytes_left` bytes; in-flight items only, no rules).
 Adding more than the budget allows means removing the difference in this same rewrite: cut finished work whose
 detail already lives in a KB note (the link is the entry once the work is done). Never cut a rule pointer or an
 open item that waits on the user. Keep dated items in ISO form (`YYYY-MM-DD`) so session start can surface them.
