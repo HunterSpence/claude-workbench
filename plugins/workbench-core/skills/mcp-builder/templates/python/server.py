@@ -72,7 +72,7 @@ class Verifier:
 
 
 # @@ end
-async def guard(ctx, call_next):
+async def check_call(ctx, call_next):
     """Refuse unknown tool arguments (the SDK drops them silently); sort and flatten what tools/list publishes."""
     if ctx.method == "tools/call":
         params = ctx.params or {}
@@ -94,7 +94,7 @@ async def guard(ctx, call_next):
 mcp = MCPServer(
     "{{name}}",
     instructions=INSTRUCTIONS,
-    middleware=[guard],
+    middleware=[check_call],
     # @@ if auth=oauth
     auth=AuthSettings(issuer_url=ISSUER, resource_server_url=PUBLIC_URL, validate_token_resource=True),
     token_verifier=Verifier(),

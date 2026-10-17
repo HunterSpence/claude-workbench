@@ -8,8 +8,7 @@ Microsoft documentation, a read-only database, and so on) through a ready-made M
 catalog entry ships off. `<KIT>` is the kit folder (guide 01); the catalog and each server's data route are in `mcp/README.md`.
 
 ## Steps
-1. Read the entry in `mcp/README.md` first. Its `egress` column says where your data goes: a hosted server sends every
-   query to a third party (guide 38). Check with the data owner and your security team before turning one on.
+1. Read the entry in `mcp/README.md` first. Its `egress` column says whether the server is local or hosted.
 2. Check your organisation's policy. Managed settings can allow, deny or fix the MCP list, and they always win. If a server
    is not allowed, the ask is "MCP restricted" in `docs/admin-asks.md`: name the server, an exact version, read-only mode,
    and where it starts from. You send it (guide 03).

@@ -6,14 +6,9 @@ The import is a one-time, pinned copy of a tagged release. Nothing auto-updates,
 this repository is configured, and no credentials are used.
 
 ## Before you start
-- **Check your organisation's policy** on installing third-party or open-source tooling, and get
-  whatever approval it requires. Many organisations want a security review of anything that runs
-  as a hook, because hooks execute code on every tool call. Give your security team
-  `docs/security-overview.md` (what runs, what leaves the machine) and the heads-up text in
-  section 1 of `docs/admin-asks.md`.
 - **Managed settings always win.** The installer never edits them and refuses to write any key a
-  managed source already sets. If your organisation blocks plugins or user hooks, stop and ask
-  your IT team; don't look for a way around it.
+  managed source already sets. If your organisation blocks plugins or user hooks, ask your IT team
+  (`docs/admin-asks.md`).
 - You need Claude Code and Python 3.10+ (`py -3 --version` on Windows, `python3 --version` on
   Linux). Setup installs the rest it can without admin rights and drafts an ask-IT text for the
   rest. No PowerShell script execution is needed.
@@ -22,17 +17,17 @@ this repository is configured, and no credentials are used.
 | Tier | What you get | How |
 |---|---|---|
 | 0. Skills only | The business skills on Claude web or desktop; or agents and skills in Claude Code without hooks, when policy allows only managed hooks | Upload the skills from `plugins/workbench-biz/skills/` (`docs/howto/25-package-a-skill-for-the-web.md`), or install as in tier 1: the installer warns that hooks will not run until IT enables them |
-| 1. Kit | Instructions, settings profile, plugins, guards and the knowledge base; no network, no admin | `install.py --apply` |
+| 1. Kit | Instructions, settings profile, plugins, hooks and the knowledge base; no network, no admin | `install.py --apply` |
 | 2. Kit + machine setup | Tier 1 plus the capability report, user-scope packages, the knowledge index over your libraries and model routing for your organisation's allowed models | `install.py --apply --setup auto` (the paste prompt below) |
 | 3. Tier 2 + WSL | A sandboxed Linux shell for unfamiliar code; one UAC prompt and one reboot | Same command; setup does it when WSL is allowed, otherwise it drafts the ask |
 
 ## The Day-1 paste prompt (paste this into Claude Code)
 The release page fills in `<ZIP-URL>`, `<SHA256>`, `<TGZ-URL>` and `<SHA256-TGZ>` (the hashes are computed when the
 release is tagged). `<EXTRAS>` is a comma-separated list of opt-ins (for example `tokensave,pm-pack,capture,nightly,ctx`)
-or empty; `<GIT-HOSTS>` is your organisation's git hosts, comma-separated, or empty. The prompt drives
+or empty. The prompt drives
 `docs/SETUP-RUNBOOK.md`, which gives the session the exact command, check, denial step and ask for every component.
 
-> Set up claude-workbench `v0.3.4` on this machine, end to end, following `docs\SETUP-RUNBOOK.md` from the release. This
+> Set up claude-workbench `v0.3.5` on this machine, end to end, following `docs\SETUP-RUNBOOK.md` from the release. This
 > message is my authorisation for every step in it; do not stop to ask me except where step 11 says.
 > 1. Download `<ZIP-URL>` over HTTPS, without credentials, into a new empty temp folder. Check its SHA-256 with
 >    `(Get-FileHash <file> -Algorithm SHA256).Hash`. If it is not `<SHA256>`, stop and tell me. Unpack it with
@@ -43,8 +38,8 @@ or empty; `<GIT-HOSTS>` is your organisation's git hosts, comma-separated, or em
 >    `%LOCALAPPDATA%\Programs\Python\Python313\python.exe`) and use that full path, called PY below, for every later
 >    step. If winget is missing or blocked, stop and give me the "ask IT" line.
 > 3. Install and plan. From the unpacked folder run
->    `PY bootstrap\install.py --apply --setup plan --with <EXTRAS> --git-hosts <GIT-HOSTS>` (drop an option whose value is
->    empty). Keep the default corporate profile; never pass `--profile permissive` (that is my decision, after I have read
+>    `PY bootstrap\install.py --apply --setup plan --with <EXTRAS>` (drop `--with` when
+>    `<EXTRAS>` is empty). Keep the default corporate profile; never pass `--profile permissive` (that is my decision, after I have read
 >    the report). It installs the kit, prints the capability report and writes the setup plan, and installs nothing else.
 >    Show me the capability report summary it printed, in full, then the plan table
 >    (`%USERPROFILE%\.claude\workbench\state\plan.md`). Do not add this repository as a git remote or register it as a
@@ -61,21 +56,21 @@ or empty; `<GIT-HOSTS>` is your organisation's git hosts, comma-separated, or em
 > 7. Check. Run `SETUP doctor --deep --json`. Exit 0 with warnings is acceptable; exit 2 means a FAIL: show me the row's
 >    detail word for word and do not fix it by hand. Read `state\knowledge-verify.json` and tell me any step that is not PASS.
 > 8. Asks. For `exit_code` 3, for every `ask_it` in `SETUP status --json`, and for every check that carries one, show me the
->    ask text (the runbook, section 5, says where each lives). I send them; you never do.
+>    ask text (the runbook, section 5, says where each lives). I send them.
 > 9. Finish with three things. First, a table with one row per component (columns: component, command run, result, evidence,
 >    pending ask) as in the runbook, section 3. Second, the capability report diff (`state\capability-diff.md`, before vs
 >    after). Third, the runbook's section 4, "what we can and cannot do here" (capabilities, blocked items, pending asks),
 >    filled in from the report, then the "first 10 minutes" from IMPORT.md, and tell me to restart Claude Code so the plugins
->    load and to run the guard test.
+>    load and to run `/hooks` (the workbench hooks must be listed).
 > 10. Hard stop rule: if any hook, permission prompt, gateway, proxy or policy DENIES something, stop that step and show me
->    the denial verbatim. Never retry it another way, with another tool, shell or route, and never elevate.
-> 11. Stop only for: a hash mismatch; a denial (step 10); a Windows UAC prompt (tell me to click it; never elevate anything
->    yourself); a reboot (tell me to save my work and restart; after I sign in a console window resumes setup; I then
+>    the denial verbatim. Never retry it another way, with another tool, shell or route.
+> 11. Stop only for: a hash mismatch; a denial (step 10); a Windows UAC prompt (tell me to click it); a reboot (tell me to save my work and restart; after I sign in a console window resumes setup; I then
 >    restart Claude Code and type `/workbench-core:setup resume`).
 
 **Profile.** The prompt keeps the default `corporate` profile: normal permission prompts. `--profile permissive` (no
-permission prompts, broad allow rules) is the option for a machine you fully control. The guard pack that limits pushes to
-your approved git hosts is on under both profiles. The decision is yours, after you have read the capability report and
+permission prompts, broad allow rules) is the option for a machine you fully control. Under both profiles a short list of
+permission rules applies (`settings/SETTINGS.md`): Claude Code asks before a force push, a repository delete or a release
+delete, and only the save driver may edit the knowledge base's `active-context.md`. The kit has no guard hook; those rules match command text, not intent. The decision is yours, after you have read the capability report and
 `docs/howto/08-permission-modes-and-prompts.md`; the session must not choose it. To change it later, run the installer again
 with the other profile (`--force` replaces keys you already set).
 
@@ -154,9 +149,8 @@ Guide `docs/howto/02-read-the-capability-report.md` walks through it.
 | `--upstream-plugins-optional` | Also registers the optional set; see `settings/SETTINGS.md` |
 | `--data-root PATH` | Your data folder (`<DATA>`): default the work OneDrive's `Workbench` folder when exactly one verified work OneDrive exists, else `Workbench` in your profile |
 | `--kb-root PATH` | Where your knowledge base lives (default `<DATA>/kb`; an upgrade keeps the previous one) |
-| `--git-hosts host1,host2` | Git hosts the corporate guard pack lets you push to. Until set, a push to another host asks you first (refused at the strict guard level) |
-| `--guard minimal\|standard\|strict` | Guard level. `standard` (default): a push or upload to an unlisted host and `--no-verify` ask instead of being refused, and plain browser navigation runs without a prompt; `strict` refuses them; `minimal` refuses nothing and asks only before irreversible, outward, credential and guard-control steps. Kept across upgrades; `settings/SETTINGS.md` lists what each level does |
-| `--approvals ask\|off` | Corporate profile: `off` runs ordinary commands without a prompt (new windows start in bypass mode; the kit's own ask rules are lifted, deny rules and the guard stay). Kept across upgrades |
+| `--git-hosts host1,host2` | Accepted and ignored, so older setup commands still run |
+| `--approvals ask\|off` | Corporate profile: `off` runs ordinary commands without a prompt (new windows start in bypass mode; the kit's few ask rules and the active-context deny stay). Kept across upgrades |
 | `--force` | Overwrite keys you already set |
 | `--no-cli` | Don't call the `claude` CLI; print the plugin commands for you to run instead |
 | `--uninstall` | Undo everything the installer and setup recorded, newest first (dry run unless `--apply`) |
@@ -172,7 +166,7 @@ Guide `docs/howto/02-read-the-capability-report.md` walks through it.
 | `update [--check] [--json] [--with update-latest]` | Move the tools setup installed to the tested versions; `--check` changes nothing. Writes `update.json` and `update.md` |
 | `routing` | Rewrite the model routing table for the models your organisation allows |
 | `resume` | Continue after the WSL reboot (a RunOnce entry runs it once at sign-in) |
-| `doctor [--deep] [--json] [--bundle OUT.zip]` | Health check, exit 0 ok, 1 warnings, 2 errors. `--deep` also runs the Day-1 knowledge checks D1 to D23 (written to `knowledge-verify.json`) and exits 2 only when a row is a FAIL, never for a warning. It fails on a config folder, index or git repository inside OneDrive, work data in a personal OneDrive, or guards that have not run for three sessions. `--bundle` writes a redacted support zip |
+| `doctor [--deep] [--json] [--bundle OUT.zip]` | Health check, exit 0 ok, 1 warnings, 2 errors. `--deep` also runs the Day-1 knowledge checks D1 to D23 (written to `knowledge-verify.json`) and exits 2 only when a row is a FAIL, never for a warning. It fails on a config folder, index or git repository inside OneDrive, or work data in a personal OneDrive. `--bundle` writes a redacted support zip |
 | `backup [--out ZIP]` | KB notes and curated config into `<DATA>/backup/` |
 | `restore ZIP [--to DIR] [--apply] [--force] [--restore-settings]` | Hashes and paths are checked first; settings files (whose hooks run code) only with `--restore-settings` |
 | `undo-config [--apply]` | Undo the machine changes setup recorded (user env vars, Path entries, the scheduled task, the RunOnce value, the Playwright CLI, the StopFailure relay hooks, the `find` MCP registration) |
@@ -185,9 +179,8 @@ Setup exit codes: 0 done, 2 usage or already running, 3 done with ask-IT items, 
 1. `/status`: look at *Setting sources* and *Organization*. Managed settings, if any, are listed.
 2. `/plugin`, `/agents`, `/skills`, `/hooks`: the workbench items appear.
 3. `py -3 <KIT>/bootstrap/setup.py doctor --deep` exits 0 (warnings are allowed; `<WB>/state/knowledge-verify.json` lists D1 to D23).
-4. Guard test: in a scratch git repo, ask Claude to run `git push --force origin main`. It must be
-   blocked with a message. Hooks fail open silently when misconfigured, so this test is the only
-   proof they run.
+4. Hooks: `/hooks` lists the `workbench-core` hooks. Hooks fail open silently when misconfigured, so after
+   one session `py -3 <KIT>/bootstrap/setup.py doctor` must show the `hooks heartbeat` row OK.
 5. The statusline shows model, effort, context use and cache state.
 6. Knowledge base: ask Claude to search the knowledge base for any word; it returns hits or says
    the knowledge base is empty.
@@ -199,15 +192,12 @@ Restart Claude Code, then try three tasks:
    running; `find`'s status says how far it is.
 2. **Turn notes into actions.** Paste the notes of a recent meeting and ask for the decisions and action items. The
    `meeting-to-actions` skill answers with a table and flags items without an owner.
-3. **Prove the guards run.** The guard test above: ask Claude to force-push `main` in a scratch repository.
+3. **Check the hooks run.** Step 4 above: `/hooks`, then the doctor's `hooks heartbeat` row.
 
 What not to do in the first week:
-- Don't run Claude Code as administrator, and don't switch to the permissive profile on a managed laptop without
-  approval.
-- Don't add a whole tenant or every synced library to `find`, and don't start capture or mail ingest before you have
-  told your security team (`docs/admin-asks.md`).
-- Don't enable MCP servers you don't need, and never paste a password, key or one-time code into a prompt.
-- Don't retry a blocked action another way; follow the hard stop rule and ask IT with the text the report gives you.
+- Don't add every synced library to `find` at once: start with the folders you search most.
+- Don't enable MCP servers you don't need: each one costs context.
+- A blocked action: follow the hard stop rule and ask IT with the text the report gives you.
 - Don't edit files under `<KIT>`: the next release replaces them. Your own changes go in your user folder.
 
 ## After install
@@ -216,11 +206,10 @@ What not to do in the first week:
 2. **Upstream skills** (humanizer for drafts, playwright-cli for browser checks) are pinned and hash-checked:
    `--with upstream-skills`, or by hand:
    `py -3 <KIT>/tools/fetch-upstream/fetch_upstream.py` (dry run) and again with `--apply`; with `--pm` it fetches
-   the product-management pack instead (same as `--with pm-pack`). Add `--optional` for the design set only after your
-   organisation approves it (`THIRD-PARTY.md`). Use `python3` instead of `py -3` on Linux and WSL.
+   the product-management pack instead (same as `--with pm-pack`). Add `--optional` for the design set (`THIRD-PARTY.md`). Use `python3` instead of `py -3` on Linux and WSL.
 3. **Skills are invoked by their plugin name:** `/workbench-core:<skill>`, `/workbench-kb:save`,
-   `/workbench-biz:<skill>` and `/workbench-capture:<skill>`. Claude also uses them unasked when a task fits, except
-   the user-invoked ones (`setup`, `cleanup`, `pc-checkup`, `vdi-drive`, `capture`, `ingest`).
+   `/workbench-biz:<skill>` and `/workbench-capture:<skill>`; the bare name (`/save`) works too unless another command
+   already uses that name. Claude also uses them unasked when a task fits, except the user-invoked ones (`setup`, `cleanup`, `pc-checkup`, `vdi-drive`, `capture`, `ingest`).
 4. **How-to guides** for common tasks: `docs/howto/README.md`. When something fails: `docs/troubleshooting.md`.
 
 ## Updating
@@ -239,9 +228,10 @@ the same command again, with an explicit 10-minute timeout, until it prints the 
    --deep` as a background job of its own, writes `<WB>/state/post-update-verify.json` and prints one table with the line **Restart every
    Claude Code window, then type: go**;
 4. after the restart, the first message you type (any message, "go" is enough) starts the pending verify: every check as
-   PASS, WARN, FAIL or NEEDS-IT in one table (plugin Python options, hook errors in the newest debug log, whether the guard fired in a
-   session that started after the update, the guard's denies and asks since then as counts per rule, the Path, the `doctor --deep` rows, the skill listing against its limit, failures logged since
-   the update), the live guard test in a scratch repository, your IT asks once, and a box **FOR THE KIT AUTHOR** with only the kit's own
+   PASS, WARN, FAIL, NEEDS-IT or INFO in one table (plugin Python options, hook errors in the newest debug log, whether a session
+   started after the update (the hooks heartbeat), the active-context deny, the local changes the installer kept, the Path, the
+   `doctor --deep` rows, the skill listing against its limit, failures logged since the update), your IT asks once, and a box
+   **FOR THE KIT AUTHOR** with only the kit's own
    defects: an id, the command, the first three error lines, the kit and Claude Code versions. User, computer, domain and company names,
    unknown hosts and credentials are scrubbed from the box and from the report saved as `<WB>/state/field-report.md`.
 If the kit is already current it says so and runs the verify. It never elevates, never changes policy or managed settings and never
@@ -269,7 +259,7 @@ else ask me once. `<PY>` is the `python` in `<WB>\config.json` (the installer wr
 >    `sha256:`) or the value in the checksum table of `body`; either one is enough. Neither given, or two different values: delete the
 >    file and stop, and tell me.
 > 3. Unpack with `Expand-Archive` into a new folder. The kit is the nested folder `claude-workbench-v<ver>` (for example
->    `claude-workbench-v0.3.4`); call it `<unpacked>`. Its `bootstrap\install.py` must hold `VERSION = "<ver>"`, the `tag_name` without
+>    `claude-workbench-v0.3.5`); call it `<unpacked>`. Its `bootstrap\install.py` must hold `VERSION = "<ver>"`, the `tag_name` without
 >    the `v`; if not, delete everything and stop. Read `<unpacked>\IMPORT.md`, section "Updating": if it says more than this list,
 >    follow that one.
 > 4. Remember my choices; do not add or change any: `with`, `no_nightly` and `no_update` in `<WB>\state\setup-state.json`
@@ -287,11 +277,31 @@ else ask me once. `<PY>` is the `python` in `<WB>\config.json` (the installer wr
 > 9. Stop only for: a hash mismatch, a denial (show it, never retry another way, never elevate), a UAC prompt, a reboot, and step 8.
 > After the restart, on my first message: run `<PY> <KIT>\bootstrap\kit_update.py --repo <REPO>` (it reports that the kit is current,
 > remembers the repository and runs the verify; if it says "Run the same command again", run the same command again; if it refuses
-> `--repo` because the kit remembers another repository, stop and show me, and do not add `--new-repo` yourself). Show me the table,
-> then try `git push --force origin main` in a scratch git repository under the temp folder (its only remote is
-> `https://example.invalid/scratch.git`): the workbench guard must block it. Record the result with
-> `<PY> <KIT>\bootstrap\kit_update.py record guard-live PASS "<text>"` (or FAIL), delete the scratch repository, and show me the box FOR
-> THE KIT AUTHOR as printed.
+> `--repo` because the kit remembers another repository, stop and show me, and do not add `--new-repo` yourself). Show me the table and
+> the box FOR THE KIT AUTHOR as printed.
+
+### A carried release zip (this machine cannot reach the release page)
+Download the release zip on a machine that can, copy it here, and take its SHA-256 from the release notes.
+- **Kit 0.3.5 or newer:** tell Claude Code "update the kit from `<file>`, SHA-256 `<hash>`". The skill runs
+  `py -3 <KIT>/bootstrap/kit_update.py update --archive <file> --sha256 <hash>`: the file's SHA-256 is computed first and a mismatch
+  stops with exit 4 before anything is unpacked or written; then the same install, setup and verify chain as above. No network,
+  no credentials, no `gh`.
+- **Kit 0.3.4** (its `kit_update.py` has no `--archive`): paste this, with `<file>`, `<hash>` and `<PY>` filled in.
+  > Update claude-workbench from the release zip `<file>`, end to end; this message is my authorisation. Give every command an
+  > explicit 10-minute timeout. 1. `(Get-FileHash <file> -Algorithm SHA256).Hash` must equal `<hash>`; if not, stop and tell me.
+  > 2. `Expand-Archive <file>` into a new empty folder; `<unpacked>` is the nested `claude-workbench-v<ver>` folder. 3. Read
+  > `profile` in `<WB>\config.json` and `with` in `<WB>\state\setup-state.json` (`options`); never add or change one. 4. Run
+  > `<PY> <unpacked>\bootstrap\install.py --apply --profile <profile> --with <with>` (drop `--with` when empty; exit 3 is policy:
+  > stop and show me). 5. `<PY> <KIT>\bootstrap\setup.py run --detach --with <with>`, then `<PY> <KIT>\bootstrap\setup.py status
+  > --json --wait 60` until `running` is false. 6. `<PY> <KIT>\bootstrap\setup.py doctor --deep`; show me every FAIL row word for
+  > word. 7. Tell me: "Restart every Claude Code window, then type: go." Stop only for a hash mismatch, a denial, a UAC prompt or
+  > a reboot.
+
+Before the installer replaces the kit it copies what this machine changed there (the kit copy, its instructions, the plugin
+cache) with a diff to `<WB>\state\local-patches\<timestamp>\` (`patches.json`); the verify's `local-patches` row points to it and
+the `kit-update` skill re-applies a change only when the new release does not already hold the same fix. Upgrading from 0.3.4 also
+archives the files the old blocking hook left (allowlist, heartbeat, logs) under `<WB>\backups\<timestamp>\`, retires the permission
+rules the old kit wrote (never one you wrote), and keeps a kit plugin you disabled disabled.
 
 From 0.3.2 on, the same update is one sentence. Upgrading from 0.2.0: read the upgrade notes in `CHANGELOG.md` first (a renamed skill, a
 renamed variable and an index that migrates by itself). The tools setup installed move between releases with `setup.py update --check`,
@@ -310,6 +320,5 @@ then `setup.py update`.
    `<DATA>/` yourself. Leaving the company or under a legal hold: `docs/runbooks.md` first.
 
 ## What this kit never does
-It never sends telemetry of its own, pushes to any remote, sends messages, edits managed settings, asks for or stores
-credentials, or bypasses any site's or organisation's controls, and it updates only when you ask (the `kit-update` skill for the
-kit; setup's update phase for the tools it installed). What does leave the machine, and why, is listed in `docs/security-overview.md`.
+It sends no telemetry of its own, never edits managed settings, and updates only when you ask (the `kit-update` skill for the
+kit; setup's update phase for the tools it installed).

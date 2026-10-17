@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """ingest.py: meeting transcripts and (experimental, opt-in) cached mail into the knowledge layer (interface I25).
 
-  ingest.py setup [--apply] | ack-infosec | meetings run [--graph] [--no-digest] [--json]
+  ingest.py setup [--apply] | meetings run [--graph] [--no-digest] [--json]
             mail probe [--json] | mail run --experimental --source com|graph [--folders L] [--since D] [--max-items N] [--no-digest] [--json]
             digest PATH | digest --pending [--max N] | rollup [--date D] | config get|set KEY [VALUE]
             purge --source meetings|outlook [--older-than DAYS] | logout | status --json
-Exit: 0 ok, 3 stopped by a guard, policy or tenant gate (report carries the ask-IT text), 4 error, 5 InfoSec acknowledgement missing."""
+Exit: 0 ok, 3 stopped by a sign-in prompt, policy or tenant gate (report carries the ask-IT text), 4 error."""
 import argparse
 import hashlib
 import json
@@ -40,18 +40,6 @@ def bump(rep, k, n=1):
     rep["counts"][k] = rep["counts"].get(k, 0) + n
 
 
-def infosec_text(P):
-    f = next((x for x in (P.wb / "kit/bootstrap/infosec-note.txt", C.HERE.parents[4] / "bootstrap/infosec-note.txt") if x.is_file()), None)
-    return f.read_text("utf-8").strip() if f else "Tell your security team before the first run: this reads your own meeting transcripts and mail and saves copies."
-
-
-def gate(S):
-    if S["infosec_ack"]:
-        return True
-    print("Ingest needs the InfoSec acknowledgement first. Tell your security team, then run: ingest.py ack-infosec", file=sys.stderr)
-    return False
-
-
 def emit(rep, report_file, as_json):
     rep = {**rep, "report": C.fwd(report_file)}
     if as_json:
@@ -76,7 +64,7 @@ def job(kind, P, a, body, experimental=False):
     except C.Stop as s:
         rep["status"], rep["stop"], code = "stopped", {"kind": s.kind, "reason": s.reason, "ask": s.ask}, 3
     except PolicyBlock as e:
-        s = C.Stop("outlook-guard", str(e), "outlook-guard")
+        s = C.Stop("outlook-blocked", str(e), "outlook-blocked")
         rep["status"], rep["stop"], code = "stopped", {"kind": s.kind, "reason": s.reason, "ask": s.ask}, 3
     except Exception as e:
         if os.environ.get("WB_DEBUG"):
@@ -109,9 +97,6 @@ def entries_of(written):
 
 # ---- meetings ---------------------------------------------------------------------------------------------------
 def cmd_meetings_run(a, P, S, env, hooks):
-    if not gate(S):
-        return 5
-
     def body(rep):
         stopped = None
         if a.graph:  # a tenant gate stops the Graph route only; transcripts already in the drop folder are still processed
@@ -129,7 +114,7 @@ def cmd_meetings_run(a, P, S, env, hooks):
 
 
 # ---- mail -------------------------------------------------------------------------------------------------------
-class BodyGuard:
+class BodyTimer:
     """A protected read that never returns (a security prompt is waiting) ends the run: after `timeout` seconds a watchdog
     thread records the stop and exits the process. A read that returns late raises PolicyBlock from the context manager."""
 
@@ -171,8 +156,6 @@ def make_source(kind, P, S, env, hooks):
 
 
 def cmd_mail_run(a, P, S, env, hooks):
-    if not gate(S):
-        return 5
     if not a.experimental:
         print("Mail ingest is experimental: add --experimental to run it.", file=sys.stderr)
         return 4
@@ -190,10 +173,10 @@ def cmd_mail_run(a, P, S, env, hooks):
         pidx, written, total = C.PathIndex(P, "outlook"), [], 0
 
         def on_hang():  # the main thread is stuck inside a mailbox call
-            rep.update(status="stopped", stop={"kind": "outlook-guard", "reason": "a mailbox read did not return (a security prompt may be waiting)", "ask": C.ASKS["outlook-guard"]})
+            rep.update(status="stopped", stop={"kind": "outlook-blocked", "reason": "a mailbox read did not return (a security prompt may be waiting)", "ask": C.ASKS["outlook-blocked"]})
             emit(rep, C.save_report(P, rep, 3), False)
             hooks.get("hard_exit", os._exit)(3)
-        guard = BodyGuard(hooks.get("body_timeout", 20), on_hang)
+        timer = BodyTimer(hooks.get("body_timeout", 20), on_hang)
 
         def convert_attachments(atts):
             out = []
@@ -206,7 +189,7 @@ def cmd_mail_run(a, P, S, env, hooks):
                 try:
                     with tempfile.TemporaryDirectory(prefix="wb-att-") as d:  # the attachment's own name is never used as a path
                         f = Path(d) / f"attachment{ext}"
-                        with guard:
+                        with timer:
                             at.save(str(f))
                         c = find.convert(f)
                 except PolicyBlock:
@@ -221,16 +204,16 @@ def cmd_mail_run(a, P, S, env, hooks):
             return out
 
         def read_message(it):
-            with guard:
+            with timer:
                 labels = src.labels(it)
             irm = any(t in it.message_class.lower() for t in ("rpmsg", "rightsmanagement"))
             atts = []
             if not labels:
-                with guard:
+                with timer:
                     atts = src.attachments(it)
                 irm = irm or any(x.name.lower().endswith(".rpmsg") for x in atts)
             prot = bool(labels) or irm
-            with guard:
+            with timer:
                 h = src.body(it, headers_only=prot)
             m = {"key": hashlib.sha1((h.get("message_id") or it.entry_id).encode()).hexdigest(), "message_id": h.get("message_id"),
                  "subject": C.inline(it.subject), "from": h.get("from"), "to": h.get("to") or [], "cc": h.get("cc") or [],
@@ -324,14 +307,12 @@ def cmd_mail_probe(a, P, S, env, hooks):
         res = run_child(hooks.get("child_cmd") or [sys.executable, str(C.HERE / "outlook_com.py"), "--body-probe"], hooks.get("probe_timeout", 20))
         out["body_read"] = res
         if res != "ok":
-            raise C.Stop("outlook-guard", f"reading one message body {'timed out (a security prompt may be waiting)' if res == 'timeout' else 'was refused or failed'}", "outlook-guard")
+            raise C.Stop("outlook-blocked", f"reading one message body {'timed out (a security prompt may be waiting)' if res == 'timeout' else 'was refused or failed'}", "outlook-blocked")
     return job("mail-probe", P, a, body)
 
 
 # ---- digest, rollup ---------------------------------------------------------------------------------------------
 def cmd_digest(a, P, S, env, hooks):
-    if not gate(S):
-        return 5
     if bool(a.path) == bool(a.pending):
         print("give a PATH or --pending", file=sys.stderr)
         return 4
@@ -368,7 +349,7 @@ def cmd_config(a, P, S, env, hooks):
         print(json.dumps(S[a.key]))
         return 0
     if a.key not in SETTING_TYPES or a.value is None:
-        print("usage: config set KEY VALUE (infosec_ack is set by ack-infosec)", file=sys.stderr)
+        print("usage: config set KEY VALUE", file=sys.stderr)
         return 4
     t = SETTING_TYPES[a.key]
     try:
@@ -381,14 +362,6 @@ def cmd_config(a, P, S, env, hooks):
     S[a.key] = v
     C.save_settings(P, S)
     print(f"{a.key} = {json.dumps(v)}")
-    return 0
-
-
-def cmd_ack(a, P, S, env, hooks):
-    print(infosec_text(P))
-    S["infosec_ack"] = C.iso(C.clock())
-    C.save_settings(P, S)
-    print(f"\nAcknowledged at {S['infosec_ack']}.")
     return 0
 
 
@@ -448,7 +421,7 @@ def cmd_status(a, P, S, env, hooks):
     count = lambda g: sum(1 for _ in g)  # noqa: E731
     st = digest.load_state(P)
     runs = sorted(P.runs.glob("*-ingest.json")) if P.runs.is_dir() else []
-    out = {"version": C.VERSION, "infosec_ack": bool(S["infosec_ack"]), "data_root": C.fwd(P.data),
+    out = {"version": C.VERSION, "data_root": C.fwd(P.data),
            "drop_waiting": count(f for f in P.drop.glob("*") if f.is_file() and f.suffix.lower() in (".vtt", ".docx")) if P.drop.is_dir() else 0,
            "drop_failed": count((P.drop / "failed").glob("*")) if (P.drop / "failed").is_dir() else 0,
            "meetings_files": count(P.captured.glob("meetings/*/*.md")), "outlook_files": count(P.captured.glob("outlook/*/*.md")),
@@ -470,7 +443,6 @@ def build_parser():
             p.set_defaults(fn=fn)
         return p
     add(sub, "setup", cmd_setup).add_argument("--apply", action="store_true")
-    add(sub, "ack-infosec", cmd_ack)
     m = add(sub, "meetings", None).add_subparsers(dest="sub", required=True)
     r = add(m, "run", cmd_meetings_run)
     r.add_argument("--graph", action="store_true")

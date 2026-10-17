@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="$lang">
+<head>
+<meta charset="utf-8">
+<title>$title</title>
+<meta name="author" content="$author">
+<style>
+$css
+</style>
+<style>
+:root { --page-h: $page_h; }
+@page { size: $page; }
+@page { @top-left { content: "$run_left"; } @top-right { content: "$run_right"; } }
+@page cover { @top-left { content: none; } @top-right { content: none; } @bottom-center { content: none; } }
+</style>
+</head>
+<body>
+<!-- cover:start -->
+<section class="cover">
+<h1>$title</h1>
+$cover_rest
+</section>
+<!-- cover:end -->
+<!-- toc -->
+<main>
+$body
+</main>
+</body>
+</html>

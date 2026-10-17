@@ -5,4 +5,3 @@ node_modules/
 *.sqlite
 *.db
 .cache/
-denylist*.txt

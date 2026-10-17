@@ -37,6 +37,6 @@ ships a server, enabling theirs (guide 26) beats building one. `<KIT>` is the ki
 
 ## Common failures
 - **A catch-all request tool or a `method` argument:** split it into task-shaped tools; the lint flags it.
-- **A credential in a file:** it comes from the environment; rotate it if it was committed (guide 40).
-- **Adding the connector to a shared organisation:** ask the owner first; a managed MCP policy may refuse it (guides 26 and 39).
+- **A credential in a file:** it comes from the environment, never from a file in the repository.
+- **A managed MCP policy refuses the connector:** guides 26 and 39.
 - **Unpinned SDK:** the scaffold pins exact versions. Keep them and re-pin on purpose.

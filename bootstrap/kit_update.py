@@ -3,6 +3,7 @@
 policy, never runs `claude update`):
 
   kit_update.py [update] [--repo OWNER/REPO [--new-repo]] [--check] [--wait SECONDS]
+  kit_update.py update --archive FILE --sha256 HEX [--wait SECONDS]
       Asks GitHub (anonymous HTTPS) for the latest release of this kit, checks the asset's published SHA-256 BEFORE and after
       the download, unpacks it to a fresh folder under <WB>/state/kit-update/, runs that release's `install.py --apply` and
       then `setup.py run --detach` with the opt-ins the last setup remembered (<WB>/state/setup-state.json). It is a chain of
@@ -12,27 +13,28 @@ policy, never runs `claude update`):
       restart line. Already current: says so and runs the verify. --check only reports. Where the releases live: the
       remembered config.json "kit_repo" (a --repo that differs from it needs --new-repo), then env WB_KIT_REPO, then
       plugins/workbench-core/skills/kit-update/release-source.json; a --repo that worked is remembered.
+      --archive: a release zip (or .tar.gz) carried to this machine, no network and no credentials. Its SHA-256 is computed
+      FIRST and must equal --sha256 (the value in the release notes), else exit 4 and nothing was changed; then the same
+      unpack, install, setup and verify chain.
   kit_update.py verify [--wait SECONDS]
       The pending post-update verify: every mechanical check as PASS / WARN / FAIL / NEEDS-IT on one screen, the IT asks once,
       and a FOR THE KIT AUTHOR box with only the kit's own defects (credentials redacted, user, computer, domain and company
       names and unknown hosts scrubbed). Saved to <WB>/state/field-report.md. Clears the marker. Exit 2 on a FAIL, 1 on a WARN,
       else 0; 6 while its `doctor --deep` job is still running (run the same command again).
   kit_update.py record ID PASS|WARN|FAIL TEXT [--command CMD]
-      Adds one row (the live guard test, which only Claude can do) to the saved report.
-  kit_update.py set [--approvals off|ask] [--guard minimal|standard|strict]
-      Re-runs the installed kit's `install.py --apply` with the same profile and opt-ins and only these changed.
-      --approvals (corporate profile) off: ordinary commands run without a prompt (new windows start in bypass mode, or
-      acceptEdits where policy keeps bypass off; the kit's own ask rules are lifted); ask: a prompt before each command again.
-      --guard minimal: the guard refuses nothing and asks only before irreversible, outward, credential and guard-control
-      steps. Both are kept across updates. Restart afterwards.
+      Adds one row (a check only Claude can do) to the saved report.
+  kit_update.py set --approvals off|ask
+      Re-runs the installed kit's `install.py --apply` with the same profile and opt-ins and only this changed (corporate
+      profile). off: ordinary commands run without a prompt (new windows start in bypass mode, or acceptEdits where policy
+      keeps bypass off; the kit's minimal ask rules and the active-context deny stay); ask: a prompt before each command
+      again. Kept across updates. Restart afterwards.
 Exit codes of update: 0 done and clean, 1 done with warnings, 2 usage or environment, 3 blocked by policy or a proxy (ask IT),
 4 a step failed, 5 waiting on a reboot, 6 not finished (run the same command again).
 """
 import argparse
-import ast
 import datetime
-import functools
 import getpass
+import hashlib
 import json
 import os
 import platform
@@ -65,7 +67,7 @@ RESTART = "Restart every Claude Code window, then type: go"
 RUN_FILE, REPORT = "kit-update.json", "field-report.md"
 NOT_KIT = {"backup", "managed policy", "knowledge: kb-index", "knowledge: capture"}   # rows about the user's own data or choices
 IT_ROWS = {"TLS + network"}                                # doctor rows that name blocked hosts or inspected TLS: IT's, once, as NEEDS-IT
-OWN_ROWS = {"plugin python option", "guard heartbeat", "skill listing", "IT asks"}      # the verify has its own row for these
+OWN_ROWS = {"plugin python option", "hooks heartbeat", "skill listing", "IT asks"}      # the verify has its own row for these
 FILE_EXT = set("py pyc json jsonl md txt log exe cmd bat ps1 sh zip gz tgz tar js mjs cjs ts yml yaml toml ini cfg xml html css "
                "dll sqlite db lock bak tmp csv whl msix pdf docx xlsx pptx png svg gif ico".split())
 EXTRA_HOSTS = {"api.github.com", "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com",
@@ -330,7 +332,7 @@ def unpack(archive, dest):
         n = name.replace("\\", "/")
         p = (root / n).resolve()
         return not (n.startswith("/") or re.match(r"[A-Za-z]:", n)) and (p == root or root in p.parents)
-    if str(archive).endswith(".zip"):
+    if str(archive).lower().endswith(".zip"):
         with zipfile.ZipFile(archive) as z:
             infos = z.infolist()
             too_big(len(infos), sum(i.file_size for i in infos))
@@ -358,13 +360,28 @@ def unpack(archive, dest):
     raise I.Stop(4, "the archive holds no bootstrap/install.py; nothing was installed")
 
 
-def cmd_update(ctx, repo_arg=None, check=False, budget=90, run=run_py, new_repo=False):
+def file_sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def package_version(new):
+    m = re.search(r'(?m)^VERSION = "(\d+\.\d+\.\d+)"', (new / "bootstrap" / "install.py").read_text(encoding="utf-8", errors="replace"))
+    return m.group(1) if m else None
+
+
+def cmd_update(ctx, repo_arg=None, check=False, budget=90, run=run_py, new_repo=False, archive=None, sha256=None):
     t_call, run_file = time.time(), ctx.state_dir / RUN_FILE
     rs = S.jload(run_file)
     if rs and rs.get("stage") in ("setup", "doctor"):           # an earlier call got this far: carry on from there
         return advance(ctx, rs, budget, run)
     if S.lock_holder(ctx) and not check:                       # a setup run on the old kit would find its files replaced under it
         raise I.Stop(2, f"setup is already running (pid {S.lock_holder(ctx)}); wait for it to finish, then run this again")
+    if archive:
+        return update_from_archive(ctx, archive, sha256, check, budget, run, t_call)
     repo = resolve_repo(ctx, repo_arg, new_repo)
     rel = latest_release(ctx, repo)
     steps = [("latest release", "PASS", f"{rel['tag']} (installed v{I.VERSION})")]
@@ -388,9 +405,42 @@ def cmd_update(ctx, repo_arg=None, check=False, budget=90, run=run_py, new_repo=
                         "the download was deleted and nothing was installed")
     steps.append(("download + SHA-256", "PASS", f"{rel['name']}, {z.stat().st_size:,} bytes, matches the published value"))
     new = unpack(z, work / "kit")
-    says = re.search(r'(?m)^VERSION = "(\d+\.\d+\.\d+)"', (new / "bootstrap" / "install.py").read_text(encoding="utf-8", errors="replace"))
-    if not says or says.group(1) != rel["version"]:
-        raise I.Stop(4, f"the package says it is v{says.group(1) if says else '?'}, the release says {rel['tag']}; nothing was installed")
+    says = package_version(new)
+    if says != rel["version"]:
+        raise I.Stop(4, f"the package says it is v{says or '?'}, the release says {rel['tag']}; nothing was installed")
+    return install_chain(ctx, new, work, rel["tag"], rel["version"], steps, budget, run, t_call, repo=repo)
+
+
+def update_from_archive(ctx, archive, sha256, check, budget, run, t_call):
+    """R3: the offline path. The hash is checked before anything is unpacked or written; no network, no credentials, no gh."""
+    archive = Path(archive)
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", str(sha256 or "")):
+        raise I.Stop(2, "--archive needs --sha256 with the 64-hex SHA-256 from the release notes; nothing was changed")
+    if check:
+        raise I.Stop(2, "--check asks GitHub; it does not apply to --archive. Nothing was changed")
+    if not archive.is_file() or not str(archive).lower().endswith((".zip", ".tar.gz", ".tgz")):
+        raise I.Stop(2, f"{fwd(archive)} is not a release .zip or .tar.gz file; nothing was changed")
+    got = file_sha256(archive)
+    if got != sha256.lower():
+        raise I.Stop(4, f"SHA-256 mismatch for {archive.name} (expected {sha256.lower()[:12]}..., the file is {got[:12]}...): "
+                        "nothing was changed. Do not retry another way; get the file again from the release page.")
+    steps = [("archive + SHA-256", "PASS", f"{archive.name}, {archive.stat().st_size:,} bytes, matches --sha256")]
+    (ctx.state_dir / "kit-update").mkdir(parents=True, exist_ok=True)
+    work = Path(tempfile.mkdtemp(prefix="archive-", dir=ctx.state_dir / "kit-update"))
+    new = unpack(archive, work / "kit")
+    ver = package_version(new)
+    if not ver:
+        shutil.rmtree(work, ignore_errors=True)
+        raise I.Stop(4, "the archive's bootstrap/install.py names no VERSION; nothing was installed")
+    if S.vkey(ver) <= S.vkey(I.VERSION):
+        shutil.rmtree(work, ignore_errors=True)
+        print(f"The kit is already current (installed v{I.VERSION}, the archive holds v{ver}). Running the verify.")
+        return cmd_verify(ctx, run, budget)
+    return install_chain(ctx, new, work, f"v{ver}", ver, steps, budget, run, t_call)
+
+
+def install_chain(ctx, new, work, tag, version, steps, budget, run, t_call, repo=None):
+    """The unpacked release's installer, then setup in the background, then the resumable stages (advance)."""
     opts = sorted(ctx.with_)
     keep = ["--with", ",".join(opts)] if opts else []
     here = os.getcwd()
@@ -404,15 +454,16 @@ def cmd_update(ctx, repo_arg=None, check=False, budget=90, run=run_py, new_repo=
         raise I.Stop(3 if rc == 3 else 4, f"install.py --apply exited {rc}: {tail}. " + (
             "Your organisation's policy stopped it: quote this to IT, do not retry another way." if rc == 3 else f"The unpacked release is kept in {fwd(work)}."))
     steps.append(("install", "PASS", f"install.py --apply --profile {ctx.profile}" + (f" --with {','.join(opts)}" if opts else "")))
-    S.set_config(ctx, kit_repo=repo)
+    if repo:
+        S.set_config(ctx, kit_repo=repo)
     flags = [*(["--no-nightly"] if ctx.no_nightly else []), *(["--no-update"] if ctx.no_update else [])]
     started = S.now()
     rc, out, err = run(ctx, setup_py(ctx), "run", "--detach", *keep, *flags, timeout=300)
     if rc not in (0, 2):                                       # 2: a run is already going; wait for that one
         raise I.Stop(4, f"setup.py run --detach exited {rc}: {' | '.join((out + err).strip().splitlines()[-3:])}")
-    rs = {"stage": "setup", "tag": rel["tag"], "version": rel["version"], "from_version": I.VERSION, "started": started,
+    rs = {"stage": "setup", "tag": tag, "version": version, "from_version": I.VERSION, "started": started,
           "started_t": time.time(), "work": fwd(work), "steps": [list(s) for s in steps]}
-    S.jwrite(run_file, rs)
+    S.jwrite(ctx.state_dir / RUN_FILE, rs)
     return advance(ctx, rs, max(0, budget - (time.time() - t_call)), run)          # the download and the install were part of the wait
 
 
@@ -470,21 +521,19 @@ def spawn(ctx, out, run):
     return subprocess.Popen(cmd, start_new_session=True, **kw).pid
 
 
-def cmd_set(ctx, approvals=None, guard=None, run=run_py):
-    """`set`: the installed kit's installer again, same profile and opt-ins, only --approvals and/or --guard changed."""
-    if not approvals and not guard:
-        raise I.Stop(2, "set what? Add --approvals off|ask and/or --guard minimal|standard|strict")
-    if approvals and ctx.profile != "corporate":
+def cmd_set(ctx, approvals=None, run=run_py):
+    """`set`: the installed kit's installer again, same profile and opt-ins, only --approvals changed."""
+    if not approvals:
+        raise I.Stop(2, "set what? Add --approvals off|ask")
+    if ctx.profile != "corporate":
         print(f"This install uses the {ctx.profile} profile, which already runs commands without asking: approvals unchanged.")
-        approvals = None
-        if not guard:
-            return 0
+        return 0
     inst = ctx.wb / "kit" / "bootstrap" / "install.py"
     if not inst.is_file():
         raise I.Stop(2, f"{fwd(inst)} is missing: install the kit first")
     opts = sorted(ctx.with_)
     keep = ["--with", ",".join(opts)] if opts else []
-    change = (["--approvals", approvals] if approvals else []) + (["--guard", guard] if guard else [])
+    change = ["--approvals", approvals]
     here = os.getcwd()
     os.chdir(ctx.state_dir)
     try:
@@ -497,18 +546,13 @@ def cmd_set(ctx, approvals=None, guard=None, run=run_py):
             ". Your organisation's policy stopped it: quote this to IT, do not retry another way." if rc == 3 else ""))
     if approvals == "off":
         m = re.search(r"approvals: off \(new windows start in (\w+)\)", out)
-        print("Approvals OFF: ordinary commands run without asking" + (f" (new windows start in {m.group(1)})." if m else "."))
+        print("Approvals OFF: ordinary commands run without asking" + (f" (new windows start in {m.group(1)})." if m else ".")
+              + " The kit's few ask rules (force push, repo and release delete) still ask.")
         for line in out.splitlines():
             if "approvals off:" in line:
                 print(line.strip())
-    elif approvals == "ask":
+    else:
         print("Approvals back ON: Claude Code asks before each command that is not on your allow list.")
-    if guard == "minimal":
-        print("Guard MINIMAL: it refuses nothing and asks only before irreversible steps (force-push or delete of main, wiping a "
-              "home folder or drive), anything that leaves this machine (sending, publishing, uploads, pushes to an unapproved "
-              "host), credential files and changes to its own controls.")
-    elif guard:
-        print(f"Guard {guard.upper()}.")
     print("Restart every Claude Code window: the change applies to new windows.")
     return 0
 
@@ -599,12 +643,14 @@ def plugin_rows(ctx):
         user = I.read_json(sp) if sp.exists() else {}
     except (OSError, ValueError) as e:
         return [R("settings", "settings.json", "FAIL", f"not valid JSON ({e})", "py -3 <KIT>/bootstrap/setup.py doctor")]
-    rows = []
+    rows, choice = [], ledger(ctx).get("plugins") or {}
     for pid in I.python_plugin_ids(KIT) or I.PLUGIN_IDS:
         name = pid.split("@")[0]
         fix = f"claude plugin install {pid} --config python=<python>"
         py = (((user.get("pluginConfigs") or {}).get(pid) or {}).get("options") or {}).get("python")
-        if (user.get("enabledPlugins") or {}).get(pid) is not True:
+        if choice.get(pid) in ("disabled-by-user", "removed-by-user") and (user.get("enabledPlugins") or {}).get(pid) is not True:
+            rows.append(R(f"plugin-python:{name}", f"plugin python: {name}", "INFO", I.off_text(pid), kit=False))
+        elif (user.get("enabledPlugins") or {}).get(pid) is not True:
             rows.append(R(f"plugin-python:{name}", f"plugin python: {name}", "FAIL", "the plugin is not enabled in settings.json", fix))
         elif not py or not isinstance(py, str):
             rows.append(R(f"plugin-python:{name}", f"plugin python: {name}", "FAIL",
@@ -636,105 +682,97 @@ def hook_row(ctx, since):
 
 
 def heartbeat_row(ctx, since):
-    """After an update the guard counts only when a session STARTED after the update (last_start > the marker) and the guard fired in
-    it (last_fired >= last_start): a fire from before the restart proves nothing about the new plugins."""
-    hb = S.jload(ctx.state_dir / "guard-heartbeat.json", {}) or {}
-    fired, started = parse_time(hb.get("last_fired")), parse_time(hb.get("last_start"))
-    cmd = "py -3 <KIT>/bootstrap/setup.py doctor"
-    if not fired:
-        return R("guard-heartbeat", "guard heartbeat", "FAIL", "the guard has not fired in any Claude Code session yet", cmd)
-    if since:
-        if not started or started <= since:
-            return {**R("guard-heartbeat", "guard heartbeat", "FAIL", f"no Claude Code session has started since the update at "
-                        f"{since:%Y-%m-%dT%H:%M:%SZ} (last session start {hb.get('last_start') or 'never'}): close every Claude Code window "
-                        "and start a new one", cmd), "restart_due": True}
-        if fired < started:
-            return R("guard-heartbeat", "guard heartbeat", "FAIL", f"the guard last fired {hb.get('last_fired')}, before this session "
-                     f"started ({hb.get('last_start')}): the plugin hooks are not running", cmd)
-        return R("guard-heartbeat", "guard heartbeat", "PASS", f"fired {hb.get('last_fired')}, in the session started {hb.get('last_start')} "
-                 "(after the update)")
-    n = int(hb.get("sessions_since_fire") or 0)
-    if n >= 3:
-        return R("guard-heartbeat", "guard heartbeat", "FAIL", f"last fired {hb.get('last_fired')}; {n} session(s) since", cmd)
-    return R("guard-heartbeat", "guard heartbeat", "PASS", f"last fired {hb.get('last_fired')}")
+    """I3: session_start.py stamps last_start on every SessionStart. After an update, only a session that STARTED after the update
+    proves the new plugins' hooks run; until then the row fails and the verify keeps its marker (restart_due)."""
+    core = "workbench-core@workbench"
+    if (ledger(ctx).get("plugins") or {}).get(core) in ("disabled-by-user", "removed-by-user") and enabled(ctx).get(core) is not True:
+        return R("hooks-heartbeat", "hooks heartbeat", "INFO", "not measured: workbench-core is off (your choice)", kit=False)
+    hb = S.jload(ctx.state_dir / "hooks-heartbeat.json", {}) or {}
+    started = parse_time(hb.get("last_start"))
+    if since and (not started or started <= since):
+        return {**R("hooks-heartbeat", "hooks heartbeat", "FAIL", f"no Claude Code session has started since the update at "
+                    f"{since:%Y-%m-%dT%H:%M:%SZ} (last session start {hb.get('last_start') or 'never'}): close every Claude Code window "
+                    "and start a new one", "py -3 <KIT>/bootstrap/setup.py doctor"), "restart_due": True}
+    if not started:
+        return R("hooks-heartbeat", "hooks heartbeat", "WARN", "no Claude Code session has started since the install: start one, "
+                 "then run this again", kit=False)
+    return R("hooks-heartbeat", "hooks heartbeat", "PASS", f"last session start {hb.get('last_start')}"
+             + (" (after the update)" if since else ""))
 
 
-# One line of the guard log: `<local time> sid=.. tool=.. cwd=.. [level=..] BLOCK|ASK [rule-id] ...` (the engine writes it; the level field
-# is newer than some kits). The engine does not quote the folder name, so the folder may hold spaces and text that looks like a decision.
-# Only the time, BLOCK or ASK and a rule id the installed guard can emit are read: the rest of a line holds commands and paths.
-GUARD_PREFIX = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d) sid=\S* tool=\S* cwd=(.*)$")
-GUARD_DECISION = re.compile(r" (?:level=\S+ )?(BLOCK|ASK) \[([^\]\s]{1,60})\]")
-GUARD_OTHER_MSG = re.compile(r" (?:ERROR|PASS|READFLOOD)\b")
-RULE_ID = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)+")
+def ledger(ctx):
+    d = S.jload(ctx.state_dir / "kit-written.json", {})
+    return d if isinstance(d, dict) else {}
 
 
-@functools.lru_cache(maxsize=4)
-def guard_rule_ids(kit):
-    """The rule ids the kit's guard can emit, read from its own source (the engine and its rulepacks): the second argument of every
-    block(..) / ask(..) call (the first of relaxed(..)), and every hyphenated lowercase string constant (the id tables hold their ids as plain constants).
-    Empty when the source is not there: every decision then counts as "other"."""
-    ids, g = set(), Path(kit) / "plugins" / "workbench-core" / "scripts" / "guards"
-    for f in [g / "engine.py", *sorted((g / "rulepacks").glob("*.py"))]:
-        try:
-            tree = ast.parse(f.read_text(encoding="utf-8", errors="replace"))
-        except (OSError, SyntaxError, ValueError):
+def enabled(ctx):
+    d = S.jload(ctx.ch / "settings.json", {})
+    e = d.get("enabledPlugins") if isinstance(d, dict) else None
+    return e if isinstance(e, dict) else {}
+
+
+def active_versions(ctx, pid):
+    """The versions of a plugin Claude Code has: installed_plugins.json (an entry or a list of entries per scope), else the
+    version folders of its cache. An empty set when neither can be read."""
+    d = S.jload(ctx.ch / "plugins" / "installed_plugins.json", {})
+    e = (d.get("plugins") or {}).get(pid) if isinstance(d, dict) and isinstance(d.get("plugins"), dict) else None
+    vers = set()
+    for x in e if isinstance(e, list) else [e] if isinstance(e, dict) else []:
+        v = x.get("version") or Path(str(x.get("installPath") or "")).name if isinstance(x, dict) else None
+        if v:
+            vers.add(str(v))
+    if vers:
+        return vers
+    cache = ctx.ch / "plugins" / "cache" / I.MARKETPLACE / pid.split("@")[0]
+    return {p.name for p in cache.iterdir() if p.is_dir()} if cache.is_dir() else set()
+
+
+def plugin_cache_row(ctx):
+    """Whether Claude Code runs the plugins of the kit installed now: a hop that could not call `claude` leaves the old ones
+    active. An environment problem, never a kit defect; a plugin the user turned off is not checked."""
+    want, choice, on = str(ctx.cfg.get("version") or ""), ledger(ctx).get("plugins") or {}, enabled(ctx)
+    stale, unknown = [], []
+    for pid in I.DEFAULT_PLUGINS + (I.CAPTURE_PLUGIN,):
+        if on.get(pid) is not True or choice.get(pid) in ("disabled-by-user", "removed-by-user"):
             continue
-        for n in ast.walk(tree):
-            if isinstance(n, ast.Call) and getattr(n.func, "attr", getattr(n.func, "id", "")) in ("block", "ask", "relaxed"):
-                at = 0 if getattr(n.func, "attr", getattr(n.func, "id", "")) == "relaxed" else 1             # relaxed(gid, ..), block(reason, gid, ..)
-                if len(n.args) > at and isinstance(n.args[at], ast.Constant) and isinstance(n.args[at].value, str):
-                    ids.add(n.args[at].value)
-            elif isinstance(n, ast.Constant) and isinstance(n.value, str) and RULE_ID.fullmatch(n.value):
-                ids.add(n.value)
-    return frozenset(ids)
+        vers, name = active_versions(ctx, pid), pid.split("@")[0]
+        if not want or not vers or (want in vers and len(vers) > 1):
+            unknown.append(name)
+        elif want not in vers:
+            stale.append(f"{name} is still {', '.join(sorted(vers))} in Claude Code")
+    fix = "claude plugin marketplace update workbench, then claude plugin update <plugin>@workbench (or re-run the installer from a terminal where `claude --version` works), then restart"
+    if stale:
+        return R("plugin-cache", "plugin cache", "FAIL", "; ".join(stale) + f" (the kit is {want})", fix, kit=False)
+    if unknown:
+        return R("plugin-cache", "plugin cache", "WARN", f"could not tell which version Claude Code runs for {', '.join(unknown)}",
+                 fix, kit=False)
+    return R("plugin-cache", "plugin cache", "PASS", f"Claude Code runs the kit's plugins at {want}")
 
 
-def guard_decision(rest, ids):
-    """(BLOCK or ASK, rule id) of a guard-log line, with "other" for an id the guard cannot emit, or None when the line holds no decision.
-    `rest` is everything after `cwd=`. Folder text that looks like a decision is skipped unless its id is a real one, and an ERROR, PASS
-    or READFLOOD message ends the search: its text quotes whatever it likes."""
-    seen = None
-    for m in GUARD_DECISION.finditer(rest):
-        if GUARD_OTHER_MSG.search(rest[:m.start()]):
-            break
-        if m.group(2) in ids:
-            return m.group(1), m.group(2)
-        seen = m if seen is None or "level=" in m.group(0) else seen          # the engine's own level field marks its decision
-    if seen and not GUARD_OTHER_MSG.search(rest[seen.end():]):
-        return seen.group(1), "other"
-    return None
+def ac_deny_row(ctx):
+    """The one deny the kit owns: Edit on the KB's active-context.md (only the save driver writes it)."""
+    if any(d.get("allowManagedPermissionRulesOnly") is True for _, d in I.managed_sources()):
+        return R("ac-deny", "active-context deny", "INFO", "inert: managed allowManagedPermissionRulesOnly (only your "
+                 "organisation's permission rules apply on this machine)", kit=False)
+    want = I.ac_rule(ctx.cfg.get("kb_root") or ctx.kb)
+    try:
+        perms = (I.read_json(ctx.ch / "settings.json") or {}).get("permissions") or {}
+    except (OSError, ValueError):
+        perms = {}
+    if want in ((perms.get("deny") or []) if isinstance(perms, dict) else []):
+        return R("ac-deny", "active-context deny", "PASS", f"settings.json denies {want}")
+    return R("ac-deny", "active-context deny", "FAIL", f"settings.json has no {want} in permissions.deny: a direct edit of "
+             "active-context.md is not refused", "py -3 <KIT>/bootstrap/install.py --apply")
 
 
-def activity_row(ctx, since):
-    """What the guard denied (BLOCK) and asked about, per rule id, since the update: counts and the five busiest rule ids, nothing else
-    of the log; an id the installed guard cannot emit is counted as "other", never shown. Information, never a kit failure: a deny is
-    the guard working."""
-    d = Path(os.environ.get("GUARDS_LOG_DIR") or os.environ.get("WORKBENCH_LOG_DIR") or ctx.wb / "logs")
-    per, read, ids = {}, False, guard_rule_ids(KIT)
-    for f in (d / "guards.log.1", d / "guards.log"):
-        try:
-            with open(f, "rb") as fh:
-                fh.seek(0, 2)
-                fh.seek(max(0, fh.tell() - 8_000_000))
-                text = S.decode(fh.read())
-        except OSError:
-            continue
-        read = True
-        for ln in text.splitlines():
-            m = GUARD_PREFIX.match(ln)
-            try:
-                when = datetime.datetime.fromisoformat(m.group(1)).astimezone(datetime.timezone.utc) if m else None   # logged in local time
-            except ValueError:
-                when = None
-            got = guard_decision(m.group(2), ids) if when else None
-            if got and (not since or when >= since):
-                per.setdefault(got[1], [0, 0])[got[0] == "ASK"] += 1
-    if not read:
-        return R("guard-activity", "guard activity", "INFO", "not measured: no guard log yet", kit=False)
-    top = sorted(per.items(), key=lambda kv: (-sum(kv[1]), kv[0]))[:5]
-    says = "; ".join(f"{g} ({', '.join(f'{n} {w}' for n, w in zip(c, ('deny', 'ask')) if n)})" for g, c in top)
-    return R("guard-activity", "guard activity", "PASS", f"{sum(c[0] for c in per.values())} deny, {sum(c[1] for c in per.values())} ask "
-             f"{'since the update' if since else 'in the guard log'}" + (f"; busiest rules: {says}" if top else ""), kit=False)
+def local_patches_row(ctx):
+    """What the last install found changed on this machine before it replaced the kit (the kit-update skill reviews it)."""
+    dirs = sorted(p for p in (ctx.state_dir / "local-patches").glob("*") if (p / "patches.json").is_file())
+    if not dirs:
+        return R("local-patches", "local changes kept", "INFO", "none", kit=False)
+    n = len((S.jload(dirs[-1] / "patches.json", {}) or {}).get("files") or [])
+    return R("local-patches", "local changes kept", "INFO", f"{n} in {fwd(dirs[-1])} (patches.json; the kit-update skill reviews them)",
+             public=f"{n} kept", kit=False)
 
 
 def path_row(ctx):
@@ -837,7 +875,8 @@ def verify_rows(ctx, run, budget=90):
     res = doctor_job(ctx, "verify", budget, run)
     if res is None:
         return None
-    rows = plugin_rows(ctx) + [hook_row(ctx, since), heartbeat_row(ctx, since), activity_row(ctx, since), path_row(ctx)]
+    rows = plugin_rows(ctx) + [hook_row(ctx, since), heartbeat_row(ctx, since), plugin_cache_row(ctx), ac_deny_row(ctx), local_patches_row(ctx),
+                              path_row(ctx)]
     drows, asks = doctor_rows(ctx, res)
     rows += drows + [skill_row(ctx), issues_row(ctx, since),
              R("it-asks", "IT asks", "NEEDS-IT" if asks else "PASS", f"{len(asks)} distinct ask(s), each listed once below" if asks
@@ -879,8 +918,7 @@ def cmd_verify(ctx, run=run_py, budget=90):
     print(render(rows, asks, meta))
     path = ctx.state_dir / REPORT
     S.atomic_write(path, "```text\n" + render(rows, asks, meta, public=True) + "\n```\n")
-    print(f"\nSaved: {fwd(path)} (scrubbed). Next: the live guard test (kit-update skill), then record it with: "
-          "kit_update.py record guard-live PASS|FAIL \"<text>\"")
+    print(f"\nSaved: {fwd(path)} (scrubbed).")
     if any(r.get("restart_due") for r in rows):                        # run before the restart: the next session still has to run it
         print("\nThe update marker stays: no Claude Code session has started since the update. Close every Claude Code window, start a "
               "new one and run this again.")
@@ -916,6 +954,8 @@ def main(argv=None):
     p.add_argument("--new-repo", action="store_true", help="--repo may name a repository other than the remembered one")
     p.add_argument("--check", action="store_true")
     p.add_argument("--wait", type=float, default=90)
+    p.add_argument("--archive", help="a release .zip or .tar.gz carried to this machine (offline; needs --sha256)")
+    p.add_argument("--sha256", help="the archive's SHA-256 from the release notes")
     p = sub.add_parser("verify")
     p.add_argument("--wait", type=float, default=90)
     sub.add_parser("_doctor").add_argument("out")
@@ -924,9 +964,8 @@ def main(argv=None):
     p.add_argument("status", choices=["PASS", "WARN", "FAIL"])
     p.add_argument("text")
     p.add_argument("--command", default="")
-    p = sub.add_parser("set", allow_abbrev=False)          # no --appr off: the guard reads the full words
-    p.add_argument("--approvals", choices=["off", "ask"])
-    p.add_argument("--guard", choices=["minimal", "standard", "strict"])
+    p = sub.add_parser("set", allow_abbrev=False)          # no abbreviations: --appr off is refused
+    p.add_argument("--approvals", choices=["off", "ask"], required=True)
     try:
         a = ap.parse_args(argv)
     except SystemExit as e:
@@ -940,8 +979,10 @@ def main(argv=None):
         if a.cmd == "record":
             return cmd_record(ctx, a.id, a.status, a.text, a.command)
         if a.cmd == "set":
-            return cmd_set(ctx, a.approvals, a.guard, run=run_py)  # looked up at call time: the seam tests replace
-        return cmd_update(ctx, a.repo, a.check, a.wait, new_repo=a.new_repo)
+            return cmd_set(ctx, a.approvals, run=run_py)  # looked up at call time: the seam tests replace
+        if bool(a.archive) != bool(a.sha256):
+            raise I.Stop(2, "--archive and --sha256 go together: the file and the SHA-256 from the release notes; nothing was changed")
+        return cmd_update(ctx, a.repo, a.check, a.wait, new_repo=a.new_repo, archive=a.archive, sha256=a.sha256)
     except I.Stop as s:
         print(("STOP: " if s.code == 3 else "ERROR: ") + str(s))
         return s.code

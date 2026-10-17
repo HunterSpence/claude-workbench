@@ -16,13 +16,13 @@ passes its own tests, the rule check and `claude plugin validate --strict`.
 
 ## Steps
 1. **Ask four things, no more.** Name (lowercase, hyphens; not starting with `claude-`, `anthropic-`, `anthropics-` or
-   `cc-plugin-`). Kind: `content` (skills only), `guard` (adds a Bash hook), `integration` (adds an MCP server).
+   `cc-plugin-`). Kind: `content` (skills only), `tool-check` (adds a Bash hook), `integration` (adds an MCP server).
    Surfaces: `cli` (Claude Code only) or `all` (must also load on claude.ai). For `integration`, remote or stdio:
    claude.ai connects only to remote servers, so `--surfaces all` needs `--mcp remote`.
 2. **Scaffold** into the marketplace repository (a new folder is fine; the first run creates the marketplace file, the
    CI workflow and a copy of the checker):
    ```bash
-   PY "${CLAUDE_SKILL_DIR}/scripts/scaffold.py" NAME --kind content|integration|guard --surfaces cli|all [--mcp remote|stdio|none] --out REPO [--description TEXT] [--org-overlay]
+   PY "${CLAUDE_SKILL_DIR}/scripts/scaffold.py" NAME --kind content|integration|tool-check --surfaces cli|all [--mcp remote|stdio|none] --out REPO [--description TEXT] [--org-overlay]
    ```
    It refuses reserved names, an existing plugin and stdio servers for the web, and never touches user or managed settings.
 3. **Fill in the substance.** Replace the placeholder text in `skills/NAME/SKILL.md` (when it applies, the steps, what to
@@ -50,4 +50,4 @@ passes its own tests, the rule check and `claude plugin validate --strict`.
 
 ## Never
 Edit a settings file from a plugin script; ship a credential, a private hostname or a personal path in a template; call
-`claude plugin eval` without telling the user it makes model calls; publish or upload the result for the user.
+`claude plugin eval` without telling the user it makes model calls.

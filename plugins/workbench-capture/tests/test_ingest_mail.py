@@ -1,4 +1,4 @@
-"""Ingest: mail over the MailSource seam (fake source), the guard simulations and `mail probe`."""
+"""Ingest: mail over the MailSource seam (fake source), the stop simulations and `mail probe`."""
 import hashlib
 import json
 import os
@@ -146,7 +146,7 @@ class MailTests(unittest.TestCase):
         self.assertIn("experimental", out)
 
 
-class GuardTests(unittest.TestCase):
+class StopTests(unittest.TestCase):
     def setUp(self):
         self.e = H.Env()
         self.addCleanup(self.e.close)
@@ -154,9 +154,9 @@ class GuardTests(unittest.TestCase):
 
     def assert_stopped(self, code, out):
         self.assertEqual(code, 3, out)
-        self.assertIn(common.ASKS["outlook-guard"], out)
+        self.assertIn(common.ASKS["outlook-blocked"], out)
         rep = self.e.reports()[-1]
-        self.assertEqual((rep["status"], rep["stop"]["kind"], rep["stop"]["ask"]), ("stopped", "outlook-guard", common.ASKS["outlook-guard"]))
+        self.assertEqual((rep["status"], rep["stop"]["kind"], rep["stop"]["ask"]), ("stopped", "outlook-blocked", common.ASKS["outlook-blocked"]))
         self.assertEqual(len(self.src.body_calls), 2)  # no further reads after the refusal
         self.assertEqual(list(self.e.P.captured.glob("outlook/*/*.md")), [])
 
@@ -190,7 +190,7 @@ class GuardTests(unittest.TestCase):
     def test_probe_stops_on_a_refused_or_blocked_body_read(self):
         code, out = self.probe("denied")
         self.assertEqual(code, 3, out)
-        self.assertEqual(json.loads(out)["stop"]["ask"], common.ASKS["outlook-guard"])
+        self.assertEqual(json.loads(out)["stop"]["ask"], common.ASKS["outlook-blocked"])
         t = time.time()
         code, out = self.probe("block", timeout=1)
         self.assertEqual(code, 3, out)

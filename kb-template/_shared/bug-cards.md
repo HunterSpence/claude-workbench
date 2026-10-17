@@ -43,7 +43,7 @@ numbers out; describe the class, not the incident.
 - **Symptom:** The same domain fails the same way in every session, and each attempt burns a long timeout.
 - **Root cause:** A bot wall, a geo block, corporate egress filtering or a site that drops non-browser clients. The agent has no memory that the host is unreachable.
 - **Fix:** After three identical failures from different sessions, add the host to a deny list with a message naming the alternative (a search snippet, an official API, a cached copy). Set short connect timeouts. Never retry a deterministic block.
-- **Verifying test:** Replay the logged inputs against the guard: blocked hosts now fail at once with an actionable message and the success rate of the remaining fetches is unchanged.
+- **Verifying test:** Replay the logged inputs against the deny list: blocked hosts now fail at once with an actionable message and the success rate of the remaining fetches is unchanged.
 - **Spot it fast:** Group failures by host (`grep -o 'https\?://[^/]*' errors.log | sort | uniq -c | sort -rn | head`).
 
 ### 5. A script assumes a data shape it never inspected
@@ -86,10 +86,10 @@ numbers out; describe the class, not the incident.
 - **Verifying test:** Run eight concurrent writers in a loop and count the lines; all of them survive across many repetitions.
 - **Spot it fast:** `for i in $(seq 8); do (python writer.py $i &); done; wait; wc -l file`.
 
-### 10. A guard hook fails open on unexpected input
+### 10. A policy hook fails open on unexpected input
 
-- **Symptom:** A dangerous command passes a guard that should block it. The guard log shows a parse exception, or nothing at all.
-- **Root cause:** Hooks usually catch every exception and allow, so that a bug never blocks work. A byte-order mark on stdin, an unexpected field shape or a timeout then disables the guard silently. Pattern checks also have blind spots (an even quote count hiding a broken heredoc, refspec forms such as `+ref:main`).
+- **Symptom:** A dangerous command passes a policy hook that should block it. The hook's log shows a parse exception, or nothing at all.
+- **Root cause:** Hooks usually catch every exception and allow, so that a bug never blocks work. A byte-order mark on stdin, an unexpected field shape or a timeout then disables the check silently. Pattern checks also have blind spots (an even quote count hiding a broken heredoc, refspec forms such as `+ref:main`).
 - **Fix:** Decode stdin with `utf-8-sig`. Log every caught exception with the hook id. Keep a corpus of known-bad commands that MUST block and run it in CI as positive controls. Parse the command with the shell (`bash -n`) whenever quotes or heredoc markers appear.
 - **Verifying test:** The positive-control corpus blocks completely, and a payload with a byte-order mark is blocked rather than allowed.
 - **Spot it fast:** `printf '\xef\xbb\xbf{"tool_input":{"command":"..."}}' | python hook.py; echo $?`.
@@ -416,8 +416,8 @@ numbers out; describe the class, not the incident.
 
 ### 51. A policy denial is retried in another shape
 
-- **Symptom:** A hook, a permission rule, a gateway or a managed setting refuses an action, and the agent tries the same goal through a different shell, tool or path. Each retry produces a new log line for the security team.
-- **Root cause:** The denial was read as a bug to route around instead of as a decision. Retrying through another route can breach the policy, and it hides the real fix: an approval.
+- **Symptom:** A hook, a permission rule, a gateway or a managed setting refuses an action, and the agent tries the same goal through a different shell, tool or path. Each retry produces another denial in the log.
+- **Root cause:** The denial was read as a bug to route around instead of as a decision. Retrying through another route hides the real fix: an approval.
 - **Fix:** Stop. Report the denial verbatim: the tool, the command, the message and the rule id. Do not retry by another route or shell. Use the matching ask-IT text from `docs/admin-asks.md`, continue with the work that is not blocked, and record the blocked step.
 - **Verifying test:** A forced denial in a test session ends in a stop and a verbatim report, with no second attempt in the log.
 - **Spot it fast:** Two or more near-identical attempts in a row after a denial message.
@@ -426,7 +426,7 @@ numbers out; describe the class, not the incident.
 
 - **Symptom:** An `ssh_config` option works in Git Bash and breaks the Windows ssh, or the reverse. `Permission denied (publickey)` appears in one shell only.
 - **Root cause:** Git for Windows ships its own OpenSSH, often newer than the Windows one. Both read the same config and may use different agents and key paths.
-- **Fix:** Guard new options with `IgnoreUnknown <Option>`. Pin `IdentityFile` and the user per host. Pick one agent.
+- **Fix:** Put `IgnoreUnknown <Option>` before new options. Pin `IdentityFile` and the user per host. Pick one agent.
 - **Verifying test:** `ssh host true` works from both shells.
 - **Spot it fast:** `where ssh` and `ssh -V` in each shell, then `ssh -vv host 2>&1 | grep -E 'identity|Offering'`.
 
@@ -520,7 +520,7 @@ numbers out; describe the class, not the incident.
 
 ### 64. A table keyed by model id goes wrong silently after a model change
 
-- **Symptom:** Spend reads zero or the wrong amount after a model change, a spend guard never trips, a capability flag is wrong for the new model, or an old model's history series is lost.
+- **Symptom:** Spend reads zero or the wrong amount after a model change, a spending cap never trips, a capability flag is wrong for the new model, or an old model's history series is lost.
 - **Root cause:** An unknown id falls back to a default (zero, or another model's rate). A flat per-model rate cannot express a model that charges more above a prompt-length threshold, as Haiku 5.5 does. Deleting old rows re-prices history. Token caps and estimates were tuned on another tokenizer: Haiku 5.5 counts approximately thirty percent more tokens for the same text than the small model before it, and its minimum cacheable prompt length is much lower.
 - **Fix:** Fail on unknown ids. Price each request by its own size, tier and token class (input, output, cache write, cache read). Keep old rows. Recount token caps and cost models with the new model's own counts.
 - **Verifying test:** Price a request below and above the threshold for each model; an unknown id raises.
@@ -667,7 +667,7 @@ numbers out; describe the class, not the incident.
 - **Symptom:** `<hook name> hook error` with `Failed with non-blocking status code: ...`.
 - **Root cause:** The hook's path or interpreter is wrong, it printed invalid JSON, or it exited with a code other than two. Only exit two blocks by code alone, so a policy hook can be silently off.
 - **Fix:** Run the hook command by hand with a sample event. Use the full interpreter path. Enforce with exit two or a JSON decision. Watch the first run of every new policy hook.
-- **Verifying test:** The kit's guard test is blocked and `claude --debug` shows the hook's exit code.
+- **Verifying test:** A sample event that must be blocked is blocked, and `claude --debug` shows the hook's exit code.
 - **Spot it fast:** `claude --debug`, trigger the tool, read the hook line in the debug log.
 
 ### 83. No usable shell on Windows

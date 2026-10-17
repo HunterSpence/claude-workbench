@@ -19,8 +19,8 @@ what is right. The skill works the same on claude.ai, the desktop app and Claude
    - **`ASSUMPTION:` lines:** accept or reject each one.
 5. Refine: "split US-1.2 into smaller stories", or build test cases from the stories with `/workbench-biz:test-cases-from-requirements`.
 6. Put the approved list in your tracker yourself, or ask Claude to create the items once you approve it, if a tracker is connected.
-   A Word or Excel version can be built with `/workbench-core:office-docx` or `/workbench-core:office-xlsx`. Before a file
-   leaves the organisation, scrub it (guide 36).
+   A Word or Excel version can be built with `/workbench-core:office-docx` or `/workbench-core:office-xlsx`; guide 36
+   removes hidden content from a copy.
 
 ## Verify
 - Every requirement ID maps to a story or to an open question, and every story traces back to a requirement.
@@ -31,4 +31,3 @@ what is right. The skill works the same on claude.ai, the desktop app and Claude
 - **Stories too big:** one that cannot finish in about a week should be split. Ask for it.
 - **A benefit was invented:** a story with no stated benefit should have become a question. Ask Claude to move it.
 - **Long source cut short:** ask "did you read to the end? which section is the last one you used?"
-- **Confidential source:** check its label first (guide 37) and what is allowed to leave this machine (guide 38).

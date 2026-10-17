@@ -29,8 +29,6 @@ Read this before branching, cleaning up, writing a workflow or wiring a secret s
   what is staged.
 - **Executable bits and line endings are decided on the committing machine.** Windows commits scripts without the bit;
   set it with `git update-index --chmod=+x` and keep a `.gitattributes` for `eol=lf`.
-- **Use the organisation's identity and its approved remotes.** Check `git remote -v` before the first push; never
-  create a public repository or gist from work content.
 - **Publishing a secret is permanent.** Deleting the file or rewriting history closes nothing: forks, caches and
   object stores keep it. Rotate the credential, and list worktrees after a redaction because a worktree keeps the old
   blob.
@@ -47,8 +45,8 @@ Read this before branching, cleaning up, writing a workflow or wiring a secret s
   use `always()`.
 - **A required check that a path filter skips never reports,** so the merge waits forever. Run the check always and
   let it exit early.
-- **Side-effect steps (notifications, uploads) fail otherwise green runs.** Mark them non-fatal and guard them on the
-  secret being set.
+- **Side-effect steps (notifications, uploads) fail otherwise green runs.** Mark them non-fatal and run them only when
+  the secret is set.
 - **Self-hosted runners keep state between jobs.** Root-owned files, fixed temp paths and leftover caches fail the
   second run, not the first. Run a pre-checkout cleanup, or use ephemeral runners.
 - **Shallow clones hide history** that version stamping, blame and changelog tools need; fetch full depth where they run.

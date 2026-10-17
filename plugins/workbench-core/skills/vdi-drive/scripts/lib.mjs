@@ -66,4 +66,4 @@ export const closeBrowser = async port => {
   try { const { b } = await attach(port); await b.newBrowserCDPSession().then(s => s.send('Browser.close')); } catch {}
 };
 
-export { assertAscii } from './guardrails.mjs';
+export { assertAscii } from './limits.mjs';

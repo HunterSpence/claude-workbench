@@ -29,7 +29,7 @@ The browser works but Node, Python, pip, git or curl fail with "unable to get lo
 ## Common failures
 - **HTTP 407 on a host:** the proxy wants sign-in; the probe reports it as `proxy-auth`, not blocked. Ask IT how
   command-line tools should authenticate.
-- **Tempted to turn verification off** (`NODE_TLS_REJECT_UNAUTHORIZED=0`, `GIT_SSL_NO_VERIFY`, `curl -k`, `pip --trusted-host`):
-  never. It defeats the proxy and the guard denies it. Install the certificate instead.
+- **Turning verification off** (`NODE_TLS_REJECT_UNAUTHORIZED=0`, `GIT_SSL_NO_VERIFY`, `curl -k`, `pip --trusted-host`)
+  hides the real fix for every later tool: install the certificate instead.
 - **Works in PowerShell, fails in WSL:** the certificate was added to Windows only. Repeat step 3 in the distribution.
 - **IT will not share the certificate:** ask which route they support, and use only that.

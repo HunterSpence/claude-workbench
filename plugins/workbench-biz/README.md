@@ -21,7 +21,7 @@ allow or deny the plugin on its own.
 |---|---|---|
 | Claude Code (terminal) | yes | `claude plugin install workbench-biz@workbench`, done by the workbench installer |
 | Claude desktop | yes | same plugin |
-| claude.ai chat | yes, as skills | one zip per skill: `package_web.py <skill folder> --out <zip>` (workbench-core, web-packager), then upload where your organisation allows custom skills |
+| claude.ai chat | yes, as skills | one zip per skill: `package_web.py <skill folder> --out <zip>` (workbench-core, web-packager), then upload it in claude.ai |
 
 The portability check (`package_web.py --check`) proves the upload rules are met: six frontmatter fields only,
 description of 250 characters or fewer, no `bin/`, hooks, stdio servers or user settings. It does not prove how a

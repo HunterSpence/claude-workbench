@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -374,6 +375,65 @@ class KB(unittest.TestCase):
         self.demote_fixture()
         self.assertEqual(self.demote()[0], 0)
         self.assertFalse((self.root / ".state").exists(), "the lock is local; nothing is written under the KB for it")
+
+
+class Junctions(unittest.TestCase):
+    """A junction inside the KB is never entered: its notes belong to the folder it points at (listed there once), and a
+    junction to a folder outside the KB must not pull foreign notes in."""
+
+    def test_kb_index_skips_a_junction(self):
+        if os.name != "nt":
+            self.skipTest("junctions exist only on Windows")
+        tmp = Path(tempfile.mkdtemp(prefix="wb-kbj-"))
+        kb, link = tmp / "kb", tmp / "kb" / "ops" / "mirror"
+        try:
+            (kb / "infra").mkdir(parents=True)
+            (kb / "ops").mkdir()
+            (kb / "infra" / "n.md").write_text("---\ntitle: n\n---\n# N\nthe quillfeather rotation note\n", encoding="utf-8")
+            (tmp / "outside").mkdir()
+            (tmp / "outside" / "foreign.md").write_text("---\ntitle: f\n---\n# F\nquillfeather outside the KB\n", encoding="utf-8")
+            for target, name in ((kb / "infra", "mirror"), (tmp / "outside", "away")):
+                r = subprocess.run(["cmd", "/c", "mklink", "/J", str(kb / "ops" / name), str(target)], capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, "the junction must be created: " + r.stdout + r.stderr)
+            self.assertTrue((kb / "ops" / "mirror" / "n.md").is_file(), "the junction really shows the note a second time")
+            env = {**os.environ, "WORKBENCH_KB_ROOT": str(kb), "CLAUDE_CONFIG_DIR": str(tmp / "claude"), "PYTHONIOENCODING": "utf-8"}
+            r = subprocess.run([sys.executable, str(SCRIPTS / "kb_index.py"), "build"], capture_output=True, text=True, encoding="utf-8", env=env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertTrue(json.loads(r.stdout)["result"].startswith("ok (1 notes,"), r.stdout)
+            r = subprocess.run([sys.executable, str(SCRIPTS / "kb_search.py"), "quillfeather", "--all-chunks", "--json"],
+                               capture_output=True, text=True, encoding="utf-8", env=env)
+            self.assertEqual([h["path"] for h in json.loads(r.stdout)["hits"]], ["infra/n.md"], r.stdout)
+            # a KB root that is itself reached through a junction (a redirected folder) is still read: only the entries inside are skipped
+            root_link = tmp / "kb-link"
+            r = subprocess.run(["cmd", "/c", "mklink", "/J", str(root_link), str(kb)], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            r = subprocess.run([sys.executable, str(SCRIPTS / "kb_index.py"), "build"], capture_output=True, text=True, encoding="utf-8",
+                               env={**env, "WORKBENCH_KB_ROOT": str(root_link)})
+            self.assertTrue(json.loads(r.stdout)["result"].startswith("ok (1 notes,"), r.stdout + r.stderr)
+        finally:
+            for link_path in (tmp / "kb-link", kb / "ops" / "mirror", kb / "ops" / "away"):
+                if link_path.exists():
+                    os.rmdir(link_path)      # the junction itself, never its target
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_only_a_mount_point_reparse_tag_counts_as_a_junction(self):
+        """Python 3.10 and 3.11 have no DirEntry.is_junction: the fallback reads the reparse tag, so a OneDrive placeholder
+        folder (a reparse point under another tag) is still walked."""
+        sys.path.insert(0, str(SCRIPTS))
+        import kb_index
+
+        class Entry:   # no is_junction attribute, like a DirEntry before 3.12
+            def __init__(self, attrs, **more):
+                self.st = types.SimpleNamespace(st_file_attributes=attrs, **more)
+
+            def stat(self, follow_symlinks=True):
+                return self.st
+        mount, cloud = 0xA0000003, 0x9000601A
+        self.assertTrue(kb_index.is_junction(Entry(0x410, st_reparse_tag=mount)))
+        self.assertFalse(kb_index.is_junction(Entry(0x410, st_reparse_tag=cloud)), "a cloud placeholder holds real notes")
+        self.assertFalse(kb_index.is_junction(Entry(0x10, st_reparse_tag=0)))
+        self.assertFalse(kb_index.is_junction(types.SimpleNamespace(stat=lambda follow_symlinks=True: types.SimpleNamespace())), "no attributes (not Windows)")
+        self.assertTrue(kb_index.is_junction(Entry(0x410)), "a reparse point with no tag to read is skipped, not followed")
 
 
 class Shared(unittest.TestCase):

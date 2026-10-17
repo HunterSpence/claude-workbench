@@ -49,5 +49,4 @@ action items and changes with a link to each item, and nothing is promoted to an
 ## Limits
 The schema checks shape, not truth: a clever text can still bend a synopsis. That is why the output only ever lands in
 a text file that the user reads, never in a command, a message or a tool call. In a mail body, text coloured like its
-background is not detected; in PDF and Word files the check above looks for it. A transcript may contain the speech of
-people outside the organisation; the InfoSec note says so.
+background is not detected; in PDF and Word files the check above looks for it.

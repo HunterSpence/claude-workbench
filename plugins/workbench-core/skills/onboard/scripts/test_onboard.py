@@ -4,7 +4,7 @@ from pathlib import Path
 SCRIPT = Path(__file__).resolve().parent / "onboard.py"
 KEY = "AKIA" + "T" * 16          # built at runtime: this file holds no credential shape
 ANSWERS = {"name": "Sam", "role_team": "backend engineer, payments team", "timezone_hours": "UTC+1, 09:00-17:30",
-           "git_hosts": "git.example.com", "secret_store": "the organisation vault", "sign_off": "Sam",
+           "ai_policy": "the AI tools page on the intranet", "sign_off": "Sam",
            "tone": "short and direct", "repos": ["acme/payments-api"], "tools": ["VS Code", "Jira"],
            "review_norms": ["two approvals", "squash merge"], "never": ["push to main"], "work_prefs": [""]}
 
@@ -50,9 +50,9 @@ class Onboard(unittest.TestCase):
         self.assertNotIn("acme/payments-api", hot)
 
     def test_refuses_credentials(self):
-        r = self.run_it(dict(ANSWERS, secret_store=f"key is {KEY}"))
+        r = self.run_it(dict(ANSWERS, tone=f"key is {KEY}"))
         self.assertEqual(r.returncode, 2)
-        self.assertIn("secret_store", r.stderr)
+        self.assertIn("tone", r.stderr)
         self.assertNotIn(KEY, r.stdout + r.stderr)
         self.assertFalse((self.claude / "workbench" / "USER.md").exists())
 

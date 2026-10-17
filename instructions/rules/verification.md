@@ -7,7 +7,7 @@
 - **Research first:** a fresh, dated research pass (what is current, and what is coming) shapes any
   build or improvement before code.
 - **Replicate, then test, then test the test.** An adopt or reject decision cites published results
-  with a replication tier (R0 author-only, R1 one independent, R2 two or more) AND our own run, which
+  with a replication tier (R0 author-only, R1 one independent, R2 two or more) AND a local run, which
   needs a positive control, proof the change was applied, the matching workload, exit codes read
   directly and no silent skips. A run that misses one is UNTESTED, not rejected and not passed.
   Read `{{WORKBENCH_HOME}}/instructions/rules/test-validity.md` before any gate or benchmark claim.
@@ -19,7 +19,6 @@
 - **A live screen beats vendor docs.** A dropdown can be the policy: test it live.
 - **A quote or a landing page is not the product.** Read the individual listing or contract, not
   only the overview.
-- **Reading a code out of a message:** read the message body; don't regex the first 6 digits.
 - Don't ship visual work unseen: the loop is in `rules/browser.md`.
 
 ## Measurement

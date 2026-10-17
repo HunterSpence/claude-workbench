@@ -21,7 +21,7 @@ SCAFFOLD = SKILL / "scripts" / "scaffold.py"
 CHECK = SKILL / "scripts" / "check_plugin.py"
 sys.path.insert(0, str(SKILL.parent / "plugin-review" / "scripts"))
 CLAUDE = shutil.which("claude")
-CASES = [("notes-content", "content", "cli", None), ("notes-guard", "guard", "all", None),
+CASES = [("notes-content", "content", "cli", None), ("notes-check", "tool-check", "all", None),
          ("notes-remote", "integration", "all", "remote"), ("notes-stdio", "integration", "cli", "stdio")]
 TMP = REPO = None
 
@@ -42,7 +42,7 @@ def setUpModule():
     REPO = TMP / "repo"
     for name, kind, surfaces, mcp in CASES:
         args = [name, "--kind", kind, "--surfaces", surfaces, "--out", REPO] + (["--mcp", mcp] if mcp else [])
-        r = py(SCAFFOLD, *args + (["--org-overlay"] if name == "notes-guard" else []))
+        r = py(SCAFFOLD, *args + (["--org-overlay"] if name == "notes-check" else []))
         assert r.returncode == 0, r.stderr
 
 
@@ -141,7 +141,7 @@ class Generated(unittest.TestCase):
         snippet = json.loads((REPO / "org-overlay" / "managed-settings.snippet.json").read_text(encoding="utf-8"))
         self.assertEqual(set(snippet), {"extraKnownMarketplaces", "enabledPlugins", "strictKnownMarketplaces"})
         self.assertTrue(next(iter(snippet["extraKnownMarketplaces"].values()))["autoUpdate"])
-        self.assertIn("notes-guard@", next(iter(snippet["enabledPlugins"])))
+        self.assertIn("notes-check@", next(iter(snippet["enabledPlugins"])))
         self.assertIn("allowManagedHooksOnly", (REPO / "org-overlay" / "coexistence.md").read_text(encoding="utf-8"))
 
     def test_no_token_left_and_lf_only(self):
@@ -151,8 +151,8 @@ class Generated(unittest.TestCase):
                 self.assertFalse(b"\r\n" in data, str(f))
                 self.assertIsNone(re.search(rb"__[A-Z][A-Z_]{2,}__", data), str(f))
 
-    def test_guard_plugin_never_edits_settings(self):
-        for f in (REPO / "plugins" / "notes-guard").rglob("*.py"):
+    def test_tool_check_plugin_never_edits_settings(self):
+        for f in (REPO / "plugins" / "notes-check").rglob("*.py"):
             self.assertNotRegex(f.read_text(encoding="utf-8"), r"settings\.json|settings\.local")
 
 
@@ -187,9 +187,9 @@ class Refusals(unittest.TestCase):
             self.assertFalse(REQUIRE, "claude CLI not found")
 
     def test_non_portable_key_fails_the_check_for_all_surfaces(self):
-        d = TMP / "bad-key" / "plugins" / "notes-guard"
-        shutil.copytree(REPO / "plugins" / "notes-guard", d)
-        sk = d / "skills" / "notes-guard" / "SKILL.md"
+        d = TMP / "bad-key" / "plugins" / "notes-check"
+        shutil.copytree(REPO / "plugins" / "notes-check", d)
+        sk = d / "skills" / "notes-check" / "SKILL.md"
         sk.write_text(sk.read_text(encoding="utf-8").replace("allowed-tools: Read\n", "allowed-tools: Read\nmodel: opus\n"), encoding="utf-8")
         r = py(CHECK, d)
         self.assertEqual(r.returncode, 1)
@@ -197,9 +197,9 @@ class Refusals(unittest.TestCase):
         self.assertEqual(py(CHECK, d, "--target", "cli").returncode, 0)       # fine for Claude Code alone
 
     def test_a_skill_with_a_hook_secret_read_is_caught_in_a_generated_repo(self):
-        d = TMP / "bad-hook" / "plugins" / "notes-guard"
-        shutil.copytree(REPO / "plugins" / "notes-guard", d)
-        g = d / "scripts" / "guard.py"
+        d = TMP / "bad-hook" / "plugins" / "notes-check"
+        shutil.copytree(REPO / "plugins" / "notes-check", d)
+        g = d / "scripts" / "check.py"
         g.write_text(g.read_text(encoding="utf-8") + '\ntoken = os.environ["GITHUB_TOKEN"]\n', encoding="utf-8")
         r = py(CHECK, d)
         self.assertEqual(r.returncode, 1)

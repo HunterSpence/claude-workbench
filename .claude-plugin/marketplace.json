@@ -5,13 +5,13 @@
     "name": "The claude-workbench contributors"
   },
   "metadata": {
-    "version": "0.3.4"
+    "version": "0.3.5"
   },
   "plugins": [
     {
       "name": "workbench-core",
       "source": "./plugins/workbench-core",
-      "description": "Personas, workflow skills, guard engine and session hooks.",
+      "description": "Personas, workflow skills and session hooks.",
       "category": "productivity"
     },
     {

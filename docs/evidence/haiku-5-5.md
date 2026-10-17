@@ -44,7 +44,7 @@ above it.
 
 ## Effort and thinking
 
-- Start at `medium`, the default, including for agentic coding. Use `low` for chat and short tool tasks, and `high` for
+- Start at `medium`, the default (Claude Code's default for it too, E38), including for agentic coding. Use `low` for chat and short tool tasks, and `high` for
   knowledge work, longer agent tasks and strict instruction following. Compare `xhigh` and `max` with Sonnet 5.5 before you pay
   for them (E13).
 - At `low` in a long agent prompt it is more likely to skip a search, stop early or skip a check. At `xhigh` in a multi-turn
@@ -162,3 +162,9 @@ From the vendor's migration guide and prompting guide:
 - Chart values the page does not print as text, and numbers that sit only in a sibling model's card, are left out rather than
   guessed.
 - A model page can change after this was written. Re-read it before a decision that costs money.
+
+## Not tested
+
+- **Deferred MCP tools with Haiku 5.5: UNTESTED.** Claude Code's MCP page says tool search is on for Haiku 4.5 and later models
+  (E44), but nothing read for this page says whether a Haiku 5.5 subagent such as `scout` finds and calls a deferred tool. Until
+  one headless check settles it, give a `scout` task its facts in the prompt rather than through a tool server.

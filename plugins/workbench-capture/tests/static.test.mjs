@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const SCRIPTS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'capture', 'scripts');
 const files = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.name === 'node_modules' ? [] : e.isDirectory() ? files(path.join(d, e.name)) : [path.join(d, e.name)]));
 
-// Nothing in scripts/ may read a session secret, attach to a running browser, or reach the network outside the guarded page.
+// Nothing in scripts/ may read a session secret, attach to a running browser, or reach the network outside the one scoped page.
 const FORBIDDEN = [
   /cookies\s*\(/i, /storageState/i, /localStorage/i, /sessionStorage/i, /indexedDB/i, /authorization/i,
   /\.headers\s*\(/, /headerValue\s*\(/, /allHeaders\s*\(/, /connectOverCDP/, /\bfetch\s*\(/, /node:https?['"]/, /node:net['"]/,

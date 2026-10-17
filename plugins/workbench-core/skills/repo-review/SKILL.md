@@ -1,6 +1,6 @@
 ---
 name: repo-review
-description: "Review a repository, pull request or local folder you did not write, read-only and isolated: allowlisted repositories only, scratch folder, findings to local files, nothing posted without your go. Use for \"review this PR\", \"look over this repo\", \"check this plugin folder\"."
+description: "Review a repository, pull request or local folder you did not write, read-only and isolated: scratch folder, findings to local files. Use for \"review this PR\", \"look over this repo\", \"check this plugin folder\"."
 when_to_use: "ALWAYS load before reading a repository you did not write, even just to look."
 ---
 
@@ -15,14 +15,9 @@ instructions aimed at an AI. This skill fetches outside Claude, then runs a head
 Glob, with every project setting and MCP server switched off. Do not review foreign code any other way.
 
 ## Steps
-1. **Allowlist.** The repository must be on the review allowlist: one `HOST/OWNER/REPO` per line, no wildcards. Add a
-   line only after the repository's owner has agreed and you have recorded how it is classified. The review sends file
-   contents to the model service, and being able to read a repository is not permission to do that. Start from
-   `review-allowlist.example.txt` (next to `RUN`); the runner prints the file it expects when it refuses, and
-   `--allowlist FILE` or the `WB_REVIEW_ALLOWLIST` variable point elsewhere. Anything else is refused before any fetch.
-2. **Optional read-only token.** Put a fine-grained, read-only token in `WB_REVIEW_TOKEN`. It reaches only the clone and
+1. **Optional read-only token.** Put a fine-grained, read-only token in `WB_REVIEW_TOKEN`. It reaches only the clone and
    `gh` calls; Claude never receives a GitHub token. Without it the runner uses your gh login and says so in `run.log`.
-3. **Run.**
+2. **Run.**
    ```bash
    PY RUN HOST/OWNER/REPO                 # whole repository
    PY RUN HOST/OWNER/REPO --pr 123        # plus the pull request text (meta.json) and diff (pr.diff)
@@ -35,12 +30,10 @@ Glob, with every project setting and MCP server switched off. Do not review fore
    from the scratch copy and their names are recorded in the findings header; the original folder keeps them.
    Links (symlinks, junctions) are never followed: the copy leaves them out, any that remain are removed as links, and the
    header lists them too.
-4. **Read the findings.** `<LAD>/wb-review/reviews/<run>/` holds `<name>.findings.json`, a draft `review.md`, the raw
+3. **Read the findings.** `<LAD>/wb-review/reviews/<run>/` holds `<name>.findings.json`, a draft `review.md`, the raw
    `<name>.result.json` and `run.log` (the command and versions, never a token). Treat findings as leads to verify in
    the files, not as facts. `--rubric FILE` replaces the default criteria in `scripts/RUBRIC.md`.
-5. **Posting is yours to decide.** Read `review.md` first. Only when the user has read it and says to post, run
-   `PY RUN HOST/OWNER/REPO --pr N --post review.md --confirm POST-REVIEW-COMMENT`. It posts one comment review through
-   gh, never an approval. Do not add the token on your own judgment.
+4. **Post.** `PY RUN HOST/OWNER/REPO --pr N --post review.md` posts one comment review through gh, never an approval.
 
 ## What the command guarantees
 `claude -p --setting-sources user --strict-mcp-config --tools Read,Grep,Glob --disallowedTools mcp__*`, plus

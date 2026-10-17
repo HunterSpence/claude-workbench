@@ -1,0 +1,104 @@
+/* pdf-report: report.css. Change only the tokens in :root to match your brand (BRAND_SPEC.md); the rules below use tokens.
+   Margin boxes cannot read :root variables in Edge, so the few colours inside @page are literals: keep them in step.
+   Page size comes from build_pdf.py (--page A4|Letter) as --page-h plus an @page size rule; your own @page size wins. */
+:root {
+  --color-ink: #1b2733;
+  --color-muted: #5a6672;
+  --color-accent: #0b5cad;
+  --color-accent-ink: #ffffff;
+  --color-tint: #eef3f9;
+  --color-rule: #cfd6dd;
+  --color-cover: #0a3566;
+  --color-cover-ink: #ffffff;
+  --font-body: "Segoe UI", Calibri, "Helvetica Neue", Arial, sans-serif;
+  --font-head: "Segoe UI Semibold", "Segoe UI", Calibri, Arial, sans-serif;
+  --font-mono: Consolas, "Courier New", monospace;
+  --size-body: 10.5pt;
+  --space-1: 3pt;
+  --space-2: 6pt;
+  --space-3: 12pt;
+  --space-4: 20pt;
+  --page-h: 296mm;   /* cover height: the page height minus 1 mm, never the full page (a full-height cover adds a blank page) */
+}
+
+@page {
+  margin: 22mm 18mm 24mm;
+  @top-left { content: ""; font: 8.5pt "Segoe UI", Calibri, Arial, sans-serif; color: #5a6672; }
+  @top-right { content: ""; font: 8.5pt "Segoe UI", Calibri, Arial, sans-serif; color: #5a6672; }
+  @bottom-center { content: "Page " counter(page) " of " counter(pages); font: 8.5pt "Segoe UI", Calibri, Arial, sans-serif; color: #5a6672; }
+}
+@page cover { margin: 0; @top-left { content: none; } @top-right { content: none; } @bottom-center { content: none; } }
+
+* { box-sizing: border-box; }
+html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body {
+  margin: 0; color: var(--color-ink); font-family: var(--font-body); font-size: var(--size-body); line-height: 1.5;
+  font-variant-ligatures: none; font-variant-numeric: lining-nums; hyphens: manual; overflow-wrap: break-word;
+}
+p, li, dd { orphans: 3; widows: 3; }
+p { margin: 0 0 var(--space-2); }
+a { color: var(--color-accent); text-decoration: underline; text-underline-offset: 1.5pt; }
+strong { font-weight: 600; }
+small, .muted { color: var(--color-muted); }
+
+h1, h2, h3, h4 { font-family: var(--font-head); font-weight: 600; line-height: 1.25; break-after: avoid; margin: var(--space-4) 0 var(--space-2); }
+h1 { font-size: 21pt; padding-bottom: var(--space-1); border-bottom: 2pt solid var(--color-accent); }
+h2 { font-size: 15pt; }
+h3 { font-size: 12pt; }
+h4 { font-size: 10.5pt; color: var(--color-muted); }
+/* a heading at the very top of a page keeps 1pt of margin: with 0 (or less than 1pt) Edge 155 doubles its bookmark title */
+h1.pb, .chapter, .pb { break-before: page; margin-top: 1pt; }
+main > :first-child { margin-top: 1pt; }
+
+ul, ol { margin: 0 0 var(--space-2); padding-left: 16pt; }
+li { margin: 0 0 var(--space-1); }
+li > ul, li > ol { margin-top: var(--space-1); }
+
+blockquote, .callout {
+  margin: var(--space-3) 0; padding: var(--space-2) var(--space-3); background: var(--color-tint);
+  border-left: 3pt solid var(--color-accent); break-inside: avoid;
+}
+blockquote > :last-child, .callout > :last-child { margin-bottom: 0; }
+pre, code { font-family: var(--font-mono); font-size: 9pt; }
+pre { margin: var(--space-3) 0; padding: var(--space-2) var(--space-3); background: var(--color-tint); white-space: pre-wrap; overflow-wrap: anywhere; break-inside: avoid; }
+hr { border: 0; border-top: 1pt solid var(--color-rule); margin: var(--space-3) 0; }
+
+figure { margin: var(--space-3) 0; break-inside: avoid; }
+figcaption { margin-top: var(--space-1); color: var(--color-muted); font-size: 9pt; }
+img, svg { max-width: 100%; height: auto; }
+
+table { width: 100%; border-collapse: collapse; table-layout: auto; margin: var(--space-3) 0; font-size: 9.5pt; font-variant-numeric: tabular-nums; }
+table.fixed { table-layout: fixed; }   /* with <colgroup> widths; build_pdf.py adds both to every Markdown table, sized by the text in each column */
+table.fixed th, table.fixed td { overflow-wrap: anywhere; }   /* never in an auto table: it shrinks every column to one character */
+caption { caption-side: top; text-align: left; font-weight: 600; padding-bottom: var(--space-1); break-after: avoid; }
+thead { display: table-header-group; }
+tr { break-inside: avoid; }
+th, td { padding: 4pt 6pt; text-align: left; vertical-align: top; border-bottom: 0.75pt solid var(--color-rule); }
+th { background: var(--color-accent); color: var(--color-accent-ink); font-weight: 600; border-bottom: 0; }
+tbody tr:nth-child(even) td { background: var(--color-tint); }
+th.num, td.num { text-align: right; }
+
+.footnote { margin-top: var(--space-4); font-size: 9pt; color: var(--color-muted); }
+.footnote hr { display: none; }
+
+/* cover: page-sized, full bleed, no running header or footer */
+.cover {
+  page: cover; height: var(--page-h); padding: 70mm 22mm 24mm; background: var(--color-cover); color: var(--color-cover-ink);
+  display: flex; flex-direction: column; justify-content: flex-end; break-after: page;
+}
+.cover h1 { font-size: 32pt; border: 0; color: var(--color-cover-ink); margin: 0 0 var(--space-3); padding: 0; }
+.cover .subtitle { font-size: 14pt; margin: 0 0 var(--space-4); opacity: 0.9; }
+.cover .meta { font-size: 10.5pt; margin: 0; }
+.cover .tag { display: inline-block; align-self: flex-start; margin-top: var(--space-3); padding: 2pt 8pt; border: 1pt solid var(--color-cover-ink); font-size: 9pt; letter-spacing: 0.04em; text-transform: uppercase; }
+
+/* contents: the page numbers sit in fixed-width cells so writing them in never reflows the page */
+nav.toc { break-after: page; }
+nav.toc h2 { margin-top: 1pt; }
+nav.toc ol { list-style: none; margin: 0; padding: 0; }
+nav.toc li { margin: 0; padding: 3pt 0; }
+nav.toc li.l2 { padding-left: 14pt; font-size: 9.5pt; color: var(--color-muted); }
+nav.toc a { display: flex; align-items: baseline; color: inherit; text-decoration: none; }
+nav.toc .t { flex: 0 1 auto; }
+nav.toc .dots { flex: 1 1 auto; margin: 0 4pt; border-bottom: 1pt dotted var(--color-rule); }
+nav.toc .n { flex: 0 0 2.4em; text-align: right; font-variant-numeric: tabular-nums; }
+nav.toc.nonum .n, nav.toc.nonum .dots { display: none; }

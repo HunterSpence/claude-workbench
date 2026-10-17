@@ -1,14 +1,13 @@
 {
   "name": "workbench-core",
   "displayName": "Workbench core",
-  "version": "0.3.4",
-  "description": "Agent personas, workflow skills, and stdlib-only hooks: a shell-aware guard engine (generic and corporate rule packs), session start, statusline, read-flood guard, journal checkpoints, credential check.",
+  "version": "0.3.5",
+  "description": "Agent personas, workflow skills, and stdlib-only hooks: session start, statusline, read-flood check, journal checkpoints, credential check.",
   "author": {
     "name": "The claude-workbench contributors"
   },
   "license": "MIT",
   "keywords": [
-    "guards",
     "hooks",
     "skills",
     "agents",

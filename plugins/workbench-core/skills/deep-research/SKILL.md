@@ -35,16 +35,13 @@ policy; do not route around a block.
    survived, and labels each line VERIFIED, PLAUSIBLE or ASSUMED.
 
 Need more search volume than the built-in tool allows? The optional search MCP servers in
-`mcp/README.md` (each needs a key your organisation approves; queries leave the machine) can back a
-lane. Never paste internal names, code or customer data into a search query.
+`mcp/README.md` (each needs its own key) can back a lane.
 
 Small question? Collapse to 2-3 lanes and skip step 4 only if the user agrees; say that you did.
 
 ## Output
 Write the report to a local file (`research/<slug>-<YYYY-MM-DD>.md` in the working folder, or
-where the user says). Publish it to a shareable page or Artifact only when the user asks, and only
-when it contains nothing but public sources and your own organisation's information: never another
-organisation's or tenant's data, such as a client's or partner's. Shape:
+where the user says), or an Artifact when the user asks for one. Shape:
 
 ```markdown
 # <question> (researched <date>)

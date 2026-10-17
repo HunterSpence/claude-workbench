@@ -2,7 +2,7 @@
     python -m unittest discover -s plugins/workbench-kb/tests
 
 Every positive control is BUILT AT RUN TIME from fragments, so no file in the repository holds a credential-shaped string
-(a literal one would trip the scanners that guard the repository, and this test along with them). The values are
+(a literal one would trip the scanners that protect the repository, and this test along with them). The values are
 fictional. Four things are checked:
   1. the copies of secretscan.py are byte-identical (the two plugins install to separate folders, so each carries one);
   2. every shape in PATTERNS has a control that its own pattern matches, and every control names a shape that still exists;
@@ -144,7 +144,7 @@ NEGATIVES = [
     ("bearer shell variable", "Authorization: Bearer $TOKEN"),
     ("database url without a password", "DATABASE_URL=postgres://user@dbhost:5432/mydb"),
     ("database url placeholder", 'DSN="postgresql://app:<PASS>@db:5432/app"'),
-    # the new shapes' own guards
+    # the new shapes' own negative controls
     ("basic scheme in prose", "Authorization: Basic authentication is used here"),
     ("basic placeholder", "Authorization: Basic <base64>"),
     ("basic shell variable", "Authorization: Basic $CREDS"),
@@ -170,7 +170,7 @@ NEGATIVES = [
     ("code that builds a json password", "x = '\"pass" + "word\": \"' + value + '\"'"),
     ("json key that merely starts with token", '"tokenizer": "abc12345678901234567"'),
     ("access key marked required", "ACCESS_KEY: required"),
-    # the new shapes' own guards
+    # the new shapes' own negative controls
     ("api-key word that is no key", "api-key: required"),
     ("api key header placeholder", "x-api-key: <your key>"),
     ("api key header variable", "x-api-key: ${API_KEY}"),

@@ -12,8 +12,8 @@ ctx indexes local agent transcripts so you can find earlier decisions, constrain
 evidence. ctx retrieves source material; you do the analysis. Keep every conclusion grounded in
 retrieved evidence. Curated knowledge belongs in the knowledge base; ctx is the raw record.
 
-## Setup (once, by the user; ask before installing anything)
-- Check your organisation allows it. The kit's own route is `setup.py run --with ctx` (see the setup
+## Setup (once, by the user)
+- The kit's own route is `setup.py run --with ctx` (see the setup
   skill): it downloads the release pinned in `bootstrap/packages.json`, checks its SHA-256, sets the
   three variables and the manual index mode below, and `setup.py undo-config --apply` takes them
   back out. By hand, install a **pinned release binary** and verify its checksum; never pipe an

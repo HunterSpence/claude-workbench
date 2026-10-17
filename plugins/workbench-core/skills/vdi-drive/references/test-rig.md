@@ -1,8 +1,7 @@
 # Test rig: a disposable remote desktop you own
 
 Use it to measure the harness without touching anyone's real desktop. Run it on a machine you
-control (a local Docker host or WSL2 with Docker), never on shared or production infrastructure,
-and only if your organisation allows running containers there.
+control (a local Docker host or WSL2 with Docker).
 
 ## Image choice (verify before trusting)
 - **`consol/debian-xfce-vnc`**: recommended. One `docker run`, TigerVNC plus noVNC. noVNC really

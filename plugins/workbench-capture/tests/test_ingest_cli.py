@@ -25,13 +25,11 @@ def proc(e, *argv):
 
 class CliTests(unittest.TestCase):
     def setUp(self):
-        self.e = H.Env(ack=False)
+        self.e = H.Env()
         self.addCleanup(self.e.close)
 
     def test_exit_codes_of_the_real_process(self):
-        self.assertEqual(proc(self.e, "meetings", "run")[0], 5)
-        self.assertEqual(proc(self.e, "mail", "run", "--source", "com")[0], 5)
-        self.assertEqual(proc(self.e, "ack-infosec")[0], 0)
+        self.assertEqual(proc(self.e, "ack-infosec")[0], 2)                      # the acknowledgement step is gone
         self.assertEqual(proc(self.e, "mail", "run", "--source", "com")[0], 4)  # no --experimental: refused before anything is opened
         self.e.P.drop.mkdir(parents=True)
         (self.e.P.drop / "Weekly Review-20261007_090000-Meeting Transcript.vtt").write_text(H.vtt(), "utf-8")
@@ -40,7 +38,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(json.loads(out)["counts"]["written"], 1)
         code, out = proc(self.e, "status", "--json")
         st = json.loads(out)
-        self.assertEqual((code, st["meetings_files"], st["drop_waiting"], st["infosec_ack"]), (0, 1, 0, True))
+        self.assertEqual((code, st["meetings_files"], st["drop_waiting"]), (0, 1, 0))
         self.assertEqual(proc(self.e, "config", "get", "no_such_key")[0], 4)
         self.assertEqual(proc(self.e, "nonsense")[0], 2)
 

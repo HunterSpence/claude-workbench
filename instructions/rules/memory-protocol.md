@@ -1,8 +1,8 @@
 # Memory protocol (plain-Markdown knowledge base)
 
-Auto memory is off in both settings profiles, so there is one memory system: the knowledge base
+Auto memory is off in both profiles, so there is one memory system: the knowledge base
 (KB) at `{{KB_ROOT}}`, one folder per domain with a `HOT.md` summary, plus `_shared/HOT.md`. The
-`save` skill (workbench-kb plugin) owns the exact commands.
+`save` skill owns the exact commands.
 
 ## Conventions
 - One note owns each fact; everything else points to it by its note path (`<domain>/<note>`).
@@ -19,24 +19,25 @@ Auto memory is off in both settings profiles, so there is one memory system: the
   nothing.
 - **In-flight state** (the KB's active-context file) is written only through the `save` skill,
   which merges under a lock. Tempted to edit it by hand? Journal instead and say why.
-- **Permanent lessons don't go in in-flight state:** a permanent user rule goes in a rules file or
-  USER.md; an incident lesson goes in a rules file with a pointer to the KB note that recorded it.
+- **Permanent lessons don't go in in-flight state:** a user rule goes in a rules file or USER.md;
+  an incident lesson goes in a rules file with a pointer to the KB note that recorded it.
   Writing "always" or "never" into active-context means you're in the wrong file.
 - **A save is due after:** a file edited outside the KB, a root cause found, a decision a future
   session needs, a tracked number changed, a new credential reference, a non-obvious routing call.
   A session-start "PRECOMPACT SAVE PENDING" notice means `/workbench-kb:save` before anything else.
 - **KB state is machine-local:** the save lock, snapshots and metrics live in
   `<claude config dir>/workbench/kb-state/<key>/`, never in the KB folder.
-- **The KB holds only data it is approved for:** never a credential value or another tenant's
-  data. Keep `{{KB_ROOT}}` in a work-approved place: work OneDrive is fine (version history is the
-  backup), but never a git repo inside any OneDrive folder. Push only to approved remotes.
+- **Where the KB lives:** work OneDrive is fine (version history is the backup), but never a git
+  repo inside any OneDrive folder.
 
 ## Read path: search before concluding silence
 - Before acting on a domain, read its `HOT.md` and `_shared/HOT.md`; go deeper with
   `{{PYTHON}} "{{WORKBENCH_HOME}}/kit/plugins/workbench-kb/scripts/kb_search.py" "<terms>"`.
+- Kit knowledge ships in `_shared/digests/` (models and tokens, knowledge layer, retrieval
+  eval, reports, internal assistant, enterprise RAG): search there first.
 - **Before concluding something isn't known, search the KB.** A miss is not evidence of absence:
   search is keyword-based, so retry once with the note's own words (tool, ID, file name), then
-  `find search --root kb` (meaning search over the KB).
+  `find search --root kb` (meaning search).
 
 ## Size
 - Always-loaded files are re-read on every call. A new rule costs a demotion elsewhere, not creep.

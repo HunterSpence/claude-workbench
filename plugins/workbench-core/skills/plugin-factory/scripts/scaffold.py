@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """scaffold.py: create a tested, checkable plugin inside a marketplace repository.
 
-  scaffold.py NAME --kind content|integration|guard --surfaces cli|all [--mcp remote|stdio|none] --out REPO
+  scaffold.py NAME --kind content|integration|tool-check --surfaces cli|all [--mcp remote|stdio|none] --out REPO
                     [--description TEXT] [--author NAME] [--org-overlay]
 
 Writes REPO/plugins/NAME/ (manifest, one skill, README with a surface table, LICENSE, CHANGELOG, SECURITY, tests, and
-the kind's extras: guard = exec-form hook plus script, integration = .mcp.json and, for stdio, a stdlib server with three
+the kind's extras: tool-check = exec-form hook plus script, integration = .mcp.json and, for stdio, a stdlib server with three
 example tools) and appends the marketplace entry. The first run in a repository also adds tools/check_plugin.py (with
 plugin_rules.py and secretscan.py beside it), .github/workflows/plugins.yml and .gitattributes. Never touches user or
 managed settings. Refuses reserved names, an existing plugin, and stdio servers for --surfaces all (claude.ai only
@@ -28,7 +28,7 @@ import plugin_rules as R  # noqa: E402
 NAME_RX = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 RUNS = {
     "content": "Nothing: this plugin only adds a skill, which is text that Claude reads.",
-    "guard": "A Bash hook, `scripts/guard.py`, runs before every Bash tool call. It reads the call, may block a forced git push, and writes a one-word log line to the plugin data folder. It makes no network calls.",
+    "tool-check": "A Bash hook, `scripts/check.py`, runs before every Bash tool call. It reads the call, may block a forced git push, and writes a one-word log line to the plugin data folder. It makes no network calls.",
     "stdio": "A local server, `server/server.py`, starts with each session. It keeps an in-memory list and makes no network calls.",
     "remote": "Nothing runs locally for the server: `.mcp.json` points at a remote https URL, and Claude connects to it with your sign-in. Replace the placeholder URL first.",
 }
@@ -85,21 +85,21 @@ def scaffold(name, kind, surfaces, mcp, out, description=None, author=None, over
     if re.search(r"[<>]", desc):
         raise Refused("the description may not contain < or >")
     author = author or "Plugin Author"
-    runs = RUNS["guard"] if kind == "guard" else RUNS[mcp] if mcp != "none" else RUNS["content"]
-    if kind == "guard" and mcp != "none":
+    runs = RUNS["tool-check"] if kind == "tool-check" else RUNS[mcp] if mcp != "none" else RUNS["content"]
+    if kind == "tool-check" and mcp != "none":
         runs += " " + RUNS[mcp]
     tok = {"__NAME__": name, "__SKILL__": name, "__TITLE__": title_of(name), "__DESCRIPTION__": desc, "__AUTHOR__": author,
            "__YEAR__": str(datetime.date.today().year), "__KIND__": kind, "__SURFACES__": "Claude Code only" if surfaces == "cli" else "every surface",
            "__RUNS_LOCALLY__": runs, "__CLI_FRONTMATTER__\n": 'argument-hint: "[topic]"\n' if surfaces == "cli" else ""}
     written = []
     layer(TEMPLATES / "content", plugin, tok, written)
-    if kind == "guard":
-        layer(TEMPLATES / "guard", plugin, tok, written)
+    if kind == "tool-check":
+        layer(TEMPLATES / "tool-check", plugin, tok, written)
     if mcp != "none":
         layer(TEMPLATES / "integration" / mcp, plugin, tok, written)
     manifest = {"name": name, "displayName": title_of(name), "version": "0.1.0", "description": desc, "author": {"name": author},
                 "license": "MIT", "keywords": [kind], "metadata": {"surfaces": surfaces}}
-    if kind == "guard" or mcp == "stdio":
+    if kind == "tool-check" or mcp == "stdio":
         manifest["userConfig"] = {"python": {"type": "string", "title": "Python interpreter",
                                              "description": "Python 3.10 or newer that runs this plugin's scripts: a name on PATH or an absolute path.",
                                              "default": "python3"}}
@@ -132,7 +132,7 @@ def scaffold(name, kind, surfaces, mcp, out, description=None, author=None, over
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("name")
-    ap.add_argument("--kind", choices=["content", "integration", "guard"], required=True)
+    ap.add_argument("--kind", choices=["content", "integration", "tool-check"], required=True)
     ap.add_argument("--surfaces", choices=["cli", "all"], required=True)
     ap.add_argument("--mcp", choices=["remote", "stdio", "none"])
     ap.add_argument("--out", required=True)

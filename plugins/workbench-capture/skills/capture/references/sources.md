@@ -49,5 +49,5 @@ nothing matches), `search(name, query)` (a GET search box only), `download(name,
 `pace()` (count one file read), `convert(file, includeLabelled)` (the `find convert` result), `write(item)`,
 `report({url, reason})` (a skipped item), `stop(reason)`. A module never touches the page directly.
 `write` takes `{url, title, body, author?, modified?, labels?, scope, extra?}`; `extra` may hold only the mail or
-meeting keys of interface I5. Errors thrown by the layer have `guard = true`: a module lets them through (the run stops
+meeting keys of interface I5. Errors thrown by the layer have `stop = true`: a module lets them through (the run stops
 with exit 3) instead of swallowing them.

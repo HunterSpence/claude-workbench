@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${user_config.python}",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/check.py"],
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

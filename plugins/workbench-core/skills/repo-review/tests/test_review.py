@@ -300,26 +300,24 @@ class FailClosedTest(Base):
         self.assertNotIn("--safe-mode", argv)
 
 
-class AllowlistTest(Base):
-    def test_non_allowlisted_repo_is_refused_before_anything_runs(self):
-        r = self.run_review("example-org/other-repo", "--allowlist", str(self.allow))
-        self.assertEqual(r.returncode, 2, r.stderr)
-        self.assertIn("not on the review allowlist", r.stderr)
+class NoAllowlistTest(Base):
+    def test_any_well_formed_repository_is_reviewed_without_a_list(self):
+        r = self.run_review("example-org/other-repo")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(self.records("git"), "the clone ran")
+        self.assertTrue(self.records("claude"), "the review ran")
+
+    def test_an_old_allowlist_option_is_accepted_and_ignored(self):
+        r = self.run_review(REPO, "--allowlist", str(self.d / "absent.txt"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_a_malformed_name_is_still_refused_before_anything_runs(self):
+        for name in ("../etc/passwd", "a b/c", "example-org"):
+            self.assertEqual(self.run_review(name).returncode, 2, name)
         self.assertEqual(self.records(), [])                 # no git, no gh, no claude
         self.assertFalse((self.lad / "wb-review").exists())  # no scratch folder either
-
-    def test_lookalikes_are_refused_and_exact_names_pass(self):
-        for name in (f"{REPO}-2", "example-org/example", "other-host.example.com/example-org/example-repo", "../etc/passwd", "a b/c"):
-            r = self.run_review(name, "--allowlist", str(self.allow))
-            self.assertEqual(r.returncode, 2, name)
-        self.assertEqual(self.records(), [])
         for name in (REPO, f"github.com/{REPO}", f"https://github.com/{REPO}.git", REPO.upper()):
-            self.assertTrue(rr.is_allowed(rr.parse_target(name), self.allow), name)
-
-    def test_missing_allowlist_refuses(self):
-        r = self.run_review(REPO, "--allowlist", str(self.d / "absent.txt"))
-        self.assertEqual(r.returncode, 2)
-        self.assertEqual(self.records(), [])
+            self.assertEqual(rr.parse_target(name), f"github.com/{REPO}".lower(), name)
 
 
 class ArgvTest(Base):
@@ -537,31 +535,20 @@ class PostingTest(Base):
         self.run_review(REPO, "--pr", "7", "--allowlist", str(self.allow))
         self.assertEqual(self.reviews(), [])
 
-    def test_post_needs_the_token(self):
-        base = [REPO, "--pr", "7", "--allowlist", str(self.allow), "--post", str(self.review)]
-        for extra in ([], ["--confirm", "yes"], ["--confirm", "post-review-comment"], ["--confirm", ""]):
-            r = self.run_review(*base, *extra)
-            self.assertEqual(r.returncode, 2, extra)
-        self.assertEqual(self.records(), [])
-        r = self.run_review(REPO, "--allowlist", str(self.allow), "--confirm", rr.CONFIRM_TOKEN)       # a token alone posts nothing
-        self.assertEqual(self.reviews(), [])
+    def test_post_posts_one_comment_review_and_an_old_confirm_option_is_ignored(self):
+        for extra in ([], ["--confirm", "anything"]):
+            self.rec.unlink(missing_ok=True)
+            r = self.run_review(REPO, "--pr", "7", "--post", str(self.review), *extra, WB_REVIEW_TOKEN=TOKEN)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            posted = self.reviews()
+            self.assertEqual(len(posted), 1, extra)
+            self.assertEqual(posted[0]["argv"], ["pr", "review", "7", "-R", f"github.com/{REPO}", "--comment", "-F", str(self.review)])
+            self.assertNotIn("--approve", posted[0]["argv"])
+            self.assertEqual(self.records("claude"), [])                       # posting does not run a review
 
-    def test_post_with_the_token_posts_one_comment_review(self):
-        r = self.run_review(REPO, "--pr", "7", "--allowlist", str(self.allow), "--post", str(self.review), "--confirm", rr.CONFIRM_TOKEN,
-                            WB_REVIEW_TOKEN=TOKEN)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        posted = self.reviews()
-        self.assertEqual(len(posted), 1)
-        self.assertEqual(posted[0]["argv"], ["pr", "review", "7", "-R", f"github.com/{REPO}", "--comment", "-F", str(self.review)])
-        self.assertNotIn("--approve", posted[0]["argv"])
-        self.assertEqual(self.records("claude"), [])                           # posting does not run a review
-
-    def test_post_still_needs_the_allowlist_and_a_pr_number(self):
-        r = self.run_review("example-org/other-repo", "--pr", "7", "--allowlist", str(self.allow), "--post", str(self.review),
-                            "--confirm", rr.CONFIRM_TOKEN)
-        self.assertEqual(r.returncode, 2)
-        r = self.run_review(REPO, "--allowlist", str(self.allow), "--post", str(self.review), "--confirm", rr.CONFIRM_TOKEN)
-        self.assertEqual(r.returncode, 2)
+    def test_post_needs_a_pr_number_and_an_existing_file(self):
+        self.assertEqual(self.run_review(REPO, "--post", str(self.review)).returncode, 2)
+        self.assertEqual(self.run_review(REPO, "--pr", "7", "--post", str(self.d / "absent.md")).returncode, 2)
         self.assertEqual(self.reviews(), [])
 
 

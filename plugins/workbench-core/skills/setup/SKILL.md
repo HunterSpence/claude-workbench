@@ -39,12 +39,11 @@ execution policy, never elevate on your own. Setup's own UAC request is the only
    was already running or the environment is wrong.
 4. For every `ask_it` entry, show its draft text so the user can send it to IT. For every `failed` entry, show the
    one-line error; do not work around it.
-5. When the phase is `knowledge`, show `<kit>/bootstrap/infosec-note.txt` to the user once (setup logs it too).
-6. Finish with `next` from the state (often `/workbench-core:onboard`).
+5. Finish with `next` from the state (often `/workbench-core:onboard`).
 
 ## Never
 - Run `SETUP run` in the foreground from a session: it can take an hour; always `--detach` and poll.
-- Edit managed settings, policy keys or `.env` files, or turn on an opt-in (`--with`) the user did not ask for.
+- Turn on an opt-in (`--with`) the user did not ask for.
 - Update a tool IT or the user installed: `update` lists it as it-managed and leaves it. A tool in use (git, PowerShell,
   Node.js, Claude Code) is deferred: show the user the command from `update.md`, never close their programs. `claude update`
   stays the user's choice. A denied update is an ask-IT item: quote it, do not retry.

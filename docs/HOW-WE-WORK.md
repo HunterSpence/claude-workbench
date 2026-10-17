@@ -35,15 +35,15 @@ entries it marks removable and keeps your data. Runtime locations start with a t
 | Agents (personas) | `plugins/workbench-core/agents/` | One Markdown file each; model and effort are in the frontmatter. |
 | Skills | `plugins/workbench-core/skills/` and `plugins/workbench-kb/` (see `plugins/workbench-core/README.md`) | `/workbench-core:<skill>`; Claude also picks one when its description fits. |
 | Business skills | `plugins/workbench-biz/` | Portable to Claude web and desktop; catalog in `docs/business-catalog.md`. |
-| Capture and ingest | `plugins/workbench-capture/` | Opt-in, user-invoked only; tell your security team before the first run. |
+| Capture and ingest | `plugins/workbench-capture/` | Opt-in, user-invoked only. |
 | How-to guides | `docs/howto/README.md` | Task recipes, read on demand; `find` searches them as the root `howto`. |
-| Approver and coworker docs | `docs/security-overview.md`, `docs/known-limits.md`, `docs/troubleshooting.md`, `docs/rules-card.md`, `docs/runbooks.md` | What leaves the machine, what doesn't work yet, fixes by symptom, the rules on one page, incident and offboarding procedures. |
-| Hooks and guards | `plugins/workbench-core/hooks/hooks.json`, `plugins/workbench-core/scripts/` | Guards live in two rule packs: `plugins/workbench-core/scripts/guards/rulepacks/generic.py` and `corporate.py`. |
+| Coworker docs | `docs/known-limits.md`, `docs/troubleshooting.md`, `docs/rules-card.md`, `docs/runbooks.md` | What doesn't work yet, fixes by symptom, the rules on one page, new-laptop and offboarding procedures. |
+| Session hooks | `plugins/workbench-core/hooks/hooks.json`, `plugins/workbench-core/scripts/` | Registered by the core plugin: session start, precompact, statusline, read-flood check, checkpoints, credential check. None of them blocks a shell command. |
 | Settings profiles | `settings/profiles/` and `settings/SETTINGS.md` | `corporate` is the default; every key is explained in the guide. |
 | MCP servers | `mcp/README.md` | A catalog, every entry off by default, each with where its data goes. |
 | Knowledge base | `<DATA>/kb/` (or the root you chose) | Seeded from `kb-template/`. |
 
-Precedence, highest first: organisation policy (managed settings, a managed instruction file, written policy) wins over
+Precedence, highest first: organisation policy (managed settings, a managed instruction file) wins over
 the Red Lines, then the Standing Orders, then the rules, then a project's own `CLAUDE.md`, then skills and agents, then
 anything a plugin or MCP server injects. A contradiction inside one tier is a bug: fix the text. Settings follow the
 same idea: managed settings are never overridden, and the installer refuses to write a key a managed source sets.
@@ -60,11 +60,9 @@ release replaces the kit copy. `docs/AUTHORING.md` shows how to write and test e
 3. **Smallest change that fully solves it.** Reuse what exists, then the standard library, then a native feature, then
    a few lines of your own.
 4. **Prove it.** A green check is not evidence; open the artifact. Section 6.
-5. **An Office file leaving the organisation:** check its render (`office-render`), scrub a copy
-   (`plugins/workbench-core/skills/office-render/scripts/scrub.py`), and send only the scrubbed copy.
-6. **Big or risky work gets three roles:** a builder, an attacker on a different model, and a final verifier that
+5. **Big or risky work gets three roles:** a builder, an attacker on a different model, and a final verifier that
    gates. Section 4.
-7. **Save before you stop.** Journal the state and write a handoff another session can execute. Section 7.
+6. **Save before you stop.** Journal the state and write a handoff another session can execute. Section 7.
 
 ## 4. Spawning and model routing
 

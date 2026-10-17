@@ -36,15 +36,13 @@ ASK_TRANSCRIPTS = ("Please (1) enable Graph API access to meeting transcripts fo
                    "also the delegated permission OnlineMeetingAiInsight.Read.All for meeting AI insights (admin consent). "
                    "Purpose: a local, on-device meeting-notes index. To see the tenant setting: Get-CsTeamsMeetingConfiguration | "
                    "Select EnableGraphTranscriptAccess, EnableAttributedTranscripts")
-ASK_DIGESTS = ("Please confirm that summarising my own mail and meeting transcripts through our approved Claude Code login is "
-               "permitted, including speech from external participants.")
 ASK_OUTLOOK = ("Please confirm whether scripted read-only access to my own Outlook mailbox (local cache) is permitted for a local, "
                "on-device search index, and the policy setting that governs it.")
 BLOCKS = {r"HKLM\SOFTWARE\Policies\Microsoft\Edge": {"RemoteDebuggingAllowed": 0},
           r"HKLM\SOFTWARE\Policies\WSL": {"AllowWSL": 0},
           r"HKLM\SOFTWARE\Policies\ClaudeCode": {"Settings": json.dumps({"allowManagedHooksOnly": True, "deniedModels": ["claude-opus-5-5"]})}}
 EXPECT_BLOCKED = {"wsl2", "browser-automation", "capture-intranet", "capture-shared-files",
-                  "hooks-guards", "model-flagship-claude-opus-5-5"}
+                  "hooks", "model-flagship-claude-opus-5-5"}
 
 
 rd, rj = tp.rd, tp.rj
@@ -356,7 +354,8 @@ class AddendumRuleTests(Base):
         f = report.RULES["capture_mail_full"]
         s, note = f(cap(outlook_client="classic", outlook_cache_window="3 months"))[:2]
         self.assertEqual(s, report.I)
-        self.assertIn("local-cache route, InfoSec note first", note)
+        self.assertIn("local-cache route", note)
+        self.assertNotIn("InfoSec", note)
         self.assertIn("3 months", note)
         self.assertEqual(f(cap(outlook_client="both"))[0], report.I)
         self.assertEqual(f(cap(outlook_client="new"))[0], report.N)
@@ -387,10 +386,12 @@ class AddendumRuleTests(Base):
         self.assertEqual((r["status"], r["ask_it"]), (report.N, ASK_TRANSCRIPTS))
 
     def test_ai_digests(self):
+        """A capability row: READY once Claude Code is signed in; no permission ask either way."""
         p = self.probe()
-        r = self.rows(p)["ai-digests"]
-        self.assertEqual((r["status"], r["ask_it"]), (report.U, ASK_DIGESTS))
-        self.assertNotIn(ASK_DIGESTS, [x["ask"] for x in report.roadmap(report.evaluate(p, self.kit, tp.fixture_file()))])
+        f = report.RULES["ai_digests"]
+        self.assertEqual(f(self.mod(p, claude={"logged_in": True}))[0], report.R)
+        self.assertEqual(f(self.mod(p, claude={"logged_in": False}))[0], report.U)
+        self.assertIsNone(self.rows(self.mod(p, claude={"logged_in": False}))["ai-digests"]["ask_it"])
 
 
 class Agreement(Base):
@@ -399,7 +400,7 @@ class Agreement(Base):
     REAL = os.path.join(tp.KIT, "bootstrap", "packages.json")
     ASK = ("Please allow downloads from huggingface.co (a one-time embedding model), or provide an approved internal mirror of "
            "the model files.")
-    PROVED = ("find-keyword", "find-hybrid", "find-mcp", "mcp-find", "knowledge-refresh-task", "scheduled-tasks", "hooks-guards",
+    PROVED = ("find-keyword", "find-hybrid", "find-mcp", "mcp-find", "knowledge-refresh-task", "scheduled-tasks", "hooks",
               "plugin-core", "plugin-kb", "skill-find", "skill-save")
 
     def machine(self, steps=None, quick=True, tools=None, **fs_kw):
@@ -464,7 +465,7 @@ class Agreement(Base):
         _, _, rows = self.machine({"D10": "PASS", "D13": "WARN", "D14": "WARN", "D15": "FAIL", "D9": "PASS"})
         self.assertEqual(rows["find-keyword"]["status"], report.R)
         self.assertEqual(rows["find-hybrid"]["status"], report.R, "D9 passed: the index has vectors")
-        for rid in ("find-mcp", "mcp-find", "knowledge-refresh-task", "hooks-guards", "plugin-core"):
+        for rid in ("find-mcp", "mcp-find", "knowledge-refresh-task", "hooks", "plugin-core"):
             self.assertEqual(rows[rid]["status"], report.I, rid)
 
     def test_a_keyword_only_index_is_needs_it_with_the_ask_doctor_attaches_and_nothing_measurable_is_unknown_with_a_reason(self):

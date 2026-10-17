@@ -27,7 +27,7 @@ clock = lambda: datetime.now(timezone.utc)  # tests replace this  # noqa: E731
 
 # What a stop tells the user to ask for. references/asks.md carries the same texts and a test keeps them equal.
 ASKS = {
-    "outlook-guard": "Outlook refused or prompted for a protected mail property while a read-only script read my own cached "
+    "outlook-blocked": "Outlook refused or prompted for a protected mail property while a read-only script read my own cached "
                      "mailbox. Please tell me whether a local read-only script may read my own cached mailbox through classic "
                      "Outlook, and what the programmatic-access (Object Model Guard) policy is on this device. Nothing was "
                      "changed and the run did not try another way.",
@@ -46,7 +46,7 @@ ASKS = {
 
 
 class Stop(Exception):
-    """A guard, policy or tenant gate said no: the run ends with exit 3 and the ask-IT text, with no retry by another route."""
+    """A security prompt, policy or tenant gate said no: the run ends with exit 3 and the ask-IT text, with no retry by another route."""
 
     def __init__(self, kind, reason, ask_key):
         super().__init__(reason)
@@ -96,7 +96,7 @@ class Paths:
 
 
 DEFAULTS = {"graph_client_id": "", "graph_tenant_id": "", "mail_folders": ["Inbox", "Sent Items"], "digest_model": None,
-            "digest_max_per_day": 30, "digest_window_days": 14, "infosec_ack": None}
+            "digest_max_per_day": 30, "digest_window_days": 14}
 
 
 def load_settings(P):
@@ -202,7 +202,7 @@ def inline(s):
 # text the kit did not write goes through defang_at before it joins a prompt. Every @ not right after an ASCII letter, digit or
 # underscore is changed, whatever follows it (Claude Code 2.1.295 also reads one after a space or after CJK sentence marks such
 # as U+3001, U+3002, U+FF01 and U+FF1F, and accepts a quoted @"path"), so name@example.com still reads as an address. A
-# non-ASCII neighbour is never trusted: Claude Code ignores an @ after a CJK letter, but this guard changes it anyway.
+# non-ASCII neighbour is never trusted: Claude Code ignores an @ after a CJK letter, but this check changes it anyway.
 _AT = re.compile(r"(?<![A-Za-z0-9_])@")
 
 

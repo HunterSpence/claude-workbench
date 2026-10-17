@@ -6,6 +6,7 @@ The TypeScript side (links.ts, nav.ts) is tested by links.test.mjs against the s
 import contextlib
 import io
 import json
+import os
 import re
 import shutil
 import sys
@@ -14,6 +15,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace as NS
 
+REQUIRE = os.environ.get("WB_REQUIRE_ALL") == "1"   # house convention: nothing here skips
 SKILL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL / "scripts"))
 sys.path.insert(0, str(SKILL / "templates" / "python"))
@@ -54,7 +56,7 @@ export function App() {
           <Route path="profile" element={<Profile />} />
           <Route path="/absolute" element={<Abs />} />
         </Route>
-        <Route element={<Guard />}>
+        <Route element={<RequireLogin />}>
           <Route path="admin" element={<p>Don't go</p>} />
         </Route>
         <Route path="help" id="a>b" />

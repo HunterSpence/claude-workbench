@@ -8,6 +8,8 @@
   index FOLDER [--rebuild] [--force] [--include-labelled]     add a root and index it
   refresh [--all | --root L] [--rebuild] [--embed auto|off] [--max-minutes N] [--detach]
   embed [--model M] [--batch N] [--max-minutes N]             compute vectors (downloads the model once)
+  model import PATH | model export OUT.zip                    put the pinned model in place from a folder or .zip with no
+                                                              network (export builds that .zip from the cached model)
   search "Q" [--mode auto|hybrid|keyword] [--limit N] [--root L] [--path S] [--source S] [--rerank]
   show "REF" [--context N]           files "WORDS"           related "REF|PATH" [--depth N]     newest "REF|PATH|WORDS"
   convert FILE --json                label FILE --json       status | report [--json]           --purge [--root L]
@@ -21,16 +23,19 @@ Exit: 0 ok, 1 error, 2 usage.
 import argparse
 import contextlib
 import datetime
+import fnmatch
 import hashlib
 import importlib.util
 import json
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
 import time
 import zipfile
+import zlib
 import xml.etree.ElementTree as ET
 from urllib.parse import urlparse
 
@@ -46,6 +51,7 @@ OFFICE = {".docx", ".pptx", ".xlsx"}
 HIDDEN_KINDS = ("comments", "tracked_changes", "speaker_notes", "hidden_sheets", "hidden_slides")
 # Windows file attributes that mark a cloud placeholder whose content is not on disk.
 CLOUD_ONLY = 0x1000 | 0x40000 | 0x400000
+MOUNT_POINT = 0xA0000003          # IO_REPARSE_TAG_MOUNT_POINT: an NTFS junction
 OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"   # an encrypted or password-protected Office file is an OLE container
 MAX_PARA = 1800
 SKIPDIRS = {"node_modules", "__pycache__", "$RECYCLE.BIN"}
@@ -279,11 +285,21 @@ def nested_roots(con, rid, path):
     return {p for p in (norm_path(r[0]) for r in con.execute("select path from roots where id<>?", (rid,))) if p != base and p.startswith(pre)}
 
 
+def is_junction(e):
+    """True for an NTFS junction (a mount-point reparse point) among os.scandir entries. A OneDrive placeholder is a
+    reparse point too, under another tag, and is NOT one. Python 3.12+ answers this itself."""
+    if hasattr(e, "is_junction"):
+        return e.is_junction()
+    st = e.stat(follow_symlinks=False)
+    return bool(getattr(st, "st_file_attributes", 0) & 0x400) and getattr(st, "st_reparse_tag", MOUNT_POINT) == MOUNT_POINT
+
+
 def walk(root, skip_underscore=False, skip_top=(), skip_paths=(), skipped=None):
     """(relpath, stat) for every file. DirEntry.stat() reads cached attributes on Windows, so it never opens (and never
     hydrates) a placeholder. skip_underscore (captured roots): a folder whose name starts with _ is a staging area.
     skip_top: folder names skipped directly under the root only (the kb root's daily/ save log).
-    skip_paths: normcase'd absolute folders that belong to another root; their relpaths are appended to `skipped`."""
+    skip_paths: normcase'd absolute folders that belong to another root; their relpaths are appended to `skipped`.
+    A junction is never entered: its files belong to the folder it points at (indexed there, or not at all)."""
     stack = [(os.path.abspath(root), "")]
     while stack:
         d, rel_dir = stack.pop()
@@ -298,6 +314,8 @@ def walk(root, skip_underscore=False, skip_top=(), skip_paths=(), skipped=None):
             try:
                 if e.is_dir(follow_symlinks=False):
                     sub = os.path.join(d, e.name)
+                    if is_junction(e):
+                        continue
                     if os.path.normcase(sub) in skip_paths:
                         if skipped is not None:
                             skipped.append(rel)
@@ -1288,6 +1306,219 @@ def embed_cmd(con, deadline=None, batch=32, download=True, force=False):
     return {"embedded": done, "reused": reused, "pending": more, "model": MODEL, "mode_reason": None}
 
 
+# ───────────────────────── sideload: model import and export ─────────────────────────
+MODEL_CACHE_DIR = "models--Qdrant--bge-small-en-v1.5-onnx-Q"   # the hub cache folder fastembed writes for MODEL
+MODEL_SIDECARS = {                                              # the other files of the pinned revision and their SHA-256 (read from the cached pinned model)
+    "config.json": "13582bcf2effc85b7bf3d3f5532e686bc1c9ce86bb009d10f0ec33cbe92299dd",
+    "special_tokens_map.json": "5d5b662e421ea9fac075174bb0688ee0d9431699900b90662acd44b2a350503a",
+    "tokenizer.json": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66",
+    "tokenizer_config.json": "0b29c7bfc889e53b36d9dd3e686dd4300f6525110eaa98c76a5dafceb2029f53",
+}
+MODEL_MAX_BYTES = 400 << 20                                     # the model is about 66 MB: a bigger package is not it
+MODEL_IMPORT_HINT = "doc_index.py model import <folder or .zip with the model>"
+
+
+class SideloadError(Exception):
+    """A model import or export that cannot go ahead: the message is the one line shown."""
+
+
+def _sha_of(f):
+    h = hashlib.sha256()
+    for chunk in iter(lambda: f.read(1 << 20), b""):
+        h.update(chunk)
+    return h.hexdigest()
+
+
+def _below_model_dir(parts):
+    """The path inside the model's cache folder (snapshots/<revision>/<file> or refs/<name>) for a path in a package, else
+    None. The cache folder may sit at any depth, or be missing when the package is that folder's contents."""
+    for i, p in enumerate(parts):
+        if fnmatch.fnmatch(p, MODEL_GLOB):
+            rest = parts[i + 1:]
+            return tuple(rest) if len(rest) >= 2 and rest[0] in ("snapshots", "refs") else None
+    for i, p in enumerate(parts):
+        if p in ("snapshots", "refs"):
+            return tuple(parts[i:]) if len(parts) - i >= 2 else None
+    return None
+
+
+def _find_model_folder(src, depth=3):
+    todo = [(src, 0)]
+    while todo:
+        d, k = todo.pop(0)
+        if fnmatch.fnmatch(os.path.basename(d), MODEL_GLOB) or (k == 0 and os.path.isdir(os.path.join(d, "snapshots"))):
+            return d
+        if k < depth:
+            try:
+                todo += [(e.path, k + 1) for e in sorted(os.scandir(d), key=lambda e: e.name) if e.is_dir(follow_symlinks=False)]
+            except OSError:
+                pass
+    return None
+
+
+@contextlib.contextmanager
+def model_sources(src):
+    """{path inside the cache folder: (size, opener)} for the files of the model package at `src`, a folder or a .zip. The
+    hub's `blobs` copy is left out (the snapshot files are the real ones). SideloadError when `src` is neither, or a zip
+    entry would leave its folder."""
+    src, zf, out = os.path.abspath(src), None, {}
+    try:
+        if os.path.isdir(src):
+            top = _find_model_folder(src)
+            if top is None:
+                raise SideloadError(f"no model folder ({MODEL_GLOB}) found in {src}")
+            for sub in ("snapshots", "refs"):
+                for d, _dirs, files in os.walk(os.path.join(top, sub)):
+                    for n in files:
+                        full = os.path.join(d, n)
+                        out[tuple(os.path.relpath(full, top).replace("\\", "/").split("/"))] = (os.path.getsize(full), lambda p=full: open(p, "rb"))
+        elif os.path.isfile(src) and zipfile.is_zipfile(src):
+            zf = zipfile.ZipFile(src)
+            for info in zf.infolist():
+                name = info.filename.replace("\\", "/")
+                parts = name.rstrip("/").split("/")
+                if name.startswith("/") or any(p in ("", ".", "..") or ":" in p for p in parts):
+                    raise SideloadError(f"{os.path.basename(src)} holds an unsafe path ({info.filename!r}); nothing was imported")
+                if (info.external_attr >> 16) & 0o170000 == 0o120000:      # a symbolic link is stored as its target path, not as a file
+                    raise SideloadError(f"{os.path.basename(src)} holds a symbolic link ({info.filename!r}); nothing was imported")
+                rel = None if info.is_dir() else _below_model_dir(parts)
+                if rel:
+                    out[rel] = (info.file_size, lambda i=info: zf.open(i))
+        else:
+            raise SideloadError(f"{src} is not a folder or a .zip file")
+        yield out
+    finally:
+        if zf:
+            zf.close()
+
+
+def _copy_hashed(f, dest):
+    """Copy the open file `f` to `dest`; the SHA-256 of the bytes that were copied."""
+    h = hashlib.sha256()
+    with open(dest, "wb") as g:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+            g.write(chunk)
+    return h.hexdigest()
+
+
+def _model_import(src):
+    with model_sources(src) as files:
+        revs = sorted({r[1] for r in files if len(r) == 3 and r[0] == "snapshots" and r[2] == MODEL_FILE})
+        if not revs:
+            raise SideloadError(f"{MODEL_FILE} is missing from {src} (expected {MODEL_CACHE_DIR}/snapshots/<revision>/{MODEL_FILE})")
+        rev = got = None
+        for r in revs:
+            with files[("snapshots", r, MODEL_FILE)][1]() as f:
+                got = _sha_of(f)
+            if got == MODEL_SHA256:
+                rev = r
+                break
+        if rev is None:
+            raise SideloadError(f"{MODEL_FILE} in {src} does not match the pinned SHA-256 (got {got[:12]}..., want {MODEL_SHA256[:12]}...); nothing was imported")
+        pins = {MODEL_FILE: MODEL_SHA256, **MODEL_SIDECARS}
+        gone = [n for n in MODEL_SIDECARS if ("snapshots", rev, n) not in files]
+        if gone:
+            raise SideloadError(f"{' and '.join(gone)} missing beside {MODEL_FILE} in {src}; nothing was imported")
+        keep = {("snapshots", rev, n): files[("snapshots", rev, n)] for n in pins}      # only the pinned files are taken, whatever else the package holds
+        for n, want in MODEL_SIDECARS.items():
+            with keep[("snapshots", rev, n)][1]() as f:
+                if _sha_of(f) != want:
+                    raise SideloadError(f"{n} in {src} does not match its pinned SHA-256; nothing was imported")
+        total = sum(v[0] for v in keep.values())
+        if total > MODEL_MAX_BYTES:
+            raise SideloadError(f"{src} holds {total >> 20} MB of model files, more than the {MODEL_MAX_BYTES >> 20} MB the model needs; nothing was imported")
+        final, stage = os.path.join(models_dir(), MODEL_CACHE_DIR), os.path.join(models_dir(), f".import-{os.getpid()}")
+        shutil.rmtree(stage, ignore_errors=True)
+        try:
+            top = os.path.join(stage, MODEL_CACHE_DIR)
+            for r, (_size, opener) in keep.items():
+                dest = os.path.join(top, *r)
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with opener() as f:
+                    if _copy_hashed(f, dest) != pins[r[2]]:       # what was copied is what was checked, or the old model stays as it is
+                        raise SideloadError(f"{r[2]} in {src} changed while it was being copied; nothing was imported")
+            os.makedirs(os.path.join(top, "refs"), exist_ok=True)
+            with open(os.path.join(top, "refs", "main"), "w", encoding="utf-8", newline="") as g:
+                g.write(rev)                      # the hub's offline lookup resolves the revision through refs/main
+            old = os.path.join(stage, "old")
+            if os.path.isdir(final):
+                os.replace(final, old)
+            try:
+                os.replace(top, final)
+            except OSError:
+                if os.path.isdir(old):
+                    os.replace(old, final)
+                raise
+        except OSError as e:
+            raise SideloadError(f"cannot write under {models_dir()}: {e}") from e
+        finally:
+            shutil.rmtree(stage, ignore_errors=True)
+    return {"model": MODEL, "dir": final, "files": len(keep) + 1, "bytes": total}
+
+
+def model_import(src):
+    """Put the pinned embedding model from `src` (a folder, or a .zip, laid out as the hub cache that fastembed writes under
+    models_dir()) into models_dir(). Every file of the pinned revision (MODEL_FILE and MODEL_SIDECARS) must be there and match
+    its SHA-256 before anything is copied, and the copy is checked again as it is made; it is staged beside the final folder
+    and moved in whole, so any failure leaves the old model as it was. Other files in the package are ignored, a symbolic
+    link or an entry leaving its folder in a zip is refused, and a damaged zip is one clear line. Never touches the network."""
+    try:
+        return _model_import(src)
+    except (zipfile.BadZipFile, zlib.error, RuntimeError, NotImplementedError) as e:    # a bad CRC, bad deflate data, an encrypted entry
+        raise SideloadError(f"{src} is damaged or not a plain zip ({type(e).__name__}: {e}); nothing was imported") from e
+
+
+def model_export(out):
+    """Pack the cached embedding model into a .zip that `model import` takes, so a machine that cannot reach the hub can be
+    given it. The file is hashed first; a cache that does not match the pin is reported, not deleted, and nothing is written."""
+    f = find_model_file()
+    if not f:
+        raise SideloadError(f"no cached embedding model under {models_dir()}: run `embed` once on a machine that can reach the hub")
+    if sha256(f) != MODEL_SHA256:
+        raise SideloadError(f"the cached {MODEL_FILE} does not match the pinned SHA-256: nothing exported (run `embed` again to fetch it)")
+    snap = os.path.dirname(f)
+    top = os.path.dirname(os.path.dirname(snap))
+    out = os.path.abspath(out)
+    if os.path.isdir(out):
+        raise SideloadError(f"{out} is a folder, not a .zip file name")
+    tmp, n = out + ".tmp", 0
+    try:
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+            for base in (os.path.join(top, "refs"), snap):
+                for d, dirs, files in os.walk(base):
+                    dirs.sort()
+                    for name in sorted(files):
+                        full = os.path.join(d, name)
+                        zf.write(full, MODEL_CACHE_DIR + "/" + os.path.relpath(full, top).replace("\\", "/"))
+                        n += 1
+        os.replace(tmp, out)
+    except OSError as e:
+        raise SideloadError(f"cannot write {out}: {e}") from e
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    return {"model": MODEL, "path": out, "files": n, "bytes": os.path.getsize(out)}
+
+
+def keyword_reason(con, nvec, mf):
+    """Why search is keyword-only right now (everything in the way, in one sentence), or None when it is hybrid. Reads the
+    disk and the index only: no model load, no network."""
+    why = []
+    gone = [m for m in ("numpy", "fastembed") if importlib.util.find_spec(m) is None]
+    if gone:
+        why.append(f"{' and '.join(gone)} not installed in this Python")
+    if not mf:
+        fail = model_failure(con)
+        why.append("offline (HF_HUB_OFFLINE is set) and the embedding model is not downloaded" if offline() else
+                   f"the embedding model is not downloaded (the download from {fail['host']} failed: {fail['error']})" if fail else
+                   "the embedding model is not downloaded")
+    elif not nvec:
+        why.append("no vectors yet: run `embed` (or `refresh`)")
+    return "; ".join(why) or None
+
+
 # ───────────────────────── refresh ─────────────────────────
 def try_lock(path):
     """An open, locked file handle (kept until the process ends), or None when another process holds the lock."""
@@ -1704,10 +1935,12 @@ def status(con, db):
     mf = find_model_file()
     problems = [{"ref": r[0], "status": r[1], "reason": r[2], "error": r[3]} for r in con.execute(
         "select ref, status, reason, error from files where status in ('failed','skipped','labelled','cloud-only') order by status, ref limit 200")]
+    why = keyword_reason(con, nvec, mf)
     return {"db": db, "schema_version": con.execute("pragma user_version").fetchone()[0],
             "migrated_from": json.loads(get_meta(con, "migrated_from", "[]")), "roots": roots, "coverage": coverage(con),
             "paragraphs": paras, "vectors": nvec, "model": MODEL if (nvec or mf) else None,
-            "mode": "hybrid" if nvec and mf else "keyword", "last_refresh": get_meta(con, "last_refresh"),
+            "mode": "keyword" if why else "hybrid", "keyword_reason": why, "model_import": None if mf else MODEL_IMPORT_HINT,
+            "last_refresh": get_meta(con, "last_refresh"),
             "notes": json.loads(get_meta(con, "notes", "[]")), "problems": problems}
 
 
@@ -1748,7 +1981,7 @@ def purge_root(con, label, drop_root=False):
 def reexec_if_needed(cmd):
     """Heavy commands re-run themselves under config.json "knowledge_python" when a needed module is missing here."""
     need = {"index": ["markitdown"], "refresh": ["markitdown"], "convert": ["markitdown"], "embed": ["numpy", "fastembed"],
-            "search": ["numpy", "fastembed"]}.get(cmd, [])
+            "search": ["numpy", "fastembed"], "status": ["numpy", "fastembed"], "report": ["numpy", "fastembed"]}.get(cmd, [])
     py = wb_config().get("knowledge_python")
     if need and py and os.path.isfile(py) and os.environ.get("WB_KNOWLEDGE_REEXEC") != "1" and \
             os.path.normcase(os.path.abspath(py)) != os.path.normcase(os.path.abspath(sys.executable)) and \
@@ -1804,6 +2037,7 @@ def main(argv=None):
     cmd("newest", "target", json=J)
     cmd("convert", "file", include_labelled=J, json=J)
     cmd("label", "file", json=J)
+    cmd("model", "action", "path", json=J)
     cmd("status", json=J)
     cmd("report", json=J)
     a = ap.parse_args(argv)
@@ -1837,6 +2071,22 @@ def run(a, db):
         return 0
     if a.cmd == "label":
         out_json({"path": a.file, "label": file_label(a.file)})
+        return 0
+    if a.cmd == "model":
+        if a.action not in ("import", "export"):
+            print("usage: doc_index.py model import <folder or .zip> | model export <out.zip>", file=sys.stderr)
+            return 2
+        try:
+            res = (model_import if a.action == "import" else model_export)(a.path)
+        except SideloadError as e:
+            print(f"error: model {a.action}: {e}", file=sys.stderr)
+            return 1
+        if a.json:
+            out_json(res)
+        elif a.action == "import":
+            print(f"imported the embedding model ({res['files']} files, {res['bytes'] >> 20} MB) into {res['dir']}; next: doc_index.py embed")
+        else:
+            print(f"exported the embedding model ({res['files']} files, {res['bytes'] >> 20} MB) to {res['path']}; on the other machine: doc_index.py model import \"{res['path']}\"")
         return 0
     con = connect(db)
     try:
@@ -1909,6 +2159,11 @@ def run(a, db):
             else:
                 print(f"index: {db}\nroots {len(st['roots'])}  files {st['coverage']['catalogued']}  indexed {st['coverage']['content_indexed']}  "
                       f"paragraphs {st['paragraphs']}  vectors {st['vectors']}  mode {st['mode']}  last refresh {st['last_refresh'] or 'never'}")
+                if st["keyword_reason"]:
+                    print(f"  search is keyword-only: {st['keyword_reason']}")
+                if st["model_import"]:
+                    print(f"  without the internet, add the model from a folder or .zip: {st['model_import']}"
+                          "  (build the .zip where the hub is reachable: doc_index.py model export <out.zip>)")
                 for ln in table([(r["label"], f"{sum(r['files'].values())} files", f"{r['vectors']} vectors", r["path"]) for r in st["roots"]], right=(1, 2), indent="  "):
                     print(ln)
                 for k, n in st["coverage"]["skipped"].items():

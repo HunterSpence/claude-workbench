@@ -1,0 +1,23 @@
+{"version": 1,
+ "questions": [
+  {"q": "Does switching the effort level halfway through a session throw away the prompt cache?",
+   "expect": "_shared/digests/models-and-tokens.md"},
+  {"q": "If the agent file names a model and CLAUDE_CODE_SUBAGENT_MODEL is also set, which one does the subagent use?",
+   "expect": "_shared/digests/models-and-tokens.md"},
+  {"q": "Is a knowledge graph worth building over our documents, or is plain retrieval good enough?",
+   "expect": "_shared/digests/knowledge-layer.md"},
+  {"q": "Which embedding model and reranker can run on a laptop CPU, and what licences do they carry?",
+   "expect": "_shared/digests/knowledge-layer.md"},
+  {"q": "How do I prove a change to our search ranking really helped and is not just noise?",
+   "expect": "_shared/digests/retrieval-eval-method.md"},
+  {"q": "How should test questions be labelled so the labels are not biased by the search engine being tested?",
+   "expect": "_shared/digests/retrieval-eval-method.md"},
+  {"q": "Should I write this report in Word or build it from HTML before turning it into a PDF?",
+   "expect": "_shared/digests/reports-and-pdfs.md"},
+  {"q": "What should I check before sending a PDF so the page numbers, fonts and tables come out right?",
+   "expect": "_shared/digests/reports-and-pdfs.md"},
+  {"q": "How do I stop a help chatbot from showing admin-only content to ordinary users?",
+   "expect": "_shared/digests/internal-assistant.md"},
+  {"q": "What does it take to build a help assistant that answers employees from our own documentation?",
+   "expect": "_shared/digests/internal-assistant.md"}
+ ]}

@@ -40,6 +40,9 @@ NAMES = {"claude-fable-5-1": "Claude Fable 5.1", "claude-opus-5-5": "Claude Opus
          "claude-sonnet-5-5": "Claude Sonnet 5.5", "claude-haiku-5-5": "Claude Haiku 5.5"}
 DEFAULT_EFFORT = {"claude-fable-5-1": "high", "claude-opus-5-5": "medium", "claude-sonnet-5-5": "high", "claude-haiku-5-5": "medium"}
 LIMITS = ("1M tokens", "128K tokens")
+# Claude Code's own default effort (E38): its model-config page names the three 5.5 models as medium and does not name Fable.
+CLAUDE_CODE_DEFAULT = {"claude-fable-5-1": "not named", "claude-opus-5-5": "`medium`", "claude-sonnet-5-5": "`medium`",
+                       "claude-haiku-5-5": "`medium`"}
 
 # Frozen parity snapshot: row id, persona, preference order of (model, effort). It mirrors the persona/model/effort routing
 # table the kit's model policy teaches; the persona files must carry the first entry of their row.
@@ -300,6 +303,21 @@ class ModelsPage(unittest.TestCase):
             self.assertIn(f"{NAMES[mid]} {DEFAULT_EFFORT[mid]}", self.e31, mid)
         self.assertIn(f"context window {LIMITS[0]}, max output {LIMITS[1]}", self.e31)
 
+    def test_claude_code_default_effort_column_follows_e38(self):
+        e38 = {r["id"]: r["value"] for r in self.ev["rows"]}["E38"]
+        for want in ("Opus 5.5, Sonnet 5.5, and Haiku 5.5 default to medium", "Fable 5.1 is not named"):
+            self.assertIn(want, e38)
+        head = next(x for x in self.text.splitlines() if x.startswith("| Model | API id |"))
+        self.assertEqual(table_cells(head)[4:6], ["API default effort", "Claude Code default effort"])
+        seen = {}
+        for line in self.text.splitlines():
+            m = re.match(r"\| Claude [^|]+\| `([^`]+)` \|", line)
+            if m:
+                seen[m.group(1)] = table_cells(line)[5]
+        self.assertEqual(set(seen), set(CLAUDE_CODE_DEFAULT))
+        for mid, cell in seen.items():
+            self.assertTrue(cell.startswith(CLAUDE_CODE_DEFAULT[mid]), f"{mid}: {cell}")
+
     def test_each_model_has_best_for_never_for_and_effort_guidance(self):
         for mid, name in NAMES.items():
             m = re.search(rf"^### {re.escape(name)}\n(.*?)(?=^#{{2,3}} |\Z)", self.text, re.S | re.M)
@@ -353,6 +371,21 @@ class OtherDocs(unittest.TestCase):
         for needle in ("published", "direction", "settings/model-evidence.json", "--render-routing", "R0"):
             self.assertIn(needle, text)
         self.assertNotRegex(text, r"\bO\d\b")
+
+    def test_token_diet_has_the_prompt_cache_section_with_real_evidence_ids(self):
+        diet, have = read(TOKEN_DIET), {r["id"] for r in load(EVIDENCE)["rows"]}
+        self.assertIn("\n## 8. Prompt cache\n", diet)
+        section = diet.split("\n## 8. Prompt cache\n", 1)[1]
+        named = set(re.findall(r"\bE\d+\b", section))
+        self.assertTrue({"E37", "E39", "E41", "E42", "E43"} <= named, named)
+        self.assertEqual(named - have, set())
+        for want in ("Does an effort change break it?", "`/usage`", "`/insights`", "seven times", "Command-line tools over MCP"):
+            self.assertIn(want, section, want)
+
+    def test_haiku_page_marks_deferred_mcp_tools_untested(self):
+        text = read(HAIKU_MD)
+        self.assertIn("Deferred MCP tools with Haiku 5.5: UNTESTED", text)
+        self.assertEqual({r["id"]: r["kind"] for r in load(EVIDENCE)["rows"]}["E44"], "vendor")
 
     def test_guide_49_has_the_guide_shape(self):
         howto = load_module("wb_test_howto", "tools/test_howto.py")

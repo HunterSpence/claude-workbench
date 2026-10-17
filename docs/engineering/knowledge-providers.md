@@ -31,7 +31,7 @@ so Claude can say the answer may be incomplete. Each item in `related` carries `
   more than the user does is out of contract.
 - **Nothing is cached silently.** The kit stores provider results only through the capture writer (which applies the
   placement and label rules), and writes to the knowledge base only through a save the user approves.
-- **Say where the data goes.** The `egress` line in the golden entry is read by your security team before the entry is turned on.
+- **Say where the data goes.** The `egress` line in the golden entry names it.
 
 ## The answer procedure
 When a question might be answered from work documents, Claude searches in this order: `kb_search` for exact names and IDs,

@@ -11,5 +11,5 @@ Do exactly the transform asked, on exactly the input named. Do not write or modi
 
 - Every fact carries its locator (file and line, URL or message id) and, when short, the quoted text. Not in the input: answer NOT FOUND and never fill a gap from memory. List what you did not read.
 - A step that needs judgment beyond the input (is it true, which is best, what does the rule say) comes back as a question, not a guess.
-- A safeguard stops you: say so in one line and stop; the caller retries one row up.
+- A safety refusal stops you: say so in one line and stop; the caller retries one row up.
 - Follow the caller's output format and word limit exactly.

@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[1]
+REQUIRE = os.environ.get("WB_REQUIRE_ALL") == "1"   # house convention: nothing here skips
 MARKER = "post-update-verify.json"
 
 
@@ -25,7 +26,7 @@ class PostUpdate(unittest.TestCase):
         self.state = self.tmp / "claude" / "workbench" / "state"
         self.state.mkdir(parents=True)
         self.env = {**os.environ, "CLAUDE_CONFIG_DIR": str(self.tmp / "claude"), "WORKBENCH_KB_ROOT": str(self.kb),
-                    "GUARDS_LOG_DIR": str(self.tmp / "logs"), "WORKBENCH_POLICY_DIRS": str(self.managed), "PYTHONIOENCODING": "utf-8"}
+                    "WORKBENCH_POLICY_DIRS": str(self.managed), "PYTHONIOENCODING": "utf-8"}
 
     def context(self, source="startup"):
         r = subprocess.run([sys.executable, "-S", str(SCRIPTS / "session_start.py")], capture_output=True, text=True, encoding="utf-8",
@@ -51,7 +52,7 @@ class PostUpdate(unittest.TestCase):
         self.assertIn("on the user's next message", line)
         self.assertIn((Path(sys.executable).as_posix() + " "), line.replace("\\", "/"))
         self.assertIn("kit/bootstrap/kit_update.py verify", line)
-        self.assertIn("live guard test", line)
+        self.assertTrue(line.endswith("show its table."), "no live test is asked for after the table")
         self.assertIn("timeout 600000", line)
         self.assertIn("on exit 6 run it again", line)
         self.assertEqual(ctx.count("kit_update.py"), 1, "named once")

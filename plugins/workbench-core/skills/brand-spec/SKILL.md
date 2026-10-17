@@ -16,8 +16,7 @@ design tokens or CSS variables (`ui-build` step 1 lists where they hide), a deck
 product's current screens. Write down what you found and treat it as answered.
 - A spec or a complete token set already exists: say so, show where, and ask whether the user
   wants to update it. Do not start a new interview over it.
-- Material marked confidential or belonging to a client stays where it is: read it, do not copy it
-  into the spec beyond what the spec needs (colours, type names, rules).
+- Copy into the spec only what it needs (colours, type names, rules).
 
 ## 1. Ask
 - **One question per message.** Use the interactive question tool when you have it, plain text when

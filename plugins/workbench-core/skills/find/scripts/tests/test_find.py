@@ -2,7 +2,10 @@
     WB_REQUIRE_ALL=1 python -m unittest discover -s plugins/workbench-core/skills/find/scripts/tests -v
 WB_REQUIRE_ALL=1 turns a missing dependency into a failure instead of a skip; WB_LIVE=1 adds the network tests."""
 import builtins
+import contextlib
+import hashlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -13,6 +16,7 @@ import sys
 import tempfile
 import threading
 import time
+import types
 import unittest
 import zipfile
 import zlib
@@ -782,7 +786,7 @@ class Resolution(Env):
         rc, out, err = self.cli("convert", docx, "--json", python=base)
         self.assertEqual(rc, 0, err)
         self.assertIn("Hello from a word document", json.loads(out)["markdown"], out)
-        rc, out, err = self.cli("convert", docx, "--json", python=base, env={"WB_KNOWLEDGE_REEXEC": "1"})   # the loop guard
+        rc, out, err = self.cli("convert", docx, "--json", python=base, env={"WB_KNOWLEDGE_REEXEC": "1"})   # the re-exec loop stop
         self.assertIn("markitdown is not installed", json.loads(out)["error"])
 
 
@@ -913,6 +917,331 @@ class Offline(Env):
         res = self.cli_json("embed", "--json", env={"HF_HUB_OFFLINE": "1"})
         self.assertEqual((res["embedded"], res["model"]), (0, None))
         self.assertIn("offline", res["mode_reason"])
+
+
+class Junctions(Env):
+    """A junction inside an indexed folder is never entered: its files belong to the folder it points at."""
+
+    def test_walk_skips_a_junction(self):
+        if os.name != "nt":
+            self.skipTest("junctions exist only on Windows")
+        self.w("sub/own.md", "# Own\n\nthe quillfeather rotation\n")
+        real = os.path.join(self.tmp, "elsewhere")
+        self.w("other.md", "# Other\n\nquillfeather again\n", root=real)
+        link = os.path.join(self.root, "sub", "mirror")
+        r = subprocess.run(["cmd", "/c", "mklink", "/J", link, real], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, "the junction must be created: " + r.stdout + r.stderr)
+        try:
+            self.assertTrue(os.path.isfile(os.path.join(link, "other.md")), "the junction really shows the file a second time")
+            self.assertEqual(sorted(rel for rel, _st in di.walk(self.root)), ["sub/own.md"])
+            self.index()
+            self.assertEqual(self.q("select rel from files order by rel"), [("sub/own.md",)])
+            root_link = os.path.join(self.tmp, "library-link")        # a root reached through a junction (a redirected folder) is still walked
+            r = subprocess.run(["cmd", "/c", "mklink", "/J", root_link, self.root], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            try:
+                self.assertEqual(sorted(rel for rel, _st in di.walk(root_link)), ["sub/own.md"])
+            finally:
+                os.rmdir(root_link)
+        finally:
+            os.rmdir(link)       # the junction itself, never its target
+
+    def test_only_a_mount_point_reparse_tag_counts_as_a_junction(self):
+        """Python 3.10 and 3.11 have no DirEntry.is_junction: the fallback reads the reparse tag, so a OneDrive placeholder
+        folder (a reparse point under another tag) is still walked."""
+        class Entry:   # no is_junction attribute, like a DirEntry before 3.12
+            def __init__(self, attrs, **more):
+                self.st = types.SimpleNamespace(st_file_attributes=attrs, **more)
+
+            def stat(self, follow_symlinks=True):
+                return self.st
+        self.assertTrue(di.is_junction(Entry(0x410, st_reparse_tag=di.MOUNT_POINT)))
+        self.assertFalse(di.is_junction(Entry(0x410, st_reparse_tag=0x9000601A)), "a cloud placeholder holds real files")
+        self.assertFalse(di.is_junction(Entry(0x10, st_reparse_tag=0)))
+        self.assertFalse(di.is_junction(types.SimpleNamespace(stat=lambda follow_symlinks=True: types.SimpleNamespace())), "no attributes (not Windows)")
+        self.assertTrue(di.is_junction(Entry(0x410)), "a reparse point with no tag to read is skipped, not followed")
+
+
+class Sideload(Env):
+    """`model import` / `model export`: the pinned model reaches a machine that cannot reach the hub. The pins (the model and its
+    four JSON files) are replaced by the hashes of stand-in files, so no real model is needed; the mismatch tests use the real pin."""
+    REV = "0123abcd"
+    FILES = {"model_optimized.onnx": b"stand-in for the onnx model " * 200, "config.json": b"{}", "tokenizer.json": b"{\"t\": 1}",
+             "tokenizer_config.json": b"{\"c\": 2}", "special_tokens_map.json": b"{\"s\": 3}"}
+
+    def setUp(self):
+        super().setUp()
+        self.pkg = os.path.join(self.tmp, "pkg")
+        self.model_dir = self.package(self.pkg)
+        sha = lambda n: hashlib.sha256(self.FILES[n]).hexdigest()   # noqa: E731
+        for pin in (mock.patch.object(di, "MODEL_SHA256", sha("model_optimized.onnx")),
+                    mock.patch.object(di, "MODEL_SIDECARS", {n: sha(n) for n in self.FILES if n.endswith(".json")})):
+            pin.start()
+            self.addCleanup(pin.stop)
+
+    def package(self, where, drop=(), extra=None, rev=None):
+        top = os.path.join(where, di.MODEL_CACHE_DIR)
+        rev = rev or self.REV
+        for n, data in {**self.FILES, **(extra or {})}.items():
+            if n not in drop:
+                os.makedirs(os.path.join(top, "snapshots", rev), exist_ok=True)
+                with open(os.path.join(top, "snapshots", rev, n), "wb") as f:
+                    f.write(data)
+        os.makedirs(os.path.join(top, "refs"), exist_ok=True)
+        with open(os.path.join(top, "refs", "main"), "w") as f:
+            f.write(rev)
+        os.makedirs(os.path.join(top, "blobs"), exist_ok=True)
+        with open(os.path.join(top, "blobs", "ab12"), "wb") as f:
+            f.write(b"the hub's duplicate copy")
+        return top
+
+    def zip_of(self, name, entries):
+        out = os.path.join(self.tmp, name)
+        with zipfile.ZipFile(out, "w") as zf:
+            for arc, data in entries.items():
+                zf.writestr(arc, data)
+        return out
+
+    def run_main(self, *args):
+        """(exit code, stdout, stderr) of main() in this process."""
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = di.main(["--db", self.db, *map(str, args)])
+        return rc, out.getvalue(), err.getvalue()
+
+    def cached(self):
+        return os.path.join(di.models_dir(), di.MODEL_CACHE_DIR)
+
+    def test_import_from_a_folder_puts_the_model_where_the_search_finds_it(self):
+        self.assertIsNone(di.find_model_file())
+        with mock.patch("socket.socket", side_effect=AssertionError("no network")):
+            rc, out, err = self.run_main("model", "import", self.pkg, "--json")
+        self.assertEqual(rc, 0, err)
+        res = json.loads(out)
+        self.assertEqual((res["dir"], res["files"]), (self.cached(), 6))                  # five snapshot files and refs/main
+        found = di.find_model_file()
+        self.assertEqual(found, os.path.join(self.cached(), "snapshots", self.REV, di.MODEL_FILE))
+        self.assertEqual(di.verified_model_file(), found, "the pinned hash matches the imported file")
+        with open(os.path.join(self.cached(), "refs", "main")) as f:
+            self.assertEqual(f.read(), self.REV, "the hub's offline lookup resolves the revision through refs/main")
+        self.assertFalse(os.path.exists(os.path.join(self.cached(), "blobs")), "the hub's duplicate copy is not needed")
+        self.assertEqual([n for n in os.listdir(di.models_dir()) if n.startswith(".")], [], "no staging folder left behind")
+        rc, out, err = self.run_main("model", "import", self.pkg)
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(out.strip().splitlines()), 1)
+        self.assertIn("doc_index.py embed", out)
+
+    def test_import_from_a_zip_and_from_a_folder_that_holds_the_cache_folder(self):
+        entries = {f"{di.MODEL_CACHE_DIR}/snapshots/{self.REV}/{n}": d for n, d in self.FILES.items()}
+        entries[f"{di.MODEL_CACHE_DIR}/blobs/ab12"] = b"x"
+        entries["readme.txt"] = b"not part of the model"
+        for name, wrap in (("plain.zip", ""), ("wrapped.zip", "models/")):
+            shutil.rmtree(di.models_dir(), ignore_errors=True)
+            z = self.zip_of(name, {wrap + k: v for k, v in entries.items()})
+            rc, out, err = self.run_main("model", "import", z)
+            self.assertEqual(rc, 0, f"{name}: {err}")
+            self.assertEqual(sorted(os.listdir(os.path.join(self.cached(), "snapshots", self.REV))), sorted(self.FILES), name)
+            self.assertEqual(os.listdir(self.cached()).count("blobs"), 0, name)
+            self.assertFalse(os.path.exists(os.path.join(di.models_dir(), "readme.txt")))
+        shutil.rmtree(di.models_dir(), ignore_errors=True)
+        shutil.copytree(self.pkg, os.path.join(self.tmp, "wrapper", "models"))                 # the folder one level up works too
+        self.assertEqual(self.run_main("model", "import", os.path.join(self.tmp, "wrapper"))[0], 0)
+        self.assertTrue(di.find_model_file())
+
+    def test_a_model_file_that_does_not_match_the_pin_is_refused_before_anything_is_copied(self):
+        with mock.patch.object(di, "MODEL_SHA256", "0" * 64):
+            rc, out, err = self.run_main("model", "import", self.pkg)
+        self.assertEqual((rc, out), (1, ""))
+        self.assertEqual(len(err.strip().splitlines()), 1, err)
+        self.assertIn("does not match the pinned SHA-256", err)
+        self.assertFalse(os.path.exists(di.models_dir()), "nothing was created, not even the staging folder")
+        rc, out, err = self.cli("model", "import", self.pkg)                                    # the real pin, from the command line
+        self.assertEqual((rc, out), (1, ""))
+        self.assertEqual(len(err.strip().splitlines()), 1, err)
+        self.assertFalse(os.path.exists(di.models_dir()))
+
+    def test_missing_files_and_wrong_paths_are_one_clear_line(self):
+        cases = {"no model file": self.package(os.path.join(self.tmp, "p1"), drop=("model_optimized.onnx",)),
+                 "no tokenizer": self.package(os.path.join(self.tmp, "p2"), drop=("tokenizer.json",)),
+                 "no config": self.package(os.path.join(self.tmp, "p3"), drop=("config.json",)),
+                 "no tokenizer config": self.package(os.path.join(self.tmp, "p4"), drop=("tokenizer_config.json",)),
+                 "no special tokens": self.package(os.path.join(self.tmp, "p5"), drop=("special_tokens_map.json",))}
+        want = {"no model file": "is missing from", "no tokenizer": "tokenizer.json missing beside", "no config": "config.json missing beside",
+                "no tokenizer config": "tokenizer_config.json missing beside", "no special tokens": "special_tokens_map.json missing beside"}
+        for label, top in cases.items():
+            rc, out, err = self.run_main("model", "import", os.path.dirname(top))
+            self.assertEqual((rc, out), (1, ""), label)
+            self.assertEqual(len(err.strip().splitlines()), 1, err)
+            self.assertIn(want[label], err, label)
+        empty = os.path.join(self.tmp, "empty")
+        os.makedirs(empty)
+        text = os.path.join(self.tmp, "notes.txt")
+        with open(text, "w") as f:
+            f.write("x")
+        for bad in (empty, text, os.path.join(self.tmp, "absent.zip")):
+            rc, out, err = self.run_main("model", "import", bad)
+            self.assertEqual((rc, len(err.strip().splitlines())), (1, 1), bad)
+        self.assertEqual(self.run_main("model", "bogus", self.pkg)[0], 2)
+        self.assertFalse(os.path.exists(di.models_dir()))
+
+    def test_a_zip_entry_that_leaves_its_folder_is_refused(self):
+        base = {f"{di.MODEL_CACHE_DIR}/snapshots/{self.REV}/{n}": d for n, d in self.FILES.items()}
+        for evil in (f"{di.MODEL_CACHE_DIR}/snapshots/{self.REV}/../../../../escaped.txt", "/abs/escaped.txt", "C:/escaped.txt"):
+            z = self.zip_of("evil.zip", {**base, evil: b"x"})
+            rc, out, err = self.run_main("model", "import", z)
+            self.assertEqual((rc, len(err.strip().splitlines())), (1, 1), evil)
+            self.assertIn("unsafe path", err)
+        self.assertFalse(os.path.exists(di.models_dir()))
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "escaped.txt")))
+
+    def snapshot(self):
+        """{relative path: bytes} of everything under the cached model folder, to prove a failed import changed nothing."""
+        out = {}
+        for d, _dirs, names in os.walk(di.models_dir()):
+            for n in names:
+                full = os.path.join(d, n)
+                with open(full, "rb") as f:
+                    out[os.path.relpath(full, di.models_dir())] = f.read()
+        return out
+
+    def test_a_second_import_replaces_the_cache_folder_whole(self):
+        self.assertEqual(self.run_main("model", "import", self.pkg)[0], 0)
+        stale = os.path.join(self.cached(), "snapshots", self.REV, "stale.txt")
+        with open(stale, "w") as f:
+            f.write("left over from the first import")
+        other = self.package(os.path.join(self.tmp, "second"), rev="fedcba98")
+        self.assertEqual(self.run_main("model", "import", os.path.dirname(other))[0], 0)
+        self.assertEqual(os.listdir(os.path.join(self.cached(), "snapshots")), ["fedcba98"], "the old revision is gone: replaced, not merged")
+        with open(os.path.join(self.cached(), "refs", "main")) as f:
+            self.assertEqual(f.read(), "fedcba98")
+        self.assertEqual(self.run_main("model", "import", self.pkg)[0], 0)
+        self.assertFalse(os.path.exists(stale))
+        junk = self.package(os.path.join(self.tmp, "junk"), extra={"notes.txt": b"x", "extra.json": b"not json"})
+        self.assertEqual(self.run_main("model", "import", os.path.dirname(junk))[0], 0)
+        self.assertEqual(sorted(os.listdir(os.path.join(self.cached(), "snapshots", self.REV))), sorted(self.FILES),
+                         "only the pinned files are taken, whatever else the package holds")
+
+    def test_a_refused_import_leaves_the_working_model_byte_identical(self):
+        self.assertEqual(self.run_main("model", "import", self.pkg)[0], 0)
+        before = self.snapshot()
+        bad_model = self.package(os.path.join(self.tmp, "bad1"), extra={"model_optimized.onnx": b"tampered"})
+        bad_tokenizer = self.package(os.path.join(self.tmp, "bad2"), extra={"tokenizer.json": b"{\"t\": 2}"})     # valid JSON, not the pinned file
+        broken_json = self.package(os.path.join(self.tmp, "bad3"), extra={"config.json": b"{ not json"})
+        for top, name in ((bad_model, di.MODEL_FILE), (bad_tokenizer, "tokenizer.json"), (broken_json, "config.json")):
+            rc, out, err = self.run_main("model", "import", os.path.dirname(top))
+            self.assertEqual((rc, len(err.strip().splitlines())), (1, 1), name)
+            self.assertIn("does not match", err, name)
+            self.assertEqual(self.snapshot(), before, f"a refused {name} must not touch the model that works")
+        # the file changes between the check and the copy: caught on the copy, before the old folder is moved
+        pre_check = [di.MODEL_SHA256, *di.MODEL_SIDECARS.values()]          # what the check "saw": every file as pinned
+        with mock.patch.object(di, "_sha_of", side_effect=pre_check):
+            rc, out, err = self.run_main("model", "import", os.path.dirname(bad_tokenizer))
+        self.assertEqual((rc, len(err.strip().splitlines())), (1, 1))
+        self.assertIn("changed while it was being copied", err)
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(di.verified_model_file(), di.find_model_file())
+
+    def test_a_symbolic_link_in_a_zip_is_refused_and_the_working_model_stays(self):
+        self.assertEqual(self.run_main("model", "import", self.pkg)[0], 0)
+        before = self.snapshot()
+        base = f"{di.MODEL_CACHE_DIR}/snapshots/{self.REV}/"
+        out = os.path.join(self.tmp, "link.zip")
+        with zipfile.ZipFile(out, "w") as zf:
+            for n, data in self.FILES.items():
+                if n == "tokenizer.json":
+                    info = zipfile.ZipInfo(base + n)
+                    info.external_attr = (0o120777 << 16)          # a symbolic link entry: its content is the target path
+                    zf.writestr(info, "../../elsewhere/tokenizer.json")
+                else:
+                    zf.writestr(base + n, data)
+        rc, o, err = self.run_main("model", "import", out)
+        self.assertEqual((rc, o, len(err.strip().splitlines())), (1, "", 1), err)
+        self.assertIn("symbolic link", err)
+        self.assertEqual(self.snapshot(), before, "the working model is untouched")
+
+    def test_a_damaged_zip_is_one_clear_line(self):
+        self.assertEqual(self.run_main("model", "import", self.pkg)[0], 0)
+        before = self.snapshot()
+        base = f"{di.MODEL_CACHE_DIR}/snapshots/{self.REV}/"
+        for method in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+            out = os.path.join(self.tmp, f"damaged{method}.zip")
+            with zipfile.ZipFile(out, "w", method) as zf:
+                for n, data in self.FILES.items():
+                    zf.writestr(base + n, data)
+                head = zf.getinfo(base + "model_optimized.onnx")
+            raw = bytearray(open(out, "rb").read())
+            start = head.header_offset + 30 + len(head.filename.encode()) + 4        # inside the member's data
+            raw[start:start + 24] = b"\xff" * 24
+            with open(out, "wb") as f:
+                f.write(raw)
+            rc, o, err = self.run_main("model", "import", out)
+            self.assertEqual((rc, o, len(err.strip().splitlines())), (1, "", 1), f"method {method}: {err}")
+            self.assertIn("is damaged", err)
+            self.assertEqual(self.snapshot(), before)
+        with mock.patch.object(di, "_sha_of", side_effect=zlib.error("incomplete or truncated stream")):
+            rc, o, err = self.run_main("model", "import", self.pkg)
+        self.assertEqual((rc, len(err.strip().splitlines())), (1, 1), "a zlib error is mapped too")
+        self.assertIn("is damaged", err)
+
+    def test_export_packs_the_verified_model_and_import_takes_it_back(self):
+        rc, out, err = self.run_main("model", "export", os.path.join(self.tmp, "none.zip"))
+        self.assertEqual((rc, len(err.strip().splitlines())), (1, 1), "nothing cached yet")
+        self.assertIn("no cached embedding model", err)
+        self.assertEqual(self.run_main("model", "import", self.pkg)[0], 0)
+        out_zip = os.path.join(self.tmp, "out", "model.zip")
+        rc, out, err = self.run_main("model", "export", out_zip, "--json")
+        self.assertEqual(rc, 0, err)
+        with zipfile.ZipFile(out_zip) as zf:
+            names = sorted(zf.namelist())
+        self.assertEqual(names, sorted([f"{di.MODEL_CACHE_DIR}/refs/main", *(f"{di.MODEL_CACHE_DIR}/snapshots/{self.REV}/{n}" for n in self.FILES)]))
+        self.assertFalse(os.path.exists(out_zip + ".tmp"))
+        before = {n: open(os.path.join(self.cached(), "snapshots", self.REV, n), "rb").read() for n in self.FILES}
+        shutil.rmtree(di.models_dir())
+        self.assertEqual(self.run_main("model", "import", out_zip)[0], 0)
+        self.assertEqual({n: open(os.path.join(self.cached(), "snapshots", self.REV, n), "rb").read() for n in self.FILES}, before)
+        self.assertEqual(di.verified_model_file(), di.find_model_file())
+        bad = os.path.join(self.cached(), "snapshots", self.REV, di.MODEL_FILE)           # a cache that no longer matches the pin
+        with open(bad, "wb") as f:
+            f.write(b"corrupt")
+        rc, out, err = self.run_main("model", "export", os.path.join(self.tmp, "second.zip"))
+        self.assertEqual((rc, len(err.strip().splitlines())), (1, 1))
+        self.assertIn("does not match the pinned SHA-256", err)
+        self.assertTrue(os.path.exists(bad), "export reports a bad cache, it does not delete it")
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "second.zip")))
+        self.assertEqual(self.run_main("model", "export", self.tmp)[0], 1, "a folder is not a zip name")
+
+    def test_status_says_why_search_is_keyword_only_and_names_the_import(self):
+        self.w("a.md", "# A\n\nrollout plan\n")
+        self.assertEqual(self.cli("index", self.root)[0], 0)
+        st = self.cli_json("status", "--json")
+        self.assertEqual(st["mode"], "keyword")
+        self.assertIn("offline (HF_HUB_OFFLINE is set)", st["keyword_reason"])
+        self.assertTrue(st["model_import"].startswith("doc_index.py model import"))
+        st = self.cli_json("status", "--json", env={"HF_HUB_OFFLINE": "0"})
+        self.assertRegex(st["keyword_reason"], r"the embedding model is not downloaded")
+        rc, out, err = self.cli("status", env={"HF_HUB_OFFLINE": "0"})
+        self.assertEqual(rc, 0, err)
+        self.assertIn("search is keyword-only: ", out)
+        self.assertIn("doc_index.py model import", out)
+        self.assertIn("doc_index.py model export", out)
+        con = self.con()
+        con.execute("insert or replace into meta values('model_fail', ?)",
+                    (json.dumps({"at": di.now_iso(), "host": di.hub_host(), "error": "HfHubHTTPError, HTTP 403"}),))
+        con.commit()
+        with mock.patch.dict(os.environ, {"HF_HUB_OFFLINE": "0"}):
+            self.assertIn("download from huggingface.co failed: HfHubHTTPError, HTTP 403", di.status(con, self.db)["keyword_reason"])
+            have = lambda missing: (lambda m: None if m in missing else object())   # noqa: E731
+            with mock.patch.object(di.importlib.util, "find_spec", have(("fastembed",))):
+                self.assertIn("fastembed not installed in this Python", di.keyword_reason(con, 3, "model.onnx"))
+                self.assertIn("fastembed not installed", di.keyword_reason(con, 0, None))
+            with mock.patch.object(di.importlib.util, "find_spec", have(())):
+                self.assertIsNone(di.keyword_reason(con, 3, "model.onnx"), "package, model and vectors: hybrid")
+                self.assertEqual(di.keyword_reason(con, 0, "model.onnx"), "no vectors yet: run `embed` (or `refresh`)")
+        self.assertEqual(self.run_main("model", "import", self.pkg)[0], 0)
+        st = di.status(con, self.db)
+        self.assertIsNone(st["model_import"], "the model is in place: no import to suggest")
+        self.assertEqual(st["model"], di.MODEL)
+        con.close()
 
 
 class Download(Env):

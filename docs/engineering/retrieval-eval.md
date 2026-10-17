@@ -23,7 +23,9 @@ ships does and does not prove.
   name `bug-cards` finds `_shared/bug-cards.md`). A name two notes share stays unresolved; `kb_health.py` reports it as a
   dead link.
 - **No FTS5.** On a Python built without FTS5 the same two rankings run as substring matches ordered by how many query
-  words match. The JSON says `"mode": "keyword fallback"`.
+  words match. The JSON says `"ranking": "keyword fallback"`.
+- **Index state.** The JSON key `mode` says how the search ran: `index`, `stale-index`, or `grep` when the index could
+  not be used (one WARNING line is printed and the search scans the notes directly).
 
 A miss is not proof the note is absent. This is keyword search with stemming: retry once with the note's own words (the
 tool, the error string, the name) before concluding there is nothing.
@@ -82,6 +84,21 @@ What it proves and what it does not:
 - The latency figures come from a synthetic knowledge base of two thousand notes. The tests require a p95 under 300 ms
   for the search itself and a median under 300 ms for the whole command, Python start-up included. Your disk and
   antivirus will move both.
+
+## Measuring honestly
+The shipped set catches regressions. To decide whether a change to search, chunking, embeddings or a prompt
+actually helped, measure it the way the digest `_shared/digests/retrieval-eval-method.md` in your knowledge base
+describes. In short:
+- **Pre-register** the question source, the split, the metrics, the gates and the smallest difference the sample can
+  resolve; commit it before any result and never edit it afterwards.
+- **Use real questions** mined from what people typed, split into a dev half and a confirm half, plus near-miss
+  unanswerables (the subject exists, the asked-for detail does not).
+- **Label blind:** labellers find the answer with grep and reading, never with the search being tested, and a second
+  labeller audits a random sample.
+- **Plant controls for any model judge** (answers with known verdicts) and conclude nothing when it misses them.
+- **Measure the noise floor** by re-reading the same questions with the same code; a difference inside it is not a
+  result. Report rates with Wilson intervals and compare before and after on the same questions.
+- **Count negative flips** (right before, wrong after) and cap them, and require a change to hold on more than one set.
 
 ## Health checks that use the same machinery
 `kb_health.py` adds three checks:

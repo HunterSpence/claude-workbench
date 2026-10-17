@@ -8,8 +8,7 @@ Markdown copies for the knowledge layer. It is separate from `workbench-core` so
 | `capture` | Intranet pages through a dedicated signed-in Edge profile, and listed files from your OneDrive sync folder. Paced, scoped, read-only. |
 | `ingest` | Meeting transcripts and mail, experimental. |
 
-Read `skills/capture/references/pre-clearance.md` and tell your security team before the first full run. The
-guardrails are in `skills/capture/references/guardrails.md`; the sources and their settings are in
+The limits are in `skills/capture/references/limits.md`; the sources and their settings are in
 `skills/capture/references/sources.md`.
 
 The runtime is Node (20 or newer) with one dependency, `playwright-core`, installed by the setup skill into

@@ -10,12 +10,8 @@ Output: one file, plus a paste prompt. Every rule applies to every phase you wri
 does not apply keeps its header and says "None for this mission"; never drop one silently.
 
 ## Step 0: where the file goes (decide before writing)
-- Work in a repo: `<repo>/handoffs/handoff-<slug>-<YYYY-MM-DD>.md` (create the folder if needed;
-  ask before committing it if the repo is shared).
-- No repo, or the mission touches confidential material: a local folder the user names, outside
-  any synced or pushed directory. Say "local only, not committed".
-- Work for a client or a tenant: the file goes in that client's or tenant's own folder, one that has no remote and is never
-  pushed or synced, never in a shared repository. The paste prompt names that folder, so a fresh session opens in it.
+- Work in a repo: `<repo>/handoffs/handoff-<slug>-<YYYY-MM-DD>.md` (create the folder if needed).
+- No repo: a local folder the user names. Say "local only, not committed".
 - Never write a credential value, token or personal data into the file. Refer to secrets by name
   ("the API key in the team vault"). The scan in the final steps is mandatory, not optional.
 
@@ -93,6 +89,6 @@ STATE AT HANDOFF + START HERE (at most 2 KB), same Step 0 routing, same final st
    - Committed: show `git log -1 --format=%h -- <file>` before saying "committed".
    - Pushed: show `git log origin/<branch> -1 -- <file>` and see a commit before saying "pushed". A local commit proves
      nothing about the remote.
-   - Local only, including every client or tenant folder: say "local only, not committed".
+   - Local only: say "local only, not committed".
 6. Transfer ownership: the authoring session stops editing the mission. Report the path, where it
    lives (committed, pushed or local), the phase count, and the PASTE PROMPT block.

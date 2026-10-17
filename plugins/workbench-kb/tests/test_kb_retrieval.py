@@ -4,8 +4,10 @@ eval checks, the shipped template and its canned set. Run:
     python -m unittest discover -s plugins/workbench-kb/tests
 Each test drives the scripts as subprocesses, the way the save skill does, on a throwaway copy of kb-template or on a
 tiny KB built here. Every name and word below is invented."""
+import contextlib
 import functools
 import importlib.util
+import io
 import json
 import os
 import random
@@ -179,9 +181,12 @@ class Ranking(Base):
 
     def test_json_says_which_ranking_mode_ran(self):
         self.note("ops/a.md", "---\ntitle: a\n---\n# A\nsome text\n")
-        self.assertEqual(self.search("text")["mode"], "fts5")
+        res = self.search("text")
+        self.assertEqual((res["mode"], res["ranking"]), ("index", "fts5"))
         shutil.rmtree(self.tmp / "claude")
-        self.assertEqual(self.search("text", env=NO_FTS5)["mode"], "keyword fallback")
+        res = self.search("text", env=NO_FTS5)
+        self.assertEqual((res["mode"], res["ranking"]), ("index", "keyword fallback"))
+        self.assertNotIn("warning", res)
 
     def test_domain_filter_applies_to_both_arms(self):
         self.note("ops/zinnia-ledger.md", "---\ntitle: x\n---\n# X\nbody\n")
@@ -195,11 +200,12 @@ class Ranking(Base):
         self.assertTrue(self.search("text")["rebuilt"])
         self.assertFalse(self.search("text")["rebuilt"])
         db = next((self.tmp / "claude" / "workbench" / "cache").glob("kb-*.db"))
-        con = sqlite3.connect(db)
-        con.execute("update meta set v = '1' where k = 'schema'")
-        con.commit()
-        con.close()
-        self.assertIn("older", self.search("text")["rebuilt"])
+        for old in ("1", "2"):      # 2 is the schema the previous kit built: the resolver changed since, so it is rebuilt too
+            con = sqlite3.connect(db)
+            con.execute("update meta set v = ? where k = 'schema'", (old,))
+            con.commit()
+            con.close()
+            self.assertIn("older", self.search("text")["rebuilt"], old)
         rc, out, err = self.run_py("kb_search.py", "text", "--no-rebuild", "--json")   # fine again after the rebuild
         self.assertEqual(rc, 0, err)
 
@@ -228,6 +234,287 @@ class Links(Base):
         rc, out, _ = self.run_py("kb_health.py", "--json")
         dead = next(r for r in json.loads(out)["results"] if r["check"] == "dead-links")
         self.assertEqual(dead["status"], "PASS", dead["detail"])
+
+
+    def test_the_resolver_ignores_case_turns_spaces_into_hyphens_and_matches_titles(self):
+        ki = load("kb_index", self.env)
+        existing = {"ops/HOT.md", "ops/my-note.md", "ops/a.md", "infra/x.md", "infra/y.md", "_shared/Mixed-Case.md",
+                    "t1/n1.md", "t2/n2.md", "d1/dup.md", "d2/DUP.md", "cc/N.md", "CC/n.md", "ops/b.md", "ops/B.md", "docs/00-Index.md"}
+        titles = {"t1/n1.md": "Release Checklist", "t2/n2.md": "Release  checklist", "infra/y.md": "Rollback Plan", "ops/a.md": None}
+        names = ki.stems_of(existing, titles)
+        r = lambda t, src="ops/a.md": ki.resolve(t, src, existing, names)   # noqa: E731
+        self.assertEqual(r("Ops/HOT"), "ops/HOT.md", "a folder-prefixed link ignores case")
+        self.assertEqual(r("ops/hot"), "ops/HOT.md")
+        self.assertEqual(r("OPS/HOT.md|alias#part"), "ops/HOT.md")
+        self.assertEqual(r("My Note"), "ops/my-note.md", "spaces become hyphens, beside the source")
+        self.assertEqual(r("My Note", "infra/x.md"), "ops/my-note.md", "...and anywhere in the KB when one note has that name")
+        self.assertEqual(r("ops/My Note"), "ops/my-note.md")
+        self.assertEqual(r("mixed case"), "_shared/Mixed-Case.md")
+        self.assertEqual(r("Docs"), "docs/00-Index.md", "a folder link finds its index whatever the case")
+        self.assertEqual(r("Rollback Plan"), "infra/y.md", "a unique front-matter title")
+        self.assertIsNone(r("Release Checklist"), "two notes share the title: stays dead")
+        self.assertIsNone(r("DUP"), "two notes share the name: stays dead")
+        self.assertEqual(r("d1/DUP"), "d1/dup.md", "a full path is still unique")
+        self.assertIsNone(r("Cc/n"), "two paths that differ only in case: stays dead")
+        self.assertEqual(r("ops/b"), "ops/b.md", "an exact spelling wins over the case-blind match")
+        self.assertEqual(r("ops/B"), "ops/B.md")
+        self.assertIsNone(r("Ops/Missing Note"))
+        self.assertIsNone(r("Rollout Plan"), "negative control: no note has that name or title")
+        self.assertIsNone(ki.resolve("Rollback Plan", "ops/a.md", existing), "without titles there is no title rule")
+
+    def test_template_stand_ins_and_commented_links_are_not_links(self):
+        ki = load("kb_index", self.env)
+        raw = "\n".join([
+            f"see {L}...{R} and {L}<name>{R} and {L}ops/...{R} and {L}<ops/note>|alias{R} and {L}real-one{R}",
+            f"`{L}x{R}` in code and {L}outside-code{R}",
+            f"<!-- {L}hidden{R} --> then {L}after-comment{R} <!-- {L}also-hidden{R}",
+            f"{L}still-hidden{R}",
+            f"--> {L}back-in{R}",
+            "```", f"{L}in-fence{R}", "```",
+            f"<!-- a {L}one-line{R} comment --> {L}last{R}"])
+        self.assertEqual([t for _n, t in ki.links_for(raw)], ["real-one", "outside-code", "after-comment", "back-in", "last"])
+        self.assertEqual([n for n, _t in ki.links_for(raw)], [1, 2, 3, 5, 9])
+
+    def test_a_comment_opener_inside_inline_code_hides_no_link(self):
+        ki = load("kb_index", self.env)
+        raw = f"write `<!--` to open a comment, see {L}after-code{R}\nand {L}next-line{R}\n<!-- {L}hidden{R} --> {L}visible{R}\n"
+        self.assertEqual([(n, t) for n, t in ki.links_for(raw)], [(1, "after-code"), (2, "next-line"), (3, "visible")])
+
+    def test_the_index_resolves_titles_and_keeps_stand_ins_out_of_the_dead_links(self):
+        self.note("ops/release.md", "---\ntitle: Release Checklist\n---\n# Heading Only Words\nsteps\n")
+        self.note("ops/b.md", f"---\ntitle: b\n---\n# B\nsee {L}Release Checklist{R} and {L}Ops/hot{R} and {L}...{R} {L}<x>{R}\n"
+                  f"<!-- {L}gone-for-good{R} -->\n")
+        rc, out, err = self.run_py("kb_search.py", "--related", "ops/b.md", "--json")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(sorted(r["path"] for r in json.loads(out)), ["ops/HOT.md", "ops/release.md"])
+        rc, out, _ = self.run_py("kb_health.py", "--json")
+        dead = next(r for r in json.loads(out)["results"] if r["check"] == "dead-links")
+        self.assertEqual(dead["status"], "PASS", dead["detail"])
+        self.note("ops/c.md", f"---\ntitle: c\n---\nsee {L}Heading Only Words{R} and {L}x{R}\n")    # a heading is not a title; x is a real miss
+        rc, out, _ = self.run_py("kb_health.py", "--json")
+        dead = next(r for r in json.loads(out)["results"] if r["check"] == "dead-links")
+        self.assertEqual(dead["status"], "WARN")
+        self.assertIn("Heading Only Words", dead["detail"])
+        self.assertIn(f"{L}x{R}", dead["detail"])
+
+
+class Degrade(Base):
+    """A search that cannot bring the index up to date still answers, exit 0, with one warning line and no traceback."""
+
+    def main_of(self, *argv, build=None):
+        """(exit code, stdout, stderr) of kb_search.main() run in this process; `build` replaces kb_index.build."""
+        ks = load("kb_search", self.env)
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.dict(os.environ, self.env), mock.patch.object(sys, "argv", ["kb_search.py", *map(str, argv)]), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), \
+                mock.patch.object(ks.kb_index, "build", build or ks.kb_index.build):
+            rc = ks.main()
+        return rc, out.getvalue(), err.getvalue()
+
+    @staticmethod
+    def fails(exc):
+        def build(*_a, **_k):
+            raise exc
+        return build
+
+    def db(self):
+        return next((self.tmp / "claude" / "workbench" / "cache").glob("kb-*.db"))
+
+    def test_a_failed_rebuild_answers_from_the_old_index_with_one_warning(self):
+        self.note("ops/a.md", "---\ntitle: a\n---\n# A\nthe alpha procedure\n")
+        self.search("alpha")                                                   # builds the index
+        self.note("ops/b.md", "---\ntitle: b\n---\n# B\nthe bravo procedure\n")   # ...which is now stale
+        rc, out, err = self.main_of("alpha", "--json", build=self.fails(PermissionError("held by a scanner")))
+        self.assertEqual(rc, 0, err)
+        res = json.loads(out)
+        warning = "WARNING: index rebuild failed (PermissionError: held by a scanner): results may be stale"
+        self.assertEqual((res["mode"], res["warning"], [h["path"] for h in res["hits"]]), ("stale-index", warning, ["ops/a.md"]))
+        self.assertEqual(err.strip().splitlines(), [warning], "beside --json the warning is one stderr line")
+        rc, out, err = self.main_of("bravo", "--json", build=self.fails(PermissionError("x")))
+        self.assertEqual(json.loads(out)["hits"], [], "the old index does not know the new note: that is what stale means")
+        rc, out, err = self.main_of("alpha", build=self.fails(OSError("disk full")))                # text mode: one WARNING line, then the hits
+        self.assertEqual([ln for ln in out.splitlines() if ln.startswith("WARNING")], ["WARNING: index rebuild failed (OSError: disk full): results may be stale"])
+        self.assertTrue(out.splitlines()[0].startswith("WARNING") and "ops/a.md" in out)
+        rc, out, err = self.main_of("alpha", "--json")                                              # control: the rebuild works, no warning
+        res = json.loads(out)
+        self.assertEqual((res["mode"], "warning" in res, bool(res["rebuilt"])), ("index", False, True))
+
+    def test_no_index_and_a_failing_build_falls_back_to_grep(self):
+        self.note("ops/one.md", "---\ntitle: one\n---\n# One\nalpha alpha alpha and beta together\n")
+        self.note("ops/two.md", "---\ntitle: two\n---\n# Two\nalpha with beta once\n")
+        self.note("data/three.md", "---\ntitle: three\n---\n# Three\nonly alpha here\n")
+        boom = self.fails(OSError("disk full"))
+        rc, out, err = self.main_of("ALPHA beta", "--json", build=boom)
+        self.assertEqual(rc, 0, err)
+        res = json.loads(out)
+        warning = "WARNING: index unavailable (OSError: disk full): grep fallback"
+        self.assertEqual((res["mode"], res["ranking"], res["warning"]), ("grep", "grep", warning))
+        self.assertEqual([(h["path"], h["score"]) for h in res["hits"]], [("ops/one.md", 4.0), ("ops/two.md", 2.0)],
+                         "every word first, by how often they occur; the note with one of the words is not a hit while one has both")
+        self.assertIn("alpha alpha alpha", res["hits"][0]["snippet"])
+        self.assertEqual(err.strip().splitlines(), [warning])
+        res = json.loads(self.main_of("alpha gamma", "--json", build=boom)[1])
+        self.assertEqual([h["path"] for h in res["hits"]], ["ops/one.md", "data/three.md", "ops/two.md"], "no note has both: any word, by count, ties by path")
+        res = json.loads(self.main_of("alpha", "--domain", "data", "--json", build=boom)[1])
+        self.assertEqual([h["path"] for h in res["hits"]], ["data/three.md"])
+        self.assertEqual(json.loads(self.main_of("zzzz", "--json", build=boom)[1])["hits"], [])
+        rc, out, err = self.main_of("alpha", build=boom)
+        self.assertEqual(out.splitlines()[0], warning)
+        self.assertEqual(len([ln for ln in out.splitlines() if ln.startswith("WARNING")]), 1)
+        self.assertFalse(list(self.tmp.rglob("kb-*.db*")), "no index file and no half-built copy")
+
+    def test_a_corrupt_index_that_cannot_be_rebuilt_is_not_a_traceback(self):
+        self.note("ops/a.md", "---\ntitle: a\n---\n# A\nthe alpha procedure\n")
+        self.search("alpha")
+        self.db().write_bytes(b"this is not a database" * 50)
+        rc, out, err = self.main_of("alpha", "--json", build=self.fails(PermissionError("locked")))
+        self.assertEqual(rc, 0, err)
+        res = json.loads(out)
+        self.assertEqual((res["mode"], [h["path"] for h in res["hits"]]), ("grep", ["ops/a.md"]))
+        self.assertRegex(res["warning"], r"^WARNING: index unavailable \(.*\): grep fallback$")
+        res = json.loads(self.main_of("alpha", "--json")[1])                                         # when the rebuild can run it replaces the file
+        self.assertEqual((res["mode"], "warning" in res), ("index", False))
+
+    def test_related_with_no_usable_index_says_so_and_exits_zero(self):
+        self.note("ops/a.md", f"---\ntitle: a\n---\n# A\nsee {L}ops/HOT{R}\n")
+        rc, out, err = self.main_of("--related", "ops/a.md", build=self.fails(OSError("disk full")))
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(out.splitlines()[0], "WARNING: index unavailable (OSError: disk full): grep fallback")
+        self.assertIn("no links", out)
+        self.run_py("kb_search.py", "--related", "ops/a.md", "--json")                                  # builds the index
+        self.note("ops/c.md", "---\ntitle: c\n---\n# C\nnew\n")
+        rc, out, err = self.main_of("--related", "ops/a.md", "--json", build=self.fails(OSError("disk full")))
+        self.assertEqual([r["path"] for r in json.loads(out)], ["ops/HOT.md"], "the old index still has the link table")
+        self.assertIn("index rebuild failed", err)
+
+    def test_a_failed_replace_leaves_no_temporary_index(self):
+        self.note("ops/a.md", "---\ntitle: a\n---\n# A\nalpha\n")
+        ki = load("kb_index", self.env)
+        with mock.patch.dict(os.environ, self.env), mock.patch.object(ki.os, "replace", side_effect=PermissionError("held")):
+            with self.assertRaises(PermissionError):
+                ki.build()
+        self.assertEqual(list((self.tmp / "claude" / "workbench" / "cache").glob("*")), [])
+
+
+class AnswerLine(Base):
+    PAD = "the deploy step %d runs nightly and the deploy log is kept for a while after it"
+
+    def snip(self, q, body, env=None):
+        self.note("ops/guide.md", "---\ntitle: guide\n---\n# Guide\n" + body)
+        return self.search(q, env=env)["hits"][0]["snippet"]
+
+    @each_mode
+    def test_the_snippet_is_the_line_with_the_rare_word(self, env):
+        pad = "\n".join(self.PAD % i for i in range(5))
+        snip = self.snip("deploy quillfeather", f"## Steps\n{pad}\nrotate the quillfeather credentials after every deploy\n", env)
+        self.assertTrue(snip.startswith("rotate the quillfeather credentials"), snip)
+
+    def test_a_query_number_outweighs_a_line_with_more_common_words(self):
+        body = "\n\n".join(["the cache limit is documented here", "port 4096 is reserved", "the cache holds data", "the cache is warm",
+                           "the limit applies per host", "the limit is soft"]) + "\n"
+        ks = load("kb_search", self.env)
+        terms = ks.terms_of("cache limit 4096")
+        self.assertTrue(ks._snippet(body, terms).startswith("port 4096 is reserved"))
+        with mock.patch.object(ks, "NUM_BONUS", 0.0):
+            self.assertTrue(ks._snippet(body, terms).startswith("the cache limit is documented"), "without the bonus the line with more words wins")
+
+    def test_a_hard_wrapped_line_is_joined_and_front_matter_is_never_the_answer(self):
+        ks = load("kb_search", self.env)
+        pad = "\n".join(self.PAD % i for i in range(3))
+        body = f"{pad}\nThe audit export runs every Sunday and lands in the shared\nfolder named quokka-archive for the compliance team\n- a bullet\n"
+        snip = ks._snippet(body, ks.terms_of("audit quokka"))
+        self.assertTrue(snip.startswith("The audit export runs every Sunday and lands in the shared folder named quokka-archive"), snip)
+        self.assertNotIn("a bullet", snip, "a new bullet is not a continuation")
+        front = "---\ntitle: Quillfeather guide\ntags: quillfeather\n---\n# Guide\nRotate the quillfeather credentials monthly\n"
+        self.assertTrue(ks._snippet(front, ["quillfeather"]).startswith("Rotate the quillfeather"))
+
+    def test_no_line_holds_a_query_word_falls_back_to_the_window(self):
+        ks = load("kb_search", self.env)
+        body = "## Rollouts\nwe deploy the service on Friday\nand the team knows why\n"
+        self.assertEqual(ks._snippet(body, ["deployed"]), "## Rollouts we deploy the service on Friday and the team knows why", "a stem-only match: the window")
+        self.assertTrue(ks._snippet(body, ["deploy"]).startswith("we deploy the service on Friday"), "control: the word is there")
+        self.assertEqual(ks._snippet("only prose here", ["zebra"]), "only prose here")
+        self.assertEqual(ks._snippet("", ["zebra"]), "")
+
+
+class Retired(Base):
+    FACTS = {"facts": [{"id": "cache-host", "owner": "infra/cache", "canonical": "the cache runs on host alpha-9",
+                        "forbidden": ["host beta-3"]}]}
+
+    def setUp(self):
+        super().setUp()
+        self.note("infra/cache.md", "---\ntitle: cache\n---\n# Cache\n## Where\nthe cache runs on host alpha-9 for every region\n"
+                  "it used to run on host beta-3\n")
+        self.note("ops/runbook.md", "---\ntitle: runbook\n---\n# Runbook\nrestart the cache on host beta-3 first\n")
+        self.note("ops/old.md", "---\ntitle: old\n---\n# Old\nSUPERSEDED: the cache used host beta-3 until spring\n")
+        self.note("ops/other.md", "---\ntitle: other\n---\n# Other\nthe cache notes with nothing stale\n")
+
+    def facts(self, data=None):
+        self.note("_shared/facts.json", json.dumps(self.FACTS if data is None else data))
+
+    def paths(self, q, *args):
+        return [h["path"] for h in self.search(q, *args)["hits"]]
+
+    def test_a_stale_value_is_flagged_and_its_owner_pinned_above_it(self):
+        self.facts()
+        res = self.search("restart cache beta-3")
+        self.assertEqual([h["path"] for h in res["hits"]], ["infra/cache.md", "ops/runbook.md"], "the owner is not in the hits: it is inserted above")
+        owner, stale = res["hits"]
+        self.assertEqual(stale["retired"], {"fact": "cache-host", "owner": "infra/cache.md"})
+        self.assertNotIn("retired", owner)
+        self.assertEqual((owner["pinned_for"], owner["line"], owner["heading"]), ("cache-host", 6, "Where"))
+        self.assertIn("alpha-9", owner["snippet"])
+        rc, out, _ = self.run_py("kb_search.py", "restart cache beta-3")
+        self.assertRegex(out, r"ops/runbook\.md:\d+  \[Runbook\]  \[retired - live value in infra/cache\.md\] ")
+        self.assertRegex(out, r"infra/cache\.md:6  \[Where\]  \[live value of cache-host\] ")
+        self.assertEqual(len(self.search("restart cache beta-3", "--limit", "1")["hits"]), 1, "the list is still cut to --limit")
+
+    def test_negative_controls_nothing_is_flagged_that_should_not_be(self):
+        self.facts()
+        hits = self.search("used host beta-3")["hits"]
+        self.assertIn("ops/old.md", [h["path"] for h in hits])
+        self.assertTrue(all("retired" not in h for h in hits), "a line marked SUPERSEDED is the marked old value")
+        hits = self.search("cache host", "--all-chunks")["hits"]
+        owner = [h for h in hits if h["path"] == "infra/cache.md"]
+        self.assertTrue(owner and all("retired" not in h for h in owner), "the owner note may name the value that misleads")
+        res = self.search("cache host")["hits"]                          # the owner is already a hit: no second copy, no pin
+        self.assertEqual(len({h["path"] for h in res}), len(res))
+        self.assertTrue(all("pinned_for" not in h for h in res))
+        self.assertEqual([h["path"] for h in res if "retired" in h], ["ops/runbook.md"])
+        self.assertIn("infra/cache.md", [h["path"] for h in res])
+
+    def test_without_a_usable_registry_search_is_unchanged(self):
+        base = self.search("restart cache beta-3")["hits"]
+        self.assertEqual([h["path"] for h in base], ["ops/runbook.md"])
+        for data in ({"facts": []}, {"facts": [{"id": "x", "owner": "infra/cache", "canonical": "c"}]}):   # empty / no forbidden text
+            self.facts(data)
+            self.assertEqual(self.search("restart cache beta-3")["hits"], base)
+        self.note("_shared/facts.json", "{ not json")
+        rc, out, err = self.run_py("kb_search.py", "restart cache beta-3", "--json")
+        self.assertEqual((rc, json.loads(out)["hits"]), (0, base))
+        self.facts()
+        self.assertEqual(self.paths("restart cache beta-3"), ["infra/cache.md", "ops/runbook.md"], "control: the registry is what changes the list")
+
+    def test_a_registry_that_stays_locked_does_not_stop_the_search(self):
+        """savelock retries a held file for about a second, then raises OSError: search must answer without retired flags."""
+        self.facts()
+        sys.path.insert(0, str(SCRIPTS))
+        import kb_facts
+        ks = load("kb_search", self.env)
+        with mock.patch.dict(os.environ, self.env), mock.patch.object(kb_facts, "load", side_effect=PermissionError("held by a scanner")):
+            ks.ensure_index()
+            for hits in (ks.search("restart cache beta-3"), ks.grep_search("restart cache beta-3")):
+                self.assertEqual([h["path"] for h in hits], ["ops/runbook.md"])
+                self.assertTrue(all("retired" not in h and "pinned_for" not in h for h in hits))
+        rc, out, err = self.run_py("kb_search.py", "restart cache beta-3", "--json")                        # control: the registry is readable
+        self.assertEqual([h["path"] for h in json.loads(out)["hits"]], ["infra/cache.md", "ops/runbook.md"])
+
+    def test_the_grep_fallback_flags_a_stale_value_too(self):
+        self.facts()
+        ks = load("kb_search", self.env)
+        with mock.patch.dict(os.environ, self.env):
+            hits = ks.grep_search("restart cache beta-3")
+        self.assertEqual([(h["path"], "retired" in h) for h in hits], [("infra/cache.md", False), ("ops/runbook.md", True)])
 
 
 class Health(Base):

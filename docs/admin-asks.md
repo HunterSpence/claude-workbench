@@ -1,67 +1,25 @@
-# Admin asks: what to tell your security team and what to ask IT
+# Admin asks: what to ask IT
 
-Ready-to-send texts for the moments when the kit cannot proceed alone. They are drafts: **you** send them, the kit never
-does. Fill the `<...>` placeholders, delete what does not apply, and keep the answer you get; setup reads your managed
+Ready-to-send texts for the moments when the kit cannot proceed alone. Fill the `<...>` placeholders, delete what does not apply, and keep the answer you get; setup reads your managed
 settings again later and tells you what changed.
 
 Rules for every ask:
 - Ask for the smallest thing that unlocks the step, and name the exact setting, folder or host.
 - Offer the alternative that needs no change ("or we skip this feature").
-- Never ask for, and never accept, a workaround that disables a control. A denial is a decision; when one blocks a step the
-  kit stops and reports it, then continues with the work that is not blocked.
+- When a denial blocks a step the kit stops and reports it, then continues with the work that is not blocked.
 - The capability report prints the matching text beside every row that is NEEDS-IT or BLOCKED-BY-POLICY.
 
-## 1. Heads-up to your security team (send before the first run)
-
-> **Subject:** Heads-up: an open-source kit that sets up Claude Code on my managed laptop
->
-> Hi <security contact>,
->
-> Before I run it, I want you to know about a setup kit I plan to use with the Claude Code seat <org> provides to me. It
-> is open source (MIT licence), needs no administrator rights, never edits managed settings and never tries to elevate.
-> This is everything it reads, writes and schedules.
->
-> **Reads (read-only; nothing is changed):** the Windows version and edition, CPU, memory and disk type; whether the
-> machine is domain or cloud joined; proxy settings and whether HTTPS is re-signed; the policy keys that govern Claude
-> Code, the browser, WSL and the antivirus (read, never written); which developer tools are installed; and whether the
-> hosts it needs (the model API, the git host, package sources) answer. The results go to a report in my own profile.
->
-> **Writes (my user account only):** files under my Claude configuration folder (the kit copy, backups, state and logs);
-> an import line in my user instruction file and merged keys in my user settings (never a key a managed source sets);
-> user-level environment variables for certificate trust and text encoding; my user PATH, for the kit's own bin folder;
-> a one-shot "resume after restart" value under my user's RunOnce key, removed once it has run; and tools installed
-> through winget or the Microsoft Store, PyPI or npm in per-user scope where the vendor offers it.
->
-> **Scheduled task:** one per-user task (no elevation) that refreshes a local search index of documents I choose. It is
-> optional and off unless I enable it.
->
-> **Network:** downloads from the official sources only (winget and the Store, PyPI, npm, the vendors' own release
-> pages), paced to stay light on the shared link; model calls to the Claude endpoint <org> approved. Nothing else leaves
-> the machine. No telemetry is switched on by the kit.
->
-> **Data:** indexed documents and notes stay on this laptop or in <org>'s own work cloud. Files carrying a sensitivity
-> label are skipped by default. Anything copied into the work cloud falls under <org>'s retention, data-loss-prevention
-> and discovery policies. If I ever enable mail or meeting digests, the summaries run through my own approved Claude
-> login, and external participants' speech appears in meeting transcripts.
->
-> **Removal:** one command restores every file it changed and removes what it added; a second command purges the index.
->
-> If any item conflicts with a policy, tell me which and I will skip that part.
->
-> Thanks, <name>
-
-## 2. One ask per policy-change class
+## 1. One ask per policy-change class
 
 Setup saves a snapshot of which kinds of managed policy apply and compares it at every session start. When a class
-changes it names it ("policy changed: hooks locked"); this is the text for each. The kit never edits or works around a
-managed setting, so each ask is a request for a decision, with a no-change alternative.
+changes it names it ("policy changed: hooks locked"); this is the text for each, with a no-change alternative.
 
 ### Hooks locked (managed settings allow only managed hooks)
-> **Subject:** Request: allow the guard and session hooks of an open-source Claude Code plugin
+> **Subject:** Request: allow the session hooks of an open-source Claude Code plugin
 >
 > Hi <IT contact>, user and plugin hooks are currently blocked on my laptop (a managed-hooks-only setting such as
-> `allowManagedHooksOnly`). The plugin I would like to use ships a small set of Python hooks: a command guard that denies
-> or asks before risky shell commands, a session-start notice, a statusline and a credential check on the files I write.
+> `allowManagedHooksOnly`). The plugin I would like to use ships a small set of Python hooks: a session-start notice, a
+> statusline, a check that stops oversized file reads and a credential check on the files I write.
 > They run locally, read stdin, write only to my profile and make no network calls. I can send the scripts for review.
 > Could you either (a) allow this plugin's hooks, or (b) tell me that hooks stay blocked? If (b), I will run without them
 > and rely on permission prompts only. Thanks, <name>
@@ -93,17 +51,17 @@ managed setting, so each ask is a request for a decision, with a no-change alter
 ### Permissions locked (managed rules fix what may run without a prompt)
 > **Subject:** Question: can read-only commands run without a prompt?
 >
-> Hi <IT contact>, managed permission rules apply to my Claude Code sessions (including a block on the no-prompt mode). I
-> will keep every prompt for writes, publishing and anything outward. Would you allow a short list of read-only commands
+> Hi <IT contact>, managed permission rules apply to my Claude Code sessions (including a block on the no-prompt mode).
+> Would you allow a short list of read-only commands
 > to run without a prompt (listing files, `git status`, `git diff`, `git log`, reading logs)? If not, I will keep the
 > defaults and accept the prompts. Thanks, <name>
 
-## 3. Other common asks
+## 2. Other common asks
 
 ### The proxy re-signs HTTPS and a runtime rejects it
 > Hi <IT contact>, Node, Python, pip and git on my laptop fail TLS verification behind the proxy, while the browser works.
 > Could you send me the organisation's root certificate (public part only) and its recommended install location? I will
-> point each tool at it; I will not turn verification off. Thanks, <name>
+> point each tool at it. Thanks, <name>
 
 ### Browser automation for the capture plugin (only if you use it)
 > Hi <IT contact>, I would like to use a read-only capture tool that opens intranet pages in a dedicated Microsoft Edge
@@ -149,8 +107,7 @@ managed setting, so each ask is a request for a decision, with a no-change alter
 
 ### Antivirus exclusion for a build folder (only if builds are unusably slow)
 > Hi <IT contact>, builds in <folder> take <n> times longer with real-time scanning. Could you add a path exclusion for
-> that folder for my device, or suggest a faster approved location (a Dev Drive)? I will not change antivirus settings
-> myself. Thanks, <name>
+> that folder for my device, or suggest a faster location (a Dev Drive)? Thanks, <name>
 
 ### Usage limits on a Team or Enterprise seat
 > **Subject:** Question: my Claude seat tier and usage credits
@@ -160,7 +117,7 @@ managed setting, so each ask is a request for a decision, with a no-change alter
 > credits are enabled for our organisation, and (c) what spend limit applies to me or to my group? If credits stay off, I
 > will plan my work around the usage windows. Thanks, <name>
 
-## 4. Meeting transcripts and mail
+## 3. Meeting transcripts and mail
 
 Needed only if you choose the optional digests of meetings and mail. The setup probes each gate read-only and prints the
 matching ask. Send only the asks the report flags.
@@ -188,19 +145,10 @@ numbered asks below that apply to you:
 4. **Meeting policy:** is transcription allowed for me as organiser; may attendees download transcripts for meetings I
    attend; is there a copy restriction default I must respect? An administrator can also make transcripts view-only in
    the browser, in which case the fallback below is closed too.
-5. **Outlook:** is classic Outlook staying on this image and for how long; what is the object-model guard policy; may a
+5. **Outlook:** is classic Outlook staying on this image and for how long; what is the programmatic-access policy for Outlook's object model; may a
    local, read-only script read my own cached mailbox?
-6. **Security team:** sign-off for an own-access local index on this managed laptop (never a personal cloud), the audit
-   volume to expect from a mailbox backfill, and how labelled or encrypted items are handled.
-7. **Claude data route:** confirm my seat may process my own mail and meeting transcripts, including external
-   participants' speech, and what retention or zero-retention terms apply.
-8. **Only if the community Microsoft 365 MCP server in the kit's catalogue is enabled:** a security review of the pinned
-   version in bring-your-own-app mode, or approval of the kit's own read-only Graph client instead.
-
-Never press "request approval" in a consent dialog on someone's behalf: it notifies administrators. The kit asks you to
-decide.
+Never press "request approval" in a consent dialog on someone's behalf: it notifies administrators.
 
 **If the answer is no, or nothing yet:** the fallback needs no change from IT. Download the transcript from the meeting
-Recap, if you are allowed to, and save it in the drop folder (guide 41, route 1). If the Recap only lets you view it, do
-not extract it another way. Microsoft documents that an administrator can leave users "browser-only access to play the
+Recap, if you are allowed to, and save it in the drop folder (guide 41, route 1). Microsoft documents that an administrator can leave users "browser-only access to play the
 meeting recordings or view transcripts with no ability to download or sync files".

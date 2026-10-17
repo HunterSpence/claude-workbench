@@ -14,10 +14,8 @@ scheduled task, Edge): setup prints the package-manager commands as asks and run
 2. **A denial is a hard stop for that step.** A hook, a permission prompt, a gateway or proxy answer, a managed-settings or
    policy block, a refusal from winget or npm, an HTTP 403 or 407, or a declined UAC prompt means: stop that step, show the
    message to the user word for word, note it for the table in section 3, and carry on with the steps that do not depend on it.
-   Never elevate (no "Run as administrator", no machine-scope install of your own), never write a policy key, a managed
-   setting or a `.env` file, never change an execution policy, never retry through another tool, shell, mirror or route, and
-   never press "request approval" in a consent dialog (it notifies administrators). The remedy is the ask: show its text; the
-   user sends it. The kit sends nothing.
+   Never retry through another tool, shell, mirror or route, and never press "request approval" in a consent dialog (it
+   notifies administrators). The remedy is the ask: show its text; the user sends it.
 3. **Evidence beats exit codes.** A step is done when its verify check passes, not when an installer says it succeeded: a
    tool counts as installed when its own version call prints a version. Decide from exit codes, state files and JSON, never
    from English output. Report only what you measured.
@@ -62,7 +60,7 @@ scheduled task, Edge): setup prints the package-manager commands as asks and run
 4. Onboarding with the user (2.5).
 5. The update phase, looked at and then applied (2.8).
 6. The Day-1 knowledge checks (2.7) through `SETUP doctor --deep`.
-7. Guards proven (2.12).
+7. Hooks proven (2.12).
 8. The final report diff (2.15), the results table (3) and the summary of what we can and cannot do here (4).
 
 ## 2. Components
@@ -71,11 +69,11 @@ scheduled task, Edge): setup prints the package-manager commands as asks and run
 **Command.** From the unpacked release folder:
 ```
 PY bootstrap/install.py                                   # dry run: prints the plan, changes nothing
-PY bootstrap/install.py --apply --setup plan --with <EXTRAS> --git-hosts <HOSTS>
+PY bootstrap/install.py --apply --setup plan --with <EXTRAS>
 ```
 `--setup plan` applies the install, prints the capability report and writes the setup plan, and installs nothing else.
 (`--setup auto` runs the report and then starts the whole setup in the background; the Day-1 prompt uses `plan` so you can
-read the plan first.) Drop `--with` or `--git-hosts` when the user gave none. The options:
+read the plan first.) Drop `--with` when the user gave none. The options:
 
 | Option | Effect |
 |---|---|
@@ -83,9 +81,8 @@ read the plan first.) Drop `--with` or `--git-hosts` when the user gave none. Th
 | `--profile corporate\|permissive` | settings profile, default `corporate` |
 | `--upstream-plugins`, `--upstream-plugins-optional` | register upstream plugin marketplaces (the optional set is never implied) |
 | `--kb-root PATH`, `--data-root PATH` | where the knowledge base and the data folder live |
-| `--git-hosts a,b` | git hosts company code may be pushed to; until set, a push to another host asks first (refused at the strict guard level) |
-| `--guard minimal\|standard\|strict` | guard level, default `standard` (asks instead of refusing for unlisted push or upload hosts and `--no-verify`; plain browser navigation runs); `strict` refuses; `minimal` refuses nothing and asks only before irreversible, outward, credential and guard-control steps; kept across upgrades |
-| `--approvals ask\|off` | corporate profile: `off` runs ordinary commands without a prompt (bypass mode; the kit's ask rules lifted; deny rules and the guard stay); kept across upgrades |
+| `--git-hosts a,b` | accepted and ignored, so older setup commands still run |
+| `--approvals ask\|off` | corporate profile: `off` runs ordinary commands without a prompt (bypass mode; the kit's few ask and deny rules stay); kept across upgrades |
 | `--with LIST` | opt-ins, below |
 | `--no-nightly`, `--no-update` | no nightly refresh task (permissive profile); skip the update phase |
 | `--force`, `--no-cli` | replace settings keys the user set; print the `claude` plugin commands instead of running them |
@@ -99,9 +96,7 @@ off before first use), `pm-pack` and `upstream-skills` (pinned upstream skills, 
 **Profile.** The default is `corporate`: normal permission prompts and no nightly task unless `--with nightly`.
 `--profile permissive` is for a machine the user fully controls: it starts in bypass mode with broad allow rules, registers the
 upstream plugins and keeps the nightly task on (`--no-nightly` turns it off). Your organisation can disable bypass mode in
-managed settings, and then Claude Code will not enter it. Neither profile touches the corporate guard pack (a push allowlist
-and asks around the browser CLI): it is on in both, and only `"enabled": false` in `<WB>/corporate-allowlist.json`, the user's
-own edit, turns it off; never edit that file yourself. **The user decides the profile, after reading the capability report and
+managed settings, and then Claude Code will not enter it. **The user decides the profile, after reading the capability report and
 guide 08. Never pass `--profile permissive` on your own.**
 
 **Verify.** Exit 0. The output ends with `Next:` lines. `<KIT>` and `<WB>/config.json` exist. After a restart of Claude Code (close every
@@ -111,9 +106,9 @@ among them, are read only when it starts), `/status`, `/plugin`, `/agents`, `/sk
 
 **If blocked.** Exit 3, or a line starting `STOP`, means managed settings or policy refused a step. The installer never edits
 managed settings and refuses to write a key a managed source sets. Quote it and stop that step.
-**Ask.** Before the first run, the heads-up text (`docs/admin-asks.md`, section 1). Plugins refused: rows `plugin-core`,
+**Ask.** Plugins refused: rows `plugin-core`,
 `plugin-kb`, `plugin-biz` and `plugin-capture` carry the marketplace ask; admin-asks "Marketplaces closed". User hooks refused:
-row `hooks-guards`; admin-asks "Hooks locked".
+row `hooks`; admin-asks "Hooks locked".
 
 ### 2.2 Capability report and what each rating means
 **Command.**
@@ -176,7 +171,7 @@ and `capture-runtime`.
 `tokensave` is registered in the machine's MCP configuration **parked**: the healer reports it as PARKED, not DOWN, and the
 doctor does not warn, until a repository is initialised (`tokensave init`, `mcp/README.md`). Never run `tokensave install`,
 `reinstall`, `upgrade`, `doctor`, `uninstall`, `claude-install` or `claude-uninstall` (`doctor` adds hooks to the user's
-settings on its own; the others rewrite or remove its settings, permissions, hooks and rules); the guard blocks all seven.
+settings on its own; the others rewrite or remove its settings, permissions, hooks and rules); the rule is an instruction, nothing blocks them.
 
 Every package row has a tested `pin` in `bootstrap/packages.json`. Setup installs through `winget configure` when it is allowed
 and one package at a time otherwise (`winget install --id <id> -e --source winget --scope user ...`).
@@ -213,8 +208,7 @@ Run it after the setup finishes. Work facts only; never ask for passwords, token
 **Ask.** None.
 
 ### 2.6 Knowledge layer and the find MCP
-**Command.** The run's phase `knowledge`: it shows `<KIT>/bootstrap/infosec-note.txt` once (read it to the user), creates the
-knowledge environment `<WB>/venv/` with Python 3.13 or 3.14 (the `python313` row in 2.3), installs the pinned requirements of the `find` and `office-render` skills
+**Command.** The run's phase `knowledge` creates the knowledge environment `<WB>/venv/` with Python 3.13 or 3.14 (the `python313` row in 2.3), installs the pinned requirements of the `find` and `office-render` skills
 into it, writes `knowledge_python` and `knowledge_db` into `<WB>/config.json`, runs `find discover`, and registers the roots
 (the user's work libraries, `captured`, `howto`, `kb`). The phase `knowledge-verify` then runs D1 to D23 (2.7) and registers
 the find MCP server (D13). Last, with `--with nightly` (or on the permissive profile) a per-user task
@@ -331,10 +325,7 @@ playwright-cli --version
 playwright-cli -s=check open about:blank --browser=msedge
 playwright-cli -s=check close
 ```
-The corporate guard pack asks before `upload` and `drop`, before `eval` and `run-code`, and before `open`, `goto` or `tab-new`
-to any address that is not localhost or a loopback address and not a host in `git_remote_hosts` or `upload_hosts` of
-`<WB>/corporate-allowlist.json`; the pack's `enabled` key in that file switches it. The `playwright` MCP entry stays off: the CLI
-is preferred (guide 45).
+The `playwright` MCP entry stays off: the CLI is preferred (guide 45).
 **Verify.** `playwright-cli --version` prints a version; report rows `pkg-playwright-cli` and `browser-automation` are READY; D23
 is PASS; `SETUP verify` lists it.
 **If blocked.** No Node.js: the item is `ask-IT` (rows `pkg-node`). npm refusing the install (E403 or E407) is a denial. Edge's
@@ -370,53 +361,52 @@ runs `bug_hint.py --pending`, which injects that session's queued line once and 
 all of these hold: the kit's `bug_hint.py` defines `STOPFAILURE_MIN_CC` (2.1.78 in this release), `claude --version` is at or above
 it, and managed settings do not set `allowManagedHooksOnly`. Otherwise nothing is installed and `notes` in `SETUP status --json`
 says why; after Claude Code is updated, run `SETUP run --detach` again. The entries are recorded in the ledger (key
-`settings:stopfailure-relay`), replaced as a pair on each run, and removed by `undo-config`. They are never in the plugin's static
-`hooks.json`.
+`settings:stopfailure-relay`), replaced as a pair on each run, and removed by `undo-config`. A pair the user deleted is not added again: the ledger
+`<WB>/state/kit-written.json` keeps the key `relay_hooks` (`written`, `removed-by-user` or null). They are never in the plugin's
+static `hooks.json`.
 **Verify.** `claude --version`; both entries in `<CH>/settings.json` (read it, never edit it); D14 says "StopFailure relay dry
 run ok"; after a failed turn the next prompt shows one line naming a bug card.
-**If blocked.** Managed `allowManagedHooksOnly` means user hooks never run; the note says so. **Ask.** Row `hooks-guards`
+**If blocked.** Managed `allowManagedHooksOnly` means user hooks never run; the note says so. **Ask.** Row `hooks`
 (admin-asks "Hooks locked").
 
-### 2.12 Guards
-**Command.** The guards ship with the `workbench-core` plugin: a command guard with a generic rule pack and the corporate pack
-(on by default in both profiles), a credential check on written files, session notices and a statusline. Restart every Claude Code window after the install (close them all and start a new one from a fresh terminal) so the plugins
-load with their options, run any tool, then prove they run:
-in a scratch git repository ask Claude to run `git push --force origin main`. It must be blocked with a message. Hooks fail open
-silently when misconfigured, so this is the only proof. Pushes are refused to any host not in `--git-hosts` (the allowlist is
-`<WB>/corporate-allowlist.json`); that is expected until the user names theirs (guide 20).
-**Verify.** The block message appears; the doctor row `guard heartbeat` is OK (WARN until a session ran a tool, FAIL after three
-sessions without a guard firing); D14; report rows `hooks-guards` and `plugin-core`. The installer's own self-test does not count
-as a guard firing: it is recorded apart (`self_test_at` in `<WB>/state/guard-heartbeat.json`) and leaves `last_fired` alone.
+### 2.12 Hooks proven
+**Command.** The session hooks ship with the `workbench-core` plugin: a read-flood check, a credential check on written files,
+session notices and a statusline. None of them blocks a shell command. Restart every Claude Code window after the install (close
+them all and start a new one from a fresh terminal) so the plugins load with their options, start a session, then prove the
+hooks are registered and ran: `/hooks` lists the workbench hooks and the doctor row `hooks heartbeat` is OK. Hooks fail open
+silently when misconfigured, so these two checks are the proof. Then check the permission rules: in a scratch git repository ask
+Claude to run `git push --force origin main`. Claude Code must stop and ask first; answer no.
+**Verify.** `/hooks` shows the workbench hooks; the doctor row `hooks heartbeat` is OK (WARN until a session has started, never
+a FAIL); D14; report rows `hooks` and `plugin-core`. The heartbeat is `<WB>/state/hooks-heartbeat.json`: `last_start` is stamped at
+every session start and `last_precompact` at every compaction.
 **The issues log.** The failure hook also appends every failed tool call (not one the user interrupted) to
 `<WB>/state/issues.jsonl`: UTC time, tool, session id and the first ten error lines, with credential-shaped values replaced by
 `[REDACTED]`. At 5 MB the file rotates (one `issues.jsonl.1` is kept) and a write problem never stops the hook. List it, or hand
 it over to be fixed, with `PY <KIT>/plugins/workbench-core/scripts/issues.py show [--since YYYY-MM-DD]`: a numbered markdown table
 of number, time, tool and first error line. It stays empty while the plugins' hooks do not run (troubleshooting: `Plugin option
 "python" isn't set`).
-**If blocked.** A block of your own command is a denial: show it, never rephrase the command to slip past it. Hooks locked by
-managed settings: the kit then runs without them, on permission prompts only. **Ask.** Row `hooks-guards` (admin-asks "Hooks
+**If blocked.** A rule that asks or denies your own command: show it, never rephrase the command to slip past it. Hooks locked by
+managed settings: the kit then runs without them, on permission prompts only. **Ask.** Row `hooks` (admin-asks "Hooks
 locked"); rows `plugin-*` for a closed marketplace.
 
 ### 2.13 Capture (opt-in)
-**Command.** Only if the user asked for it. First the security heads-up (`docs/admin-asks.md`, section 1) and the pre-clearance
-note (`plugins/workbench-capture/skills/capture/references/pre-clearance.md`). Then `SETUP run --detach --with capture`: it copies the
+**Command.** Only if the user asked for it: `SETUP run --detach --with capture`. It copies the
 runtime to `<WB>/capture/app/`, runs `npm install --ignore-scripts` there and checks that `node capture.mjs --version` prints
 `capture <version>`. The signed-in browser profile `<WB>/capture/profile/` needs one interactive sign-in by the human; never type
 credentials for them. Meetings and mail (experimental) go through guide 41:
 ```
 ING setup --apply
-ING ack-infosec                 # prints the note and records the acknowledgement; without it every run exits 5
 ING status --json
 ING meetings run
 ```
-**Verify.** D17 is PASS; `ING status --json` shows `infosec_ack` true; report rows `capture-intranet`, `capture-shared-files`,
+**Verify.** D17 is PASS; `ING status --json` answers; report rows `capture-intranet`, `capture-shared-files`,
 `capture-mail-full` and `capture-meeting-transcripts` (`capture-teams` and `capture-outlook` are deferred in this release and
 read UNKNOWN).
-**If blocked.** Ingest exit 3 is a stop by a guard, policy or tenant gate: report `stop.reason` and `stop.ask` word for word and
-do not retry another way. A transcript download denied by the meeting's organiser is the answer: the Recap fallback applies only
-if the user may download. **Ask.** Rows `capture-intranet` and `capture-shared-files` (admin-asks "Browser automation for the
+**If blocked.** Ingest exit 3 is a stop by a sign-in prompt, policy or tenant gate: report `stop.reason` and `stop.ask` word for
+word. A transcript download the meeting's organiser turned off cannot be fetched: the Recap fallback works only where download is
+allowed. **Ask.** Rows `capture-intranet` and `capture-shared-files` (admin-asks "Browser automation for the
 capture plugin"); `capture-meeting-transcripts` (it carries `OnlineMeetingTranscript.Read.All`, the Copilot insights permission
-`OnlineMeetingAiInsight.Read.All` and the tenant check; section 4 of admin-asks and guide 41); `capture-mail-full`; `ai-digests`.
+`OnlineMeetingAiInsight.Read.All` and the tenant check; section 3 of admin-asks and guide 41); `capture-mail-full`.
 
 ### 2.14 Routing
 **Command.**
@@ -449,7 +439,6 @@ report; a row only added or removed means the kit changed between the two runs.
 ```
 PY <KIT>/bootstrap/kit_update.py                     # update (or "already current" + the verify); --check changes nothing
 PY <KIT>/bootstrap/kit_update.py verify              # the pending post-update verify (also runnable alone)
-PY <KIT>/bootstrap/kit_update.py record guard-live PASS|WARN|FAIL "<text>"     # the live guard test row, see below
 ```
 The update asks GitHub for the latest release (anonymous HTTPS through setup's own `curl` helper, so the Windows revocation retry
 applies), requires a published SHA-256 for the zip (the release's digest and its checksum table; two values that differ, or none, stop
@@ -464,15 +453,13 @@ collects it), then the marker `<WB>/state/post-update-verify.json`, one table an
 go". Exit 3 is a proxy or policy block (show it, ask IT), 4 a failed step, 5 a reboot. Where the releases live: the repository the kit
 remembers (`config.json` `kit_repo`), else env `WB_KIT_REPO`, else `plugins/workbench-core/skills/kit-update/release-source.json` (empty on
 purpose); the first time the repository the user names in their message (`--repo OWNER/REPO`), and a `--repo` that differs from the remembered one is refused unless `--new-repo` is given (never add it
-yourself). The guard asks the user before any `kit_update.py` call except `verify`, `record` and `--check`.
+yourself).
 Setup (not you) also applies the user-only parts: the plugin python option, `<WB>\bin` on the Path, and the skill tiers
 (`SETUP skills [--dry-run] [--force]`: over 80% of the listing limit, the user's own skills go name-only, largest first; skills the kit
 routes to stay on; a value the user set stays unless `--force`; `settings.json` is backed up first; plugin skills are never changed).
 **Verify.** After the restart the session start line "a post-update verify is pending" tells you to run `verify`: PASS / WARN / FAIL /
 NEEDS-IT per check, the IT asks once, and the box FOR THE KIT AUTHOR (kit defects only, scrubbed), saved as
-`<WB>/state/field-report.md`; the marker is cleared. Then do the live guard test no script can do: in a scratch repository under the
-temp folder (remote `https://example.invalid/scratch.git`) try `git push --force origin main`; the workbench guard must block it; run
-`record guard-live PASS|FAIL` and delete the scratch repository.
+`<WB>/state/field-report.md`; the marker is cleared.
 **If blocked.** A hash mismatch, a denial or a declined UAC prompt is a hard stop. **Ask.** admin-asks: the release hosts
 (`api.github.com`, `github.com`, `release-assets.githubusercontent.com`).
 
@@ -500,12 +487,12 @@ for r in c["features"]:
 ```
 Then write four short lists:
 - **We can:** the READY and INSTALLABLE groups in words (for example "search my documents and notes, keyword and meaning",
-  "drive Edge from the command line, headless", "guards on every command"), each backed by a row or a D-step.
+  "drive Edge from the command line, headless", "force pushes ask first"), each backed by a row or a D-step.
 - **We cannot, yet:** every NEEDS-IT and BLOCKED-BY-POLICY row, with the reason from its `note` and the ask name.
 - **Pending asks:** every `ask_it` entry of `SETUP status --json`, every D-step `ask_it`, with the ask name from section 5. The
-  user sends them; offer to open the text, never send it.
+  user sends them; offer to open the text.
 - **Waiting on the user:** deferred update commands (including `claude update`), a restart of every Claude Code window so the plugins and the `Path` change load (a fresh terminal),
-  onboarding, the guard test, a reboot, and any opt-in they did not choose.
+  onboarding, the rule check, a reboot, and any opt-in they did not choose.
 
 ## 5. Ask index: which ask to show
 Each name is a row id in `bootstrap/features.json` or a plan item; its text is in the capability report beside the row, in
@@ -515,16 +502,15 @@ Each name is a row id in `bootstrap/features.json` or a plan item; its text is i
 |---|---|---|
 | `wsl2`, `sandbox` | WSL2 is NEEDS-IT or `AllowWSL` is 0 | features.json; admin-asks "Developer features" |
 | `powershell` | PowerShell is in a restricted language mode or script policy | features.json; admin-asks "PowerShell language mode" |
-| `hooks-guards` | user hooks are refused (`allowManagedHooksOnly`) | features.json; admin-asks "Hooks locked" |
+| `hooks` | user hooks are refused (`allowManagedHooksOnly`) | features.json; admin-asks "Hooks locked" |
 | `plugin-core`, `plugin-kb`, `plugin-biz`, `plugin-capture` | the marketplace is closed | report row (marketplace allow list); admin-asks "Marketplaces closed" |
 | `find-mcp` | a managed MCP policy blocks the local `find` server | features.json; admin-asks "MCP restricted" |
 | `find-hybrid` | the embedding model host is blocked (D9, D11) | features.json |
 | `knowledge-refresh-task`, `scheduled-tasks` | Task Scheduler is not running | features.json |
 | `browser-automation` | Edge remote debugging is off (the Playwright CLI, D23) | features.json; admin-asks "Headless Edge for the command-line browser tool" |
 | `capture-intranet`, `capture-shared-files` | Edge remote debugging is off (capture) | features.json; admin-asks "Browser automation for the capture plugin" |
-| `capture-mail-full` | classic Outlook policy blocks scripted reads | features.json; admin-asks section 4 |
-| `capture-meeting-transcripts` | meeting transcripts and the Copilot insights permission | features.json; admin-asks section 4; guide 41 |
-| `ai-digests` | summarising mail or transcripts through the Claude login | features.json |
+| `capture-mail-full` | classic Outlook policy blocks scripted reads | features.json; admin-asks section 3 |
+| `capture-meeting-transcripts` | meeting transcripts and the Copilot insights permission | features.json; admin-asks section 3; guide 41 |
 | `github-com`, `github-ghe-com`, `github-ghes` | the git host is not reachable | features.json; admin-asks "Git host and sign-in" |
 | `pkg-<package id>` | a package is NEEDS-IT or ask-IT | `ask_it` in `bootstrap/packages.json`; admin-asks "Package sources" |
 | `winget-configure` | winget configuration is switched off | `SETUP status --json` |

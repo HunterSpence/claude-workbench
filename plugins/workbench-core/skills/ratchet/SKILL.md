@@ -49,7 +49,7 @@ If you must delegate a write, nothing else touches the tree until it returns and
 4. **LOCK.** Every non-trivial fix gets a test you have *watched fail*: break the implementation,
    confirm red, restore, confirm green, then `git status` clean. Record in the ledger how it was
    proven. If the harness cannot see the bug (a mock encodes your beliefs), say so in the test
-   comment and the ledger: the guard is the control; the test only proves the guard fires.
+   comment and the ledger: the check is the control; the test proves it fires.
 5. **VERIFY at the real boundary.** Run the thing where it runs: build the container and probe it;
    match production constraints (`NODE_ENV=production`, no network where prod has none); confirm it
    fails closed on missing or blank secrets and config. Record the exact command and its output.

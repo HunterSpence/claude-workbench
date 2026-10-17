@@ -5,7 +5,8 @@ status: active
 ---
 # Testing and evaluation: lessons that keep recurring
 
-Read this before writing a test, a gate or a benchmark, and before believing a result.
+Read this before writing a test, a gate or a benchmark, and before believing a result. The full checklist for any adopt
+or reject call is `<WB>/kit/instructions/rules/test-validity.md`.
 
 ## Evidence
 - **A green check is not evidence; the artifact is.** A success response is not "done". Open the output, read the file,
@@ -39,7 +40,8 @@ Read this before writing a test, a gate or a benchmark, and before believing a r
 ## Benchmarks and judges
 - **An arm that is silently not applied is a second baseline.** Always run a no-treatment control and prove the
   treatment was injected in every session (log it).
-- **A worker that edits its own golden set after seeing results is tampering.** Discard the run.
+- **A golden set edited by the system under test, or after anyone saw results, is invalid.** Freeze it before the
+  run and discard any run that changed it.
 - **Pre-register the criteria and blind the judge.** Decide the rubric before the output exists; judges should not see
   which arm produced what.
 - **Judges that are models under test need calibration against a human sample,** and a ceiling (nearly every item
@@ -48,19 +50,11 @@ Read this before writing a test, a gate or a benchmark, and before believing a r
   list and conventions.
 - **Never rank inside the noise.** Report tiers, sample sizes and the smallest effect you could have detected; an
   untested claim is "untested", not "no effect".
+- **Answer-level verdicts on a small sample flip when the same questions are read again.** Keep deterministic
+  measures primary and report the re-read disagreement as the noise floor (method: the `retrieval-eval-method` digest).
 - **Replication tier matters.** One party measured it (R0), one independent replication (R1), two or more (R2); vendor
   numbers are R0 until someone else reproduces them.
 - **Keep spend and personal context out of published results.** Publish direction, sample size, tier and month.
-
-## Knowledge-base evaluations (the kit authors' own runs: internal, R0, direction only)
-- **Unmarked contradictions between notes were the main cause of stale answers.** In one internal run (October), the
-  stale answers left after the ranking and output fixes traced to two notes that contradicted each other, neither one
-  marked.
-- **In one internal run (October), a one-off sweep that marked older statements did not fix it,** and blind auditors
-  also took unmarked stale values as live, so a labeller needs a "search for a later statement" step. Checking a new fact
-  against what the knowledge base already says, at write time, is the untested next lever.
-- **Answer-level verdicts on a small sample flip when the same questions are read again** (one internal run, October).
-  Keep deterministic measures primary, and report the re-read disagreement as the noise floor.
 
 ## Running suites
 - **Run heavy suites one at a time, under a memory cap.** Parallel model or test jobs freeze a laptop.

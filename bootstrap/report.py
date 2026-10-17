@@ -209,7 +209,7 @@ def capture_mail_full(p):
         om = c["outlook_object_model_policy"]
         if any(k in om and om[k] != 1 for k in ("PromptOOMAddressBookAccess", "PromptOOMAddressInformationAccess")):
             return B, "Outlook policy blocks or prompts scripted reads" + seen, ASK_OUTLOOK_POLICY
-        return I, "local-cache route, InfoSec note first" + seen
+        return I, "local-cache route" + seen
     if oc == "new":
         return N, "the new Outlook keeps no local cache to read"
     return U, "no Outlook client found" if oc == "none" else "Outlook client not detected"
@@ -247,7 +247,9 @@ def capture_meeting_transcripts(p):
 
 @rule
 def ai_digests(p):
-    return U, "a policy decision, not something a probe can show", True
+    if D(p, "claude").get("logged_in") is True:
+        return R, "digests run through the signed-in Claude Code login"
+    return U, "no Claude Code sign-in seen"
 
 
 @rule
@@ -298,7 +300,7 @@ for _k, _pid in (("core", "workbench-core"), ("kb", "workbench-kb"), ("biz", "wo
 
 
 @rule
-def hooks_guards(p):
+def hooks(p):
     m = managed(p)
     if m["hooks_managed_only"] is True or m["disable_all_hooks"] is True:
         return B, "managed settings allow only managed hooks"

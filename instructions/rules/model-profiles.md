@@ -49,7 +49,8 @@ with state in files and hard limits in hooks.
 ## Haiku (extraction)
 Extraction, formatting, classification, log summaries. Force an output schema. Never judgment,
 never prose for the user, never routing decisions. A Haiku task that needs a second attempt was
-misrouted: move it up a tier.
+misrouted: move it up a tier. What the public pages say about Haiku 5.5 (prices, effort, limits,
+never-list): `{{WORKBENCH_HOME}}/kit/docs/evidence/haiku-5-5.md`, on demand.
 
 ## Workflow schemas (orchestrator side)
 - Make fields an agent may legitimately omit optional or nullable, and make enums exhaustive,

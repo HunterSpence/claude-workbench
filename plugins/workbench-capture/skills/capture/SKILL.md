@@ -12,15 +12,14 @@ disable-model-invocation: true
 ## Hard stop rule (read first)
 Exit code 3 means capture stopped on purpose: a sign-in, second-step, consent, policy, data-protection or block page,
 a hit on the hourly cap, a non-GET request, a tenant mismatch or a browser policy. Show the user `stop.kind`,
-`stop.reason` and `stop.ask` from the run report word for word. Never retry, never switch browser, profile or tool to get
-past it, never click anything on the page. Sign-in and second steps are the user's to complete (`CAP login`).
+`stop.reason` and `stop.ask` from the run report word for word. Sign-in and second steps are the user's to complete
+(`CAP login`).
 
 ## Before the first run
-1. The user tells their security team first: `${CLAUDE_SKILL_DIR}/references/pre-clearance.md` has the checklist and a
-   heads-up text. The first `run` also prints the InfoSec note once.
-2. The Edge policies `RemoteDebuggingAllowed` and `HeadlessModeEnabled` must not be turned off for this device. If
+1. The Edge policies `RemoteDebuggingAllowed` and `HeadlessModeEnabled` must not be turned off for this device. If
    `RemoteDebuggingAllowed` is off, capture stops with the ask for IT and does nothing else.
-3. Set the scope. Own sites and files shared with the user come first; the deny list is for anything sensitive.
+2. Set the scope. Own sites and files shared with the user come first; the deny list is for what to skip.
+3. Do a `--dry-run` first, then a small real run (`--max-per-hour 30`), then the full run.
 
 ```bash
 CAP scope set tenant example.com                        # the tenant the signed-in account must belong to
@@ -38,7 +37,7 @@ scope may be navigated to. A deny entry blocks any address or path that contains
 | Sign in once (headed; the user does it) | `CAP login` |
 | Capture a source | `CAP run --source intranet` (add `--dry-run` to list without writing) |
 | Lower the hourly cap | `CAP run --source S --max-per-hour 60` (the cap can be lowered, never raised above 200) |
-| Include sensitivity-labelled items (policy permitting) | `CAP run --source S --include-labelled` |
+| Include sensitivity-labelled items | `CAP run --source S --include-labelled` |
 | See scope and the last run | `CAP status` · `CAP scope list [--source S]` |
 | Edit scope | `CAP scope add\|remove [--source S] [--deny] VALUE` · `CAP scope set KEY VALUE` |
 | Remove captured copies | `CAP purge [--source S] [--older-than DAYS]` |
@@ -65,6 +64,5 @@ folder yourself with the find skill's `add-root`).
 - Pace: at most 10 loads, clicks, downloads or file reads a minute and 200 an hour, with a random pause between them.
 
 ## Reporting back
-Say how many pages or files were written and skipped (and why), whether the run stopped, and where the report is. Never
-paste captured text into a reply unless the user asks. Sources, settings and the module contract:
-`${CLAUDE_SKILL_DIR}/references/sources.md`. Every guardrail and its known limits: `${CLAUDE_SKILL_DIR}/references/guardrails.md`.
+Say how many pages or files were written and skipped (and why), whether the run stopped, and where the report is. Sources, settings and the module contract:
+`${CLAUDE_SKILL_DIR}/references/sources.md`. Every limit and its known gaps: `${CLAUDE_SKILL_DIR}/references/limits.md`.

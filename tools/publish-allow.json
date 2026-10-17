@@ -1,3 +1,61 @@
-{"version": 1,
- "allow": [{"glob": "settings/model-evidence.json", "rules": ["P4", "P5"],
-            "reason": "every row cites a source; the G13 test enforces it"}]}
+{
+ "version": 1,
+ "allow": [
+  {
+   "glob": "settings/model-evidence.json",
+   "rules": [
+    "P4",
+    "P5"
+   ],
+   "reason": "every row cites a source; the G13 test enforces it"
+  },
+  {
+   "glob": "kb-template/_shared/digests/models-and-tokens.md",
+   "rules": [
+    "P4",
+    "P5"
+   ],
+   "reason": "public vendor and paper citations and generic measurements; every number carries an [S]/[M] marker, enforced by test_seed_pack"
+  },
+  {
+   "glob": "kb-template/_shared/digests/knowledge-layer.md",
+   "rules": [
+    "P4",
+    "P5"
+   ],
+   "reason": "public vendor and paper citations and generic measurements; every number carries an [S]/[M] marker, enforced by test_seed_pack"
+  },
+  {
+   "glob": "kb-template/_shared/digests/retrieval-eval-method.md",
+   "rules": [
+    "P4",
+    "P5"
+   ],
+   "reason": "public vendor and paper citations and generic measurements; every number carries an [S]/[M] marker, enforced by test_seed_pack"
+  },
+  {
+   "glob": "kb-template/_shared/digests/reports-and-pdfs.md",
+   "rules": [
+    "P4",
+    "P5"
+   ],
+   "reason": "public vendor and paper citations and generic measurements; every number carries an [S]/[M] marker, enforced by test_seed_pack"
+  },
+  {
+   "glob": "kb-template/_shared/digests/internal-assistant.md",
+   "rules": [
+    "P4",
+    "P5"
+   ],
+   "reason": "public vendor and paper citations and generic measurements; every number carries an [S]/[M] marker, enforced by test_seed_pack"
+  },
+  {
+   "glob": "kb-template/_shared/digests/enterprise-rag-*.md",
+   "rules": [
+    "P4",
+    "P5"
+   ],
+   "reason": "public citations stay exact; own-run [M] figures are blurred; test_seed_pack enforces markers and rejects exact own-run figures"
+  }
+ ]
+}

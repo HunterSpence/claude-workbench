@@ -69,10 +69,10 @@ Small text changes: open it with python-pptx, change the runs you need, save und
 render. Structural changes (reordering, new slide types): rebuild from an outline instead of
 patching XML by hand.
 
-## Before it leaves the organisation
-Render check first (section above), then scrub a copy and send only the copy:
+## Scrub a copy
+Render check first (section above), then scrub a copy (the original is never edited):
 ```bash
-"${user_config.python}" "${CLAUDE_SKILL_DIR}/../office-render/scripts/scrub.py" deck.pptx --out deck-send.pptx --json
+"${user_config.python}" "${CLAUDE_SKILL_DIR}/../office-render/scripts/scrub.py" deck.pptx --out deck-clean.pptx --json
 ```
 It removes hidden slides and every link to them, comments, author and company names and the preview image; add `--strip-notes` to drop speaker notes too. The sensitivity label stays. Details and limits: the office-render skill.
 

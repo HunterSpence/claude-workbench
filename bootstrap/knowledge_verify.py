@@ -35,7 +35,7 @@ fwd = I.fwd
 PASS, WARN, FAIL, SKIP, OFF = "PASS", "WARN", "FAIL", "SKIP", "OPT-IN-OFF"
 FAIL_LIST = ("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D10", "D14", "D20", "D21")
 # IT1: every new kit tool answers --self-test offline, in under 10 s, with exit 0. A file this kit lacks is SKIP.
-IT1 = ("tools/guard-replay/guard_replay.py", "tools/skill-probe/skill_probe.py", "tools/rules-quiz/rules_quiz.py",
+IT1 = ("tools/skill-probe/skill_probe.py", "tools/rules-quiz/rules_quiz.py",
        "tools/model-sweep/model_sweep.py", "tools/token-split/token_split.py", "tools/mcp-nowin/mcp_nowin.py",
        "plugins/workbench-core/skills/office-render/scripts/hidden_text.py",
        "plugins/workbench-core/skills/cleanup/scripts/scan_legacy.py", "plugins/workbench-kb/scripts/kb_facts.py")
@@ -414,7 +414,7 @@ def _find_build(v):
 def _questions(v):
     h = v.checks.get("howto") or {}
     qs = (jload(v.kit / str(h.get("questions") or "docs/howto/questions.json"), {}) or {}).get("questions") or []
-    return qs, int(h.get("top") or 3), int(h.get("keyword_min") or 10)
+    return qs, int(h.get("top") or 3), int(h.get("keyword_min") or len(qs))      # default: every question
 
 
 def _top(v, q, mode, top):
@@ -591,7 +591,7 @@ def d14_hooks(v):
         return FAIL, "; ".join(bad)
     settings = jload(v.ctx.ch / "settings.json", {}) or {}
     off = [p for p in PLUGINS if (settings.get("enabledPlugins") or {}).get(p) is not True]
-    hb = jload(v.ctx.state_dir / "guard-heartbeat.json", {}) or {}
+    hb = jload(v.ctx.state_dir / "hooks-heartbeat.json", {}) or {}
     soft = ([f"not enabled yet: {', '.join(off)} (run the plugin commands install.py printed)"] if off else []) + \
         ([] if hb.get("last_start") else ["no Claude Code session has started with the hooks yet"])
     head = f"session start and precompact work in a sandbox; {relay}"
@@ -656,16 +656,7 @@ def d17_capture(v):
     (drop / "planning-check-in-20260105_1000.meta.json").write_text(json.dumps(fx.get("meta") or {}), encoding="utf-8")
     env = {"WORKBENCH_HOME": str(wb), "CLAUDE_CONFIG_DIR": str(t / "ch"), "WORKBENCH_KNOWLEDGE_DB": str(t / "find.sqlite")}
     ing = v.kit / "plugins" / "workbench-capture" / "skills" / "ingest" / "scripts" / "ingest.py"
-    # The sandbox is a fresh profile, so it has no acknowledgement. Mirror the one recorded in the live profile (only that
-    # field, only when it exists): the check then tests the pipeline, and never forges what the person has not done.
-    ack = (jload(ctx.wb / "capture" / "ingest.json", {}) or {}).get("infosec_ack")
-    if ack:
-        write_atomic(wb / "capture" / "ingest.json", json.dumps({"infosec_ack": ack}))
     rc, _, err = v.run([v.py, ing, "meetings", "run", "--no-digest", "--json"], env, timeout=300)
-    if rc == 5:     # ingest.py: "5 InfoSec acknowledgement missing"; step_row keeps 300 characters, so say the next step early
-        return WARN, ("the InfoSec acknowledgement is not recorded in this profile, so ingest stopped (exit 5); the install is "
-                      "fine. Next: tell your security team what capture does (bootstrap/infosec-note.txt), then run once: "
-                      "ingest.py ack-infosec")
     written = [p for p in (data / "captured").rglob("*.md") if "_drop" not in p.parts]
     if rc != 0 or len(written) != 1 or list(drop.glob("*.vtt")):
         return WARN, f"sandbox meeting ingest: exit {rc}, {len(written)} meeting file(s), original " \

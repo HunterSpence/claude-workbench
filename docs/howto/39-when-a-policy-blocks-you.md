@@ -7,9 +7,8 @@ A hook refuses a command, a permission prompt will not allow something, a proxy 
 source is not allowed, setup says STOP, or capture or ingest ends with exit code 3. `<KIT>` is the kit folder (guide 01).
 
 ## Steps
-1. Stop. A denial is a decision, not an obstacle. Do not retry, reword the command, switch tool, shell or route, edit a
-   settings file or an execution policy, run as administrator, turn off TLS verification or antivirus, or press "request
-   approval" for someone else. Claude is told the same and will stop and report.
+1. Stop that step. Retrying it through another tool, shell or route meets the same block. Do not press "request
+   approval" for someone else: it notifies administrators.
 2. Copy the message word for word, with its rule name, setting name and file. For capture and ingest, copy `stop.kind`,
    `stop.reason` and `stop.ask` from the newest run report in `<WB>/capture/runs/`.
 3. Name the class of block. In Claude Code, `/status` lists the managed settings source. Then:
@@ -24,14 +23,12 @@ source is not allowed, setup says STOP, or capture or ingest ends with exit code
 5. Carry on with the work that is not blocked, and tell whoever is waiting which part is held and why.
 6. Keep the answer. When IT acts, refresh the report and run setup again.
 
-Longer procedures are in docs/runbooks.md, and the whole control picture is in docs/security-overview.md.
 
 ## Verify
 - Your ask quotes the block exactly and names one setting, folder or host.
 - After IT acts, the capability row moves to INSTALLABLE or READY, and `policy_snapshot.py --json` names the class under `changed` whenever the managed policy differs from the saved snapshot.
 
 ## Common failures
-- **A colleague offers a trick:** decline it. A workaround that disables a control puts the whole account at risk and is not yours to give.
-- **Same block, different tool:** it is the same denial. Do not retry it through another route.
+- **Same block, different tool:** it is the same denial.
 - **IT says no:** that is the answer. The kit continues with everything not blocked (guide 03).
 - **The block hides a real fault:** if the message looks wrong (a rule that cannot apply), report that too; do not fix it yourself.

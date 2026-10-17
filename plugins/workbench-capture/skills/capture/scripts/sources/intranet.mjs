@@ -52,12 +52,12 @@ export default {
         try {
           const r = await ctx.goto(`${u.origin}/robots.txt`);
           if (r.status === 200) rule = parseRobots((await ctx.snapshot()).text);
-        } catch (e) { if (e.guard) throw e; }
+        } catch (e) { if (e.stop) throw e; }
         allowed.set(u.origin, rule);
       }
       if (!allowed.get(u.origin)(u.pathname)) { ctx.report({ url: key, reason: 'robots.txt' }); continue; }
       let r;
-      try { r = await ctx.goto(u.href); } catch (e) { if (e.guard) throw e; ctx.report({ url: key, reason: 'load failed' }); continue; }
+      try { r = await ctx.goto(u.href); } catch (e) { if (e.stop) throw e; ctx.report({ url: key, reason: 'load failed' }); continue; }
       pages++;
       if (r.status >= 400) { ctx.report({ url: key, reason: `HTTP ${r.status}` }); continue; }
       const s = await ctx.snapshot();

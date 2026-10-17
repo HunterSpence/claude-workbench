@@ -2,7 +2,6 @@
 setup runner (K.run_py), and a temp Claude home: nothing here touches this PC's settings, registry, PATH or home folder. Every
 user, computer, domain and host name below is fictional.
 Run: python -m unittest discover -s bootstrap -p "test_kit_update.py" -v"""
-import ast
 import datetime
 import hashlib
 import io
@@ -128,14 +127,18 @@ class Machine(unittest.TestCase):
         for f in ("_wb.py", "secretscan.py"):
             shutil.copyfile(REPO / "plugins" / "workbench-core" / "scripts" / f, sc / f)
         self.py = I.fwd(sys.executable)
+        self.deny = I.ac_rule(self.home / "Workbench" / "kb")
         self.settings({"enabledPlugins": {"workbench-core@workbench": True, "workbench-kb@workbench": True},
                        "pluginConfigs": {"workbench-core@workbench": {"options": {"python": self.py}},
-                                         "workbench-kb@workbench": {"options": {"python": self.py}}}})
+                                         "workbench-kb@workbench": {"options": {"python": self.py}}},
+                       "permissions": {"deny": [self.deny]}})
         S.jwrite(self.wb / "config.json", {"profile": "corporate", "data_root": I.fwd(self.home / "Workbench"),
-                                           "kb_root": I.fwd(self.home / "Workbench" / "kb")})
+                                           "kb_root": I.fwd(self.home / "Workbench" / "kb"), "version": NEW})
+        for name in ("workbench-core", "workbench-kb"):                     # Claude Code's cache holds the kit's plugins
+            (self.ch / "plugins" / "cache" / "workbench" / name / NEW).mkdir(parents=True)
         S.jwrite(self.state / "setup-state.json", {"kit_version": OLD, "phase": "done", "exit_code": 0,
                                                    "options": {"with": ["ctx", "tokensave"], "no_nightly": True, "no_update": False}})
-        S.jwrite(self.state / "guard-heartbeat.json", {"version": 1, "last_fired": "2999-01-01T00:00:00Z", "sessions_since_fire": 0})
+        S.jwrite(self.state / "hooks-heartbeat.json", {"last_start": "2999-01-01T00:00:00Z"})
         env = {k: v for k, v in os.environ.items() if not k.startswith(("WORKBENCH_", "WB_", "OneDrive", "USERDNS"))}
         env.update(CLAUDE_CONFIG_DIR=str(self.ch), USERPROFILE=str(self.home), HOME=str(self.home), LOCALAPPDATA=str(self.tmp / "lad"),
                    WORKBENCH_FAKE_REGISTRY=str(self.tmp / "reg.json"), WORKBENCH_MANAGED_SETTINGS=str(self.tmp / "none.json"),
@@ -170,7 +173,7 @@ class Machine(unittest.TestCase):
 
 
 class SetChoices(Machine):
-    """`kit_update.py set --approvals off|ask --guard minimal|...`: the installed installer again, same profile and opt-ins."""
+    """`kit_update.py set --approvals off|ask`: the installed installer again, same profile and opt-ins."""
     def setUp(self):
         super().setUp()
         inst = self.wb / "kit" / "bootstrap" / "install.py"
@@ -190,28 +193,25 @@ class SetChoices(Machine):
             code = K.cmd_set(self.ctx(), run=run, **kw)
         return code, out.getvalue()
 
-    def test_approvals_off_and_guard_minimal_rerun_the_installed_installer_once_with_the_same_choices(self):
+    def test_approvals_off_reruns_the_installed_installer_once_with_the_same_choices(self):
         run = self.Plan()
-        code, text = self.go(run, approvals="off", guard="minimal")
+        code, text = self.go(run, approvals="off")
         self.assertEqual(code, 0)
         (name, args), = run.calls
         self.assertEqual(name, "install.py")
-        self.assertEqual(args, ("--apply", "--profile", "corporate", "--with", "ctx,tokensave", "--approvals", "off", "--guard", "minimal"))
+        self.assertEqual(args, ("--apply", "--profile", "corporate", "--with", "ctx,tokensave", "--approvals", "off"))
         self.assertEqual(Path(run.install_cwd).resolve(), self.state.resolve(), "never from inside the kit folder")
         self.assertIn("Approvals OFF", text)
         self.assertIn("new windows start in acceptEdits", text)
+        self.assertIn("still ask", text, "the minimal ask set is not lifted")
         self.assertIn("approvals off: your organisation's managed settings keep bypass mode off", text)
-        self.assertIn("Guard MINIMAL: it refuses nothing", text)
         self.assertIn("Restart every Claude Code window", text)
 
-    def test_each_choice_alone_and_back(self):
+    def test_back_to_ask(self):
         run = self.Plan()
         code, text = self.go(run, approvals="ask")
         self.assertEqual((code, run.calls[-1][1][-2:]), (0, ("--approvals", "ask")))
         self.assertIn("Approvals back ON", text)
-        code, text = self.go(run, guard="standard")
-        self.assertEqual((code, run.calls[-1][1][-2:]), (0, ("--guard", "standard")))
-        self.assertNotIn("--approvals", run.calls[-1][1])
 
     def test_the_permissive_profile_keeps_its_approvals_and_a_missing_kit_or_choice_is_a_usage_error(self):
         S.jwrite(self.wb / "config.json", {"profile": "permissive"})
@@ -219,24 +219,26 @@ class SetChoices(Machine):
         code, text = self.go(run, approvals="off")
         self.assertEqual((code, run.calls), (0, []))
         self.assertIn("already runs commands without asking", text)
-        code, text = self.go(run, approvals="off", guard="minimal")
-        self.assertEqual(run.calls[-1][1][-2:], ("--guard", "minimal"), "the guard part still applies")
-        self.assertNotIn("--approvals", run.calls[-1][1])
         S.jwrite(self.wb / "config.json", {"profile": "corporate"})
-        with mock.patch("sys.stdout", new_callable=io.StringIO):
+        with mock.patch("sys.stdout", new_callable=io.StringIO), mock.patch("sys.stderr", new_callable=io.StringIO):
             self.assertEqual(K.main(["set"]), 2)
         (self.wb / "kit" / "bootstrap" / "install.py").unlink()
         with mock.patch("sys.stdout", new_callable=io.StringIO):
             self.assertEqual(K.main(["set", "--approvals", "off"]), 2)
 
-    def test_a_policy_stop_is_exit_3_and_a_bad_value_is_a_usage_error(self):
+    def test_a_policy_stop_is_exit_3_and_a_bad_value_or_the_removed_option_is_a_usage_error(self):
         with mock.patch.object(K, "run_py", Run(install_rc=3)), mock.patch("sys.stdout", new_callable=io.StringIO) as out:
-            self.assertEqual(K.main(["set", "--guard", "minimal"]), 3)
+            self.assertEqual(K.main(["set", "--approvals", "off"]), 3)
         self.assertIn("policy stopped it", out.getvalue())
-        with mock.patch("sys.stdout", new_callable=io.StringIO), mock.patch("sys.stderr", new_callable=io.StringIO):
+        run = Run()
+        with mock.patch.object(K, "run_py", run), mock.patch("sys.stdout", new_callable=io.StringIO), \
+                mock.patch("sys.stderr", new_callable=io.StringIO) as err:
             self.assertEqual(K.main(["set", "--approvals", "maybe"]), 2)
-            self.assertEqual(K.main(["set", "--guard", "none"]), 2)
-            self.assertEqual(K.main(["set", "--appr", "off"]), 2)                # no abbreviations: the guard reads the full words
+            self.assertEqual(K.main(["set", "--" + I.OLD, "minimal"]), 2)
+            self.assertEqual(K.main(["set", "--approvals", "off", "--" + I.OLD, "minimal"]), 2)
+            self.assertIn("unrecognized arguments: --" + I.OLD, err.getvalue(), "rejected as an unknown option")
+            self.assertEqual(K.main(["set", "--appr", "off"]), 2)                # no abbreviations
+        self.assertEqual(run.calls, [], "nothing ran")
 
 
 class Update(Machine):
@@ -478,7 +480,7 @@ class Update(Machine):
     def test_a_failed_setup_and_a_failed_doctor_are_failures_in_the_table_but_the_restart_line_still_comes(self):
         run = Run(status=[{"phase": "done", "running": False, "exit_code": 4, "updated": "2999-01-01T00:00:00Z",
                            "failed": [{"item": "ctx", "error": "download exit 22"}]}],
-                  rows=[{"check": "guard heartbeat", "status": "FAIL", "detail": "x"}], doctor_rc=2)
+                  rows=[{"check": "hooks heartbeat", "status": "FAIL", "detail": "x"}], doctor_rc=2)
         with mock.patch("sys.stdout", new_callable=io.StringIO) as out:
             code = self.update(Net(), run)
         text = out.getvalue()
@@ -648,8 +650,7 @@ class Verify(Machine):
         self.run = Run(rows=[])
         mark = {"version": NEW, "time": "2026-01-01T00:00:00Z", "from_version": OLD}
         S.jwrite(self.state / S.MARKER, mark)
-        S.jwrite(self.state / "guard-heartbeat.json", {"version": 1, "last_start": "2026-02-01T08:59:00Z", "last_fired": "2026-02-01T09:00:00Z",
-                                                       "sessions_since_fire": 0})
+        S.jwrite(self.state / "hooks-heartbeat.json", {"last_start": "2026-02-01T08:59:00Z"})
         p = mock.patch.object(K, "claude_version", return_value="9.8.7")
         p.start()
         self.addCleanup(p.stop)
@@ -662,8 +663,8 @@ class Verify(Machine):
         return {r["id"]: r for r in rows}, asks
 
     def heartbeat(self, **hb):
-        S.jwrite(self.state / "guard-heartbeat.json", {"version": 1, **hb})
-        return self.rows()[0]["guard-heartbeat"]
+        S.jwrite(self.state / "hooks-heartbeat.json", hb)
+        return self.rows()[0]["hooks-heartbeat"]
 
     def verify(self):
         with mock.patch("sys.stdout", new_callable=io.StringIO) as out:
@@ -715,26 +716,109 @@ class Verify(Machine):
         row = self.rows()[0]["hook-errors"]
         self.assertEqual((row["status"], row["detail"]), ("INFO", "not measured: the newest debug log is older than the update"))
 
-    def test_guard_heartbeat_needs_a_session_started_after_the_update_in_which_the_guard_fired(self):
-        row = self.rows()[0]["guard-heartbeat"]
+    def test_hooks_heartbeat_needs_a_session_started_after_the_update(self):
+        row = self.rows()[0]["hooks-heartbeat"]
         self.assertEqual(row["status"], "PASS")
         self.assertIn("after the update", row["detail"])
-        # fired after the update but no session has started since: the fire belongs to the old plugins (the false PASS)
-        row = self.heartbeat(last_start="2025-12-31T08:00:00Z", last_fired="2026-02-01T09:00:00Z")
+        row = self.heartbeat(last_start="2025-12-31T08:00:00Z")            # the last start is from before the update
         self.assertEqual(row["status"], "FAIL")
+        self.assertTrue(row["restart_due"])
         self.assertIn("no Claude Code session has started since the update", row["detail"])
-        self.assertEqual(self.heartbeat(last_fired="2026-02-01T09:00:00Z")["status"], "FAIL", "no session start recorded at all")
-        # a session started after the update but the guard did not fire in it
-        row = self.heartbeat(last_start="2026-02-02T08:00:00Z", last_fired="2026-02-01T09:00:00Z")
-        self.assertEqual(row["status"], "FAIL")
-        self.assertIn("before this session started", row["detail"])
-        self.assertEqual(self.heartbeat(last_start="2026-02-02T08:00:00Z", last_fired="2026-02-02T08:00:00Z")["status"], "PASS",
-                         "fired at or after the start")
-        (self.state / "guard-heartbeat.json").unlink()
-        self.assertEqual(self.rows()[0]["guard-heartbeat"]["status"], "FAIL")
-        (self.state / S.MARKER).unlink()                                    # no marker: the doctor's rule (three silent sessions)
-        self.assertEqual(self.heartbeat(last_fired="2026-10-01T00:00:00Z", sessions_since_fire=3)["status"], "FAIL")
-        self.assertEqual(self.heartbeat(last_fired="2026-10-01T00:00:00Z", sessions_since_fire=1)["status"], "PASS")
+        self.assertEqual(self.heartbeat()["status"], "FAIL", "no session start recorded at all")
+        (self.state / "hooks-heartbeat.json").unlink()
+        self.assertEqual(self.rows()[0]["hooks-heartbeat"]["status"], "FAIL")
+        (self.state / S.MARKER).unlink()                                    # no update pending
+        self.assertEqual(self.heartbeat(last_start="2026-10-01T00:00:00Z")["status"], "PASS")
+        row = self.heartbeat()
+        self.assertEqual((row["status"], row["kit"]), ("WARN", False), "never a kit defect before any session")
+
+    def test_the_active_context_deny_row_passes_fails_and_is_inert_under_managed_rules_only(self):
+        row = self.rows()[0]["ac-deny"]
+        self.assertEqual(row["status"], "PASS")
+        self.settings({"enabledPlugins": {"workbench-core@workbench": True, "workbench-kb@workbench": True},
+                       "pluginConfigs": {i: {"options": {"python": self.py}} for i in ("workbench-core@workbench", "workbench-kb@workbench")},
+                       "permissions": {"deny": ["Edit(//c/elsewhere/active-context.md)"]}})
+        row = self.rows()[0]["ac-deny"]
+        self.assertEqual((row["status"], row["kit"]), ("FAIL", True))
+        self.assertEqual(self.verify()[0], 2)
+        (self.tmp / "none.json").write_text(json.dumps({"allowManagedPermissionRulesOnly": True}), encoding="utf-8")
+        row = self.rows()[0]["ac-deny"]
+        self.assertEqual((row["status"], row["kit"]), ("INFO", False))
+        self.assertIn("inert: managed allowManagedPermissionRulesOnly", row["detail"])
+
+    def test_a_plugin_the_user_turned_off_is_information_and_never_in_the_author_box(self):
+        core = "workbench-core@workbench"
+        self.settings({"enabledPlugins": {core: False, "workbench-kb@workbench": True},
+                       "pluginConfigs": {i: {"options": {"python": self.py}} for i in (core, "workbench-kb@workbench")},
+                       "permissions": {"deny": [self.deny]}})
+        row = self.rows()[0]["plugin-python:workbench-core"]
+        self.assertEqual(row["status"], "FAIL", "control: without the ledger a disabled plugin is still a failure")
+        S.jwrite(self.state / "kit-written.json", {"version": 1, "plugins": {core: "disabled-by-user"}})
+        row = self.rows()[0]["plugin-python:workbench-core"]
+        self.assertEqual((row["status"], row["kit"], row["detail"]), ("INFO", False, I.off_text(core)))
+        code, text = self.verify()
+        self.assertEqual(code, 0, text)
+        self.assertNotIn("plugin-python:workbench-core", text.split("FOR THE KIT AUTHOR")[1])
+
+    def test_a_core_the_user_turned_off_is_not_measured_by_the_heartbeat_and_the_marker_clears(self):
+        core = "workbench-core@workbench"
+        (self.state / "hooks-heartbeat.json").unlink()                       # only core's session start writes it
+        row = self.rows()[0]["hooks-heartbeat"]
+        self.assertEqual((row["status"], row.get("restart_due")), ("FAIL", True), "control: core on and no heartbeat still fails")
+        self.settings({"enabledPlugins": {core: False, "workbench-kb@workbench": True},
+                       "pluginConfigs": {i: {"options": {"python": self.py}} for i in (core, "workbench-kb@workbench")},
+                       "permissions": {"deny": [self.deny]}})
+        S.jwrite(self.state / "kit-written.json", {"version": 1, "plugins": {core: "disabled-by-user"}})
+        row = self.rows()[0]["hooks-heartbeat"]
+        self.assertEqual((row["status"], row["kit"], row.get("restart_due")), ("INFO", False, None))
+        self.assertEqual(row["detail"], "not measured: workbench-core is off (your choice)")
+        code, text = self.verify()
+        self.assertEqual(code, 0, text)
+        self.assertNotIn("hooks-heartbeat", text.split("FOR THE KIT AUTHOR")[1])
+        self.assertIsNone(self.marker(), "the marker clears: no restart can make a turned-off plugin stamp it")
+
+    def test_the_plugin_cache_row_passes_fails_on_a_stale_version_and_warns_when_unreadable(self):
+        row = self.rows()[0]["plugin-cache"]
+        self.assertEqual(row["status"], "PASS", row["detail"])
+        cache = self.ch / "plugins" / "cache" / "workbench"
+        shutil.rmtree(cache / "workbench-core" / NEW)
+        (cache / "workbench-core" / OLD).mkdir()
+        row = self.rows()[0]["plugin-cache"]
+        self.assertEqual((row["status"], row["kit"]), ("FAIL", False), "the environment, never a kit defect")
+        self.assertIn(f"workbench-core is still {OLD} in Claude Code", row["detail"])
+        self.assertIn("plugin marketplace update workbench", row["cmd"])
+        code, text = self.verify()
+        self.assertEqual(code, 2)
+        self.assertNotIn("[plugin-cache]", text.split("FOR THE KIT AUTHOR")[1])
+        S.jwrite(self.ch / "plugins" / "installed_plugins.json", {"version": 2, "plugins": {
+            "workbench-core@workbench": [{"scope": "user", "version": NEW, "installPath": str(cache / "workbench-core" / NEW)}],
+            "workbench-kb@workbench": {"version": NEW}}})
+        self.assertEqual(self.rows()[0]["plugin-cache"]["status"], "PASS", "installed_plugins.json outranks a leftover folder")
+        (self.ch / "plugins" / "installed_plugins.json").unlink()
+        shutil.rmtree(cache)
+        row = self.rows()[0]["plugin-cache"]
+        self.assertEqual((row["status"], row["kit"]), ("WARN", False))
+        self.assertIn("could not tell", row["detail"])
+        S.jwrite(self.state / "kit-written.json", {"version": 1, "plugins": {"workbench-core@workbench": "disabled-by-user",
+                                                                              "workbench-kb@workbench": "disabled-by-user"}})
+        self.assertEqual(self.rows()[0]["plugin-cache"]["status"], "PASS", "plugins the user turned off are not checked")
+
+    def test_the_local_patches_row_counts_the_newest_folder(self):
+        row = self.rows()[0]["local-patches"]
+        self.assertEqual((row["status"], row["detail"], row["kit"]), ("INFO", "none", False))
+        for ts, n in (("20260101-000000", 1), ("20260102-000000", 2)):
+            S.jwrite(self.state / "local-patches" / ts / "patches.json", {"version": 1, "files": [{"path": f"f{i}"} for i in range(n)]})
+        row = self.rows()[0]["local-patches"]
+        self.assertEqual(row["status"], "INFO")
+        self.assertTrue(row["detail"].startswith("2 in ") and "20260102-000000" in row["detail"], row["detail"])
+        self.assertEqual(row["public"], "2 kept", "no path in the saved report")
+        self.assertEqual(self.verify()[0], 0, "information, never a failure")
+
+    def test_no_row_names_the_removed_hook(self):
+        rows, _, _ = K.verify_rows(self.ctx(), self.run)
+        self.assertGreaterEqual(len(rows), 8)
+        for r in rows:
+            self.assertNotIn(I.OLD, (r["id"] + r["check"] + r["detail"]).lower(), r["id"])
 
     @unittest.skipUnless(S.WIN, "the Path row is Windows only")
     def test_path_pass_in_registry_only_warns_to_restart_and_missing_everywhere_fails(self):
@@ -754,7 +838,7 @@ class Verify(Machine):
                          {"check": "TLS + network", "status": "WARN", "detail": "blocked: pypi"},
                          {"check": "knowledge index", "status": "FAIL", "detail": "no index"},
                          {"check": "backup", "status": "WARN", "detail": "never backed up"},
-                         {"check": "guard heartbeat", "status": "FAIL", "detail": "own row instead"},
+                         {"check": "hooks heartbeat", "status": "FAIL", "detail": "own row instead"},
                          {"check": "knowledge: hybrid", "status": "WARN", "detail": "D10 the model host is blocked"}]
         S.jwrite(self.state / "knowledge-verify.json", {"steps": [{"id": "D10", "status": "WARN", "ask_it": "Please allow host-x."}]})
         r, asks = self.rows()
@@ -823,167 +907,6 @@ class Verify(Machine):
         self.assertIn("4 failed tool call", row["detail"])
         self.assertEqual(row["lines"], ["Bash: failure 1", "Bash: failure 2", "Bash: failure 3"], "the newest three, first line each")
 
-    # ── the guard activity row ──
-    @staticmethod
-    def loc(hours):
-        """A guard-log timestamp: local time, no zone, `hours` after the marker (2026-01-01T00:00:00Z)."""
-        t = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc) + datetime.timedelta(hours=hours)
-        return t.astimezone().replace(tzinfo=None).isoformat(timespec="seconds")
-
-    def guard_log(self, where=None, old=()):
-        """A fabricated guards.log: lines before the marker, lines after it (with and without the newer `level` field), lines that are
-        not decisions, and private text in the commands, the folder names and the reasons."""
-        L = self.loc
-        pre = "sid=s1 tool=Bash cwd=C:/work"
-        guards = REPO / "plugins" / "workbench-core" / "scripts" / "guards"            # the kit under test carries the real guard source
-        shutil.copytree(guards, self.kit / "plugins" / "workbench-core" / "scripts" / "guards", ignore=shutil.ignore_patterns("tests", "__pycache__"),
-                        dirs_exist_ok=True)
-        lines = [f"{L(-1)} {pre} BLOCK [prod-build] example-private-command | the reason"] * 5
-        lines += [f"{L(1)} {pre} BLOCK [push-default-branch] example-private-command | reason one",
-                  f"{L(1)} sid=s2 tool=Bash cwd=C:/work/my example project level=standard BLOCK [push-default-branch] example-private-command",
-                  f"{L(2)} {pre} level=strict BLOCK [push-default-branch] example-private-command",
-                  f"{L(2)} {pre} ASK [installer-run] example-private-command | reason",
-                  f"{L(2)} {pre} level=standard ASK [installer-run] (relaxed from deny at the standard level) example-private-command",
-                  f"{L(3)} {pre} level=strict BLOCK [installer-run] example-private-command",
-                  f"{L(3)} {pre} BLOCK [secret-path] echo BLOCK [fake-id] ~/example-person/example_key | reason",
-                  f"{L(3)} {pre} BLOCK [secret-path] example-private-command",
-                  f"{L(4)} {pre} ASK [backdate] x", f"{L(4)} {pre} BLOCK [browser-cli] x", f"{L(4)} {pre} ASK [msys-path] x",
-                  f"{L(4)} {pre} BLOCK [nest-cap] x", f"{L(4)} {pre} ASK [tls-verify-off] x",
-                  # id-shaped text that is not a rule id: an ERROR line quoting one, a PASS line in a folder that looks like a deny, the
-                  # real decision after such a folder name, and ids the guard cannot emit
-                  f"{L(4)} {pre} ERROR rule crashed on ASK [{FAKE_DOMAIN}-4471-secret] example-private-command",
-                  f"{L(4)} sid=s9 tool=Bash cwd=C:/work/Project BLOCK [Quarterly] AGH plan level=standard PASS [relaxed-rule] example-private-command",
-                  f"{L(4)} sid=s9 tool=Bash cwd=C:/work/Project BLOCK [Quarterly] AGH plan level=standard BLOCK [nest-cap] example-private-command",
-                  f"{L(4)} {pre} BLOCK [mystery-rule] x", f"{L(4)} {pre} level=strict ASK [Another-Mystery] x",
-                  f"{L(4)} {pre} level=standard PASS [relaxed-rule] (relaxed from ask at the standard level) example-private-command",
-                  f"{L(4)} {pre} ERROR rule crashed: example-private-command",
-                  "not a log line at all, example-private-command", ""]
-        d = Path(where) if where else self.wb / "logs"
-        d.mkdir(parents=True, exist_ok=True)
-        (d / "guards.log").write_text("\n".join(lines) + "\n", encoding="utf-8")
-        return d
-
-    BUSIEST = ("10 deny, 6 ask since the update; busiest rules: installer-run (1 deny, 2 ask); push-default-branch (3 deny); "
-               "nest-cap (2 deny); other (1 deny, 1 ask); secret-path (2 deny)")
-
-    def test_guard_activity_counts_deny_and_ask_per_rule_since_the_update_and_shows_only_the_five_busiest_rule_ids(self):
-        self.guard_log()
-        row = self.rows()[0]["guard-activity"]
-        self.assertEqual((row["status"], row["detail"]), ("PASS", self.BUSIEST), "5 old lines, PASS and ERROR lines and noise not counted")
-        self.assertEqual(row["public"], row["detail"])
-        self.assertFalse(row["kit"], "never a kit defect")
-        for gone in ("msys-path", "tls-verify-off", "backdate", "browser-cli", "prod-build", "fake-id", "relaxed-rule", "Quarterly", "AGH",
-                     "mystery", "4471", FAKE_DOMAIN):
-            self.assertNotIn(gone, row["detail"])
-
-    def test_guard_activity_reads_the_rotated_log_a_new_log_dir_and_every_line_without_a_marker(self):
-        d = self.guard_log()
-        (d / "guards.log").rename(d / "guards.log.1")                                     # the engine keeps one rotated file
-        self.assertEqual(self.rows()[0]["guard-activity"]["detail"], self.BUSIEST)
-        elsewhere = self.tmp / "elsewhere"
-        self.guard_log(elsewhere)
-        with mock.patch.dict(os.environ, {"GUARDS_LOG_DIR": str(elsewhere)}):               # the engine's own override
-            (d / "guards.log.1").unlink()
-            self.assertEqual(self.rows()[0]["guard-activity"]["detail"], self.BUSIEST)
-        (self.state / S.MARKER).unlink()                                                  # no marker: everything in the log
-        with mock.patch.dict(os.environ, {"GUARDS_LOG_DIR": str(elsewhere)}):
-            row = self.rows()[0]["guard-activity"]
-        self.assertTrue(row["detail"].startswith("15 deny, 6 ask in the guard log; busiest rules: prod-build (5 deny); "), row["detail"])
-
-    def test_a_decision_is_read_only_when_its_id_is_one_the_guard_can_emit_and_nothing_in_a_folder_name_or_an_error_line_shifts_it(self):
-        ids = K.guard_rule_ids(REPO)
-        for rest, want in [
-                ("C:/work ERROR rule crashed on ASK [%s-4471-secret] example-private-command" % FAKE_DOMAIN, None),       # an ERROR line quoting an id
-                ("C:/work/Project BLOCK [Quarterly] AGH plan level=standard PASS [relaxed-rule] x", None),                # a folder that looks like a deny
-                ("C:/work/Project BLOCK [Quarterly] AGH plan level=standard BLOCK [nest-cap] x", ("BLOCK", "nest-cap")),  # ... before the real one
-                ("C:/work/Project ASK [Quarterly] plan level=strict BLOCK [retired-rule] x", ("BLOCK", "other")),
-                ("C:/work level=standard ASK [push-default-branch] BLOCK [secret-path] echo", ("ASK", "push-default-branch")),
-                (" BLOCK [secret-path] x", ("BLOCK", "secret-path")),                                                         # an empty folder name
-                ("C:/work level=standard BLOCK [Quarterly] x", ("BLOCK", "other")),
-                ("C:/work level=standard ASK [%s-4471-secret] x" % FAKE_DOMAIN, ("ASK", "other")),
-                ("C:/work no decision here", None), ("C:/work READFLOOD ASK [backdate]", None)]:
-            self.assertEqual(K.guard_decision(rest, ids), want, rest)
-        self.assertEqual(K.guard_decision(" BLOCK [secret-path] x", frozenset()), ("BLOCK", "other"), "no guard source: nothing is a known id")
-
-    @staticmethod
-    def ids_the_guard_tests_expect():
-        """Every rule id test_guards.py asserts, read from its syntax tree: the guard argument of blocked(cmd, id, ..), the id of
-        assertEqual(gid(out), id, ..) and the ("ask" | "deny", id) pairs. Only constants in those positions, never a loose string."""
-        tree = ast.parse((REPO / "plugins" / "workbench-core" / "scripts" / "guards" / "tests" / "test_guards.py").read_text(encoding="utf-8"))
-        const = lambda n: n.value if isinstance(n, ast.Constant) and isinstance(n.value, str) else None       # noqa: E731
-        found = set()
-        for n in ast.walk(tree):
-            if isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "blocked" and len(n.args) > 1:
-                found.add(const(n.args[1]))
-            elif isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "assertEqual" and len(n.args) > 1 \
-                    and isinstance(n.args[0], ast.Call) and getattr(n.args[0].func, "id", "") == "gid":
-                found.add(const(n.args[1]))
-            elif isinstance(n, ast.Tuple) and len(n.elts) == 2 and const(n.elts[0]) in ("ask", "deny"):
-                found.add(const(n.elts[1]))
-        return found - {None}
-
-    def test_the_rule_id_set_is_read_from_the_engine_and_rulepacks_and_holds_every_id_the_guard_tests_expect(self):
-        ids = K.guard_rule_ids(REPO)
-        expected = self.ids_the_guard_tests_expect()
-        self.assertGreaterEqual(len(expected), 25, "the scan of the guard tests found the ids they assert")
-        self.assertEqual(sorted(expected - ids), [], "an id the guard tests expect is missing from the set read from the source")
-        for real in ("push-default-branch", "installer-run", "secret-path", "nest-cap", "backdate", "env-write", "browser-cli",
-                     "guard-config-write", "tokensave-rewrite", "encoded-command", "no-verify", "force-push-main"):
-            self.assertIn(real, ids)
-        for fake in ("other", "Quarterly", "mystery-rule", "retired-rule", "relaxed-rule", "cache", "plugins"):
-            self.assertNotIn(fake, ids)
-        self.assertEqual(K.guard_rule_ids(self.tmp / "no-such-kit"), frozenset())
-        g = self.tmp / "kit" / "plugins" / "workbench-core" / "scripts" / "guards"            # a test file next to the source is never read
-        (g / "tests").mkdir(parents=True)
-        (g / "engine.py").write_text('def f():\n    block("reason", "only-in-engine", "d")\n    relaxed("onlyrelaxed")\n    E.ask("reason", "singleword")\n', encoding="utf-8")
-        (g / "tests" / "test_x.py").write_text('def t():\n    block("reason", "only-in-tests", "d")\n    return "also-in-tests"\n', encoding="utf-8")
-        self.assertEqual(K.guard_rule_ids(self.tmp / "kit"), frozenset({"only-in-engine", "onlyrelaxed", "singleword"}))
-
-    def test_the_real_engines_log_lines_are_read_back_as_the_decision_it_made(self):
-        """The format check: the actual guard (pretooluse.py of this tree, in a scratch home) writes the lines, the row reads them."""
-        home, logs = self.tmp / "eng-home", self.tmp / "eng-logs"
-        (home / ".claude").mkdir(parents=True)
-        env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home), "CLAUDE_CONFIG_DIR": str(home / ".claude"), "GUARDS_LOG_DIR": str(logs)}
-        for k in [k for k in env if k.startswith(("WORKBENCH_", "WB_"))]:
-            del env[k]
-        want = []
-        for cmd, expect in [("git push --force origin main", ("BLOCK", "force-push-main")),
-                            ("py -3 kit_update.py --repo example-org/example-kit", ("ASK", "installer-run")),
-                            ("git commit --no-verify -m x", ("ASK", "no-verify"))]:           # a soft rule: asks instead of refusing at the standard level
-            ev = {"tool_name": "Bash", "tool_input": {"command": cmd}, "session_id": "s1", "cwd": str(self.tmp)}
-            r = subprocess.run([sys.executable, "-B", "-I", str(REPO / "plugins" / "workbench-core" / "scripts" / "guards" / "pretooluse.py")],
-                               input=json.dumps(ev).encode(), capture_output=True, env=env, timeout=120)
-            self.assertEqual(r.returncode, 0, r.stderr)
-            want.append(expect)
-        ids = K.guard_rule_ids(REPO)
-        got = []
-        for ln in (logs / "guards.log").read_text(encoding="utf-8").splitlines():
-            m = K.GUARD_PREFIX.match(ln)
-            self.assertIsNotNone(m, ln)
-            self.assertIn(" level=", ln, "the engine writes its level field")
-            got.append(K.guard_decision(m.group(2), ids))
-        self.assertEqual([g for g in got if g], want)
-
-    def test_guard_activity_is_information_when_there_is_no_log_and_never_fails_the_verify(self):
-        row = self.rows()[0]["guard-activity"]
-        self.assertEqual((row["status"], row["detail"]), ("INFO", "not measured: no guard log yet"))
-        self.assertEqual(self.verify()[0], 0)
-        S.jwrite(self.state / S.MARKER, {"version": NEW, "time": "2026-01-01T00:00:00Z", "from_version": OLD})      # the verify cleared it
-        self.guard_log()
-        code, text = self.verify()
-        self.assertEqual(code, 0, "many denies are the guard working: still a clean verify")
-        self.assertRegex(text, r"guard activity\s+PASS\s+10 deny, 6 ask since the update")
-
-    def test_nothing_from_the_guard_log_but_counts_and_rule_ids_reaches_the_screen_or_the_saved_report(self):
-        self.guard_log()
-        code, text = self.verify()
-        saved = (self.state / K.REPORT).read_text(encoding="utf-8")
-        for out in (text, saved):
-            self.assertIn("installer-run (1 deny, 2 ask)", out.replace("\n" + " " * 41, " "))
-            for private in ("example-private-command", "my example project", "example-person", "example_key", "the reason", "reason one",
-                            "Quarterly", "AGH", "4471", "mystery", "Mystery", FAKE_DOMAIN, "<company>-"):
-                self.assertNotIn(private, out)
-
     def test_it_asks_are_one_deduplicated_needs_it_row_and_never_a_kit_defect(self):
         S.jwrite(self.state / "setup-state.json", {"ask_it": [{"item": "a", "text": "Please allow  host-x."}]})
         S.jwrite(self.state / "knowledge-verify.json", {"steps": [{"id": "D10", "status": "WARN", "ask_it": "please allow host-x."},
@@ -1003,7 +926,7 @@ class Verify(Machine):
         (self.state / "issues.jsonl").write_text(json.dumps({"time": "2026-02-01T09:00:00Z", "tool": "Bash", "error": ["x"]}) + "\n")
         self.assertEqual(self.verify()[0], 1)
         S.jwrite(self.state / S.MARKER, {"version": NEW, "time": "2026-01-01T00:00:00Z"})
-        S.jwrite(self.state / "guard-heartbeat.json", {"last_fired": "2025-12-01T07:00:00Z"})
+        S.jwrite(self.state / "hooks-heartbeat.json", {"last_start": "2025-12-01T07:00:00Z"})
         self.assertEqual(self.verify()[0], 2)
 
     # ── the marker, the saved file and the author box ──
@@ -1014,24 +937,25 @@ class Verify(Machine):
         saved = (self.state / K.REPORT).read_text(encoding="utf-8")
         self.assertIn("FOR THE KIT AUTHOR", saved)
         self.assertIn("Saved:", text)
-        self.assertIn("kit_update.py record guard-live", text)
+        self.assertNotIn("record", text, "no follow-up step is asked for")
 
     def test_the_marker_is_cleared_even_when_a_row_fails(self):
-        # a session started after the update but the guard did not fire in it: a real failure, and the verify has run
-        S.jwrite(self.state / "guard-heartbeat.json", {"last_start": "2026-02-02T08:00:00Z", "last_fired": "2026-02-01T09:00:00Z"})
+        # a session started after the update, but the active-context deny is missing: a real failure, and the verify has run
+        self.settings({"enabledPlugins": {"workbench-core@workbench": True, "workbench-kb@workbench": True},
+                       "pluginConfigs": {i: {"options": {"python": self.py}} for i in ("workbench-core@workbench", "workbench-kb@workbench")}})
         self.assertEqual(self.verify()[0], 2)
         self.assertIsNone(self.marker())
 
     def test_a_verify_before_the_restart_reports_but_keeps_the_marker_until_a_session_has_started(self):
-        for hb in ({"last_fired": "2025-12-01T07:00:00Z"},                                      # no session start recorded
-                   {"last_start": "2025-12-31T08:00:00Z", "last_fired": "2026-02-01T09:00:00Z"}):   # the last one is from before the update
-            S.jwrite(self.state / "guard-heartbeat.json", hb)
+        for hb in ({},                                                      # no session start recorded
+                   {"last_start": "2025-12-31T08:00:00Z"}):                 # the last one is from before the update
+            S.jwrite(self.state / "hooks-heartbeat.json", hb)
             code, text = self.verify()
             self.assertEqual(code, 2)
             self.assertIsNotNone(self.marker(), "no session has started since the update: the next one must still run the verify")
             self.assertIn("marker stays", text)
             self.assertIn("FOR THE KIT AUTHOR", (self.state / K.REPORT).read_text(encoding="utf-8"), "the report is still written")
-        S.jwrite(self.state / "guard-heartbeat.json", {"last_start": "2026-02-02T08:00:00Z", "last_fired": "2026-02-02T08:00:01Z"})
+        S.jwrite(self.state / "hooks-heartbeat.json", {"last_start": "2026-02-02T08:00:00Z"})
         code, text = self.verify()                                                                # after the restart
         self.assertEqual(code, 0, text)
         self.assertIsNone(self.marker())
@@ -1059,7 +983,7 @@ class Verify(Machine):
         self.settings({"enabledPlugins": {"workbench-core@workbench": True, "workbench-kb@workbench": True},
                        "pluginConfigs": {}})
         self.run.rows = [{"check": "knowledge: kb-index", "status": "WARN", "detail": "D5 built (fts5); kb_health WARN: dead-links"},
-                         {"check": "knowledge: capture", "status": "WARN", "detail": "D17 the InfoSec acknowledgement is not recorded"},
+                         {"check": "knowledge: capture", "status": "WARN", "detail": "D17 sandbox meeting ingest: exit 4, 0 meeting file(s)"},
                          {"check": "knowledge: kb-machinery", "status": "FAIL", "detail": "D3 1 failure(s)/error(s): test_x"}]
         code, text = self.verify()        # the row names are the doctor's own: setup.py doctor --json prefixes knowledge rows
         box = text.split("FOR THE KIT AUTHOR")[1]
@@ -1130,14 +1054,14 @@ class Verify(Machine):
         self.assertIn("withheld", out)
         self.assertNotIn(TOKEN, out)
 
-    def test_record_adds_the_live_guard_row_scrubbed_and_a_failure_gets_a_box_entry(self):
+    def test_record_adds_a_row_scrubbed_and_a_failure_gets_a_box_entry(self):
         self.verify()
-        K.cmd_record(self.ctx(), "guard-live", "PASS", f"blocked by push-default-branch on {FAKE_HOST}")
-        K.cmd_record(self.ctx(), "guard-live", "FAIL", f"not blocked: {TOKEN}", "git push --force origin main in a scratch repo")
+        K.cmd_record(self.ctx(), "live-check", "PASS", f"asked before a forced push on {FAKE_HOST}")
+        K.cmd_record(self.ctx(), "live-check", "FAIL", f"not asked: {TOKEN}", "git push --force origin main in a scratch repo")
         saved = (self.state / K.REPORT).read_text(encoding="utf-8")
         self.assertEqual(saved.count("## Added after the script"), 1)
-        self.assertIn("[guard-live] PASS: blocked by push-default-branch on <host>", saved)
-        self.assertIn("[guard-live] FAIL: not blocked: [REDACTED]", saved)
+        self.assertIn("[live-check] PASS: asked before a forced push on <host>", saved)
+        self.assertIn("[live-check] FAIL: not asked: [REDACTED]", saved)
         self.assertIn("command: git push --force origin main in a scratch repo", saved)
         self.assertNotIn(FAKE_HOST, saved)
         self.assertNotIn(TOKEN, saved)
@@ -1220,6 +1144,83 @@ class Verify(Machine):
         self.assertEqual(self.spawned, ["doctor-verify.out.json"], "one job for both calls")
 
 
+class Archive(Machine):
+    """R3 / G-H: `update --archive FILE --sha256 HEX`: the hash first, before anything is unpacked or written; no network."""
+    def setUp(self):
+        super().setUp()
+        self.name, self.data = archive(NEW)
+        self.zip = self.tmp / "carried" / self.name
+        self.zip.parent.mkdir()
+        self.zip.write_bytes(self.data)
+        self.good = hashlib.sha256(self.data).hexdigest()
+
+    def no_net(self, ctx, args, timeout):
+        self.fail(f"the archive path touched the network: {args}")
+
+    def tree(self):
+        return {I.fwd(p.relative_to(self.ch)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(self.ch.rglob("*")) if p.is_file()}
+
+    def test_the_right_sha_installs_the_packages_own_installer_once_then_setup_and_the_doctor(self):
+        class Paths(Run):
+            def __call__(inner, ctx, script, *args, timeout=0):
+                inner.scripts = getattr(inner, "scripts", []) + [Path(script)]
+                return Run.__call__(inner, ctx, script, *args, timeout=timeout)
+        run = Paths()
+        with mock.patch.object(S, "curl", self.no_net), mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            code = K.cmd_update(self.ctx(), run=run, archive=str(self.zip), sha256=self.good.upper())
+        self.assertEqual(code, 0, out.getvalue())
+        installs = [s for s in run.scripts if s.name == "install.py"]
+        self.assertEqual(len(installs), 1)
+        self.assertTrue(I.under(installs[0], self.state / "kit-update"), installs[0])
+        self.assertEqual(run.named("install.py")[0][:3], ("--apply", "--profile", "corporate"))
+        self.assertEqual(run.named("setup.py", "run")[0][:2], ("run", "--detach"))
+        self.assertEqual(self.marker()["version"], NEW)
+        self.assertIn("archive + SHA-256", out.getvalue())
+        self.assertIsNone(S.jload(self.wb / "config.json").get("kit_repo"), "no repository is remembered from a carried file")
+
+    def test_a_wrong_sha_is_exit_4_before_anything_is_unpacked_or_written(self):
+        before = self.tree()
+        run = Run()
+        with mock.patch.object(S, "curl", self.no_net), mock.patch.object(K, "run_py", run), \
+                mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            code = K.main(["update", "--archive", str(self.zip), "--sha256", "0" * 64])
+        self.assertEqual(code, 4)
+        self.assertIn("nothing was changed", out.getvalue())
+        self.assertEqual(run.calls, [])
+        self.assertEqual(self.tree(), before, "the Claude home (settings, state, kit) is byte-identical")
+        self.assertFalse((self.state / "kit-update").exists(), "not even the work folder was made")
+
+    def test_both_flags_are_needed_and_check_does_not_apply(self):
+        with mock.patch.object(S, "curl", self.no_net), mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            self.assertEqual(K.main(["update", "--archive", str(self.zip)]), 2)
+            self.assertEqual(K.main(["update", "--sha256", self.good]), 2)
+            self.assertEqual(K.main(["update", "--archive", str(self.zip), "--sha256", "abc"]), 2)
+            self.assertEqual(K.main(["update", "--archive", str(self.zip), "--sha256", self.good, "--check"]), 2)
+            self.assertEqual(K.main(["update", "--archive", str(self.tmp / "missing.zip"), "--sha256", self.good]), 2)
+        self.assertIn("go together", out.getvalue())
+
+    def test_an_upper_case_zip_name_is_still_a_zip(self):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr(f"claude-workbench-{NEW}/bootstrap/install.py", f'VERSION = "{NEW}"\n')
+        f = self.tmp / "carried" / "CLAUDE-WORKBENCH.ZIP"
+        f.write_bytes(buf.getvalue())
+        with mock.patch.object(S, "curl", self.no_net), mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            code = K.cmd_update(self.ctx(), run=Run(), archive=str(f), sha256=hashlib.sha256(buf.getvalue()).hexdigest())
+        self.assertEqual(code, 0, out.getvalue())
+        self.assertEqual(self.marker()["version"], NEW)
+
+    def test_an_archive_that_is_not_newer_says_current_and_runs_the_verify(self):
+        name, data = archive(OLD)
+        z = self.tmp / "carried" / name.replace(NEW, OLD)
+        z.write_bytes(data)
+        run = Run()
+        with mock.patch.object(S, "curl", self.no_net), mock.patch.object(K, "cmd_verify", return_value=0) as ver, \
+                mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            code = K.cmd_update(self.ctx(), run=run, archive=str(z), sha256=hashlib.sha256(data).hexdigest())
+        self.assertEqual((code, ver.call_count, run.named("install.py")), (0, 1, []))
+        self.assertIn("already current", out.getvalue())
+
 class ClaudeCli(Machine):
     """claude_version through a real (fake) claude program on the fake bin path: no mock of claude_version anywhere."""
     def setUp(self):
@@ -1227,7 +1228,7 @@ class ClaudeCli(Machine):
         self.bin = self.tmp / "fakebin"
         self.bin.mkdir()
         S.jwrite(self.state / S.MARKER, {"version": NEW, "time": "2026-01-01T00:00:00Z", "from_version": OLD})
-        S.jwrite(self.state / "guard-heartbeat.json", {"last_start": "2026-02-01T08:59:00Z", "last_fired": "2026-02-01T09:00:00Z"})
+        S.jwrite(self.state / "hooks-heartbeat.json", {"last_start": "2026-02-01T08:59:00Z"})
         p = mock.patch.dict(os.environ, {"WORKBENCH_FAKE_BIN": str(self.bin), "PATH": str(self.wb / "bin") + os.pathsep + os.environ.get("PATH", "")})
         p.start()
         self.addCleanup(p.stop)
@@ -1266,7 +1267,8 @@ class Docs(unittest.TestCase):
     """What the skill and IMPORT.md promise, checked against the script."""
     def test_the_skill_says_to_run_the_same_command_again_with_an_explicit_timeout_until_it_is_done(self):
         text = (REPO / "plugins" / "workbench-core" / "skills" / "kit-update" / "SKILL.md").read_text(encoding="utf-8")
-        for want in ("600000", "exit 6", "same command", "--wait 90", "verify"):
+        for want in ("600000", "exit 6", "same command", "--wait 90", "verify", "--archive", "--sha256", "local-patches",
+                     "claude plugin enable workbench-core@workbench"):
             self.assertIn(want, text)
 
     def test_the_docs_say_the_first_update_trusts_the_repository_you_name_and_the_hash_shows_integrity_only(self):
@@ -1290,7 +1292,8 @@ class Docs(unittest.TestCase):
         self.assertRegex(text, r"(?m)^#{2,4} .*check the new stuff and go.*$")
         sec = text.split("## Updating", 1)[1].split("## Removing everything", 1)[0]
         for want in ("<REPO>", "kit_repo", "`python` in `<WB>\\config.json`", "digest", "checksum table", "claude-workbench-v<ver>", "VERSION",
-                     "exit code 5", "kit_update.py --repo <REPO>", "--new-repo"):
+                     "exit code 5", "kit_update.py --repo <REPO>", "--new-repo", "--archive", "--sha256", "setup.py run --detach",
+                     "setup.py doctor --deep", "local-patches"):
             self.assertIn(want, sec, want)
         self.assertNotIn("must equal the `digest` after `sha256:` and the value in the table", sec)
 

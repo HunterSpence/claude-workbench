@@ -70,8 +70,7 @@ rounds. Put the PNG in the document, link the `.mmd` beside it so the next perso
 `render.py x.mmd` regenerates `x.excalidraw` every time (the previous one is kept as
 `x.excalidraw.prev`, one generation). Once someone edits the `.excalidraw` by hand, render from that
 file (`render.py x.excalidraw` writes `x.svg` and `x.png` only) and stop re-rendering the `.mmd`.
-Open the scene in an Excalidraw editor your organisation allows; do not upload client diagrams to a
-public web editor.
+Open the scene in any Excalidraw editor.
 
 ## Failures
 - `BUNDLE_MISSING` - step 2, first block, or set `DIAGRAM_RENDER_BUNDLE` to the file.

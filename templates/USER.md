@@ -10,9 +10,6 @@
 
 ## Where the rules live
 - **Organisation policies that apply to AI tools:** <link or path to the policy pages>
-- **Approved git remotes and hosts:** <e.g. github.example.com/<org>/*>
-- **Secret store:** <e.g. the organisation vault, or your OS credential manager>
-- **Data the KB may hold:** <e.g. internal-only engineering notes; never customer data>
 
 ## How I like to work
 <!-- Only what differs from instructions/working-style.md. Delete lines you don't need. -->

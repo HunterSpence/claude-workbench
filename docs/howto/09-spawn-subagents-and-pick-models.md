@@ -16,6 +16,9 @@ is the kit folder (guide 01).
    what never to use, and the evidence. Setup keeps only models your organisation allows and writes the result to
    `<WB>/state/routing.effective.json` (rebuild it with `py -3 <KIT>/bootstrap/setup.py routing`). `docs/models.md` has the
    other half: what each model is for, what to keep it away from, its price and where to start on effort.
+   The built-in `general-purpose` has no definition of its own, so it runs on `CLAUDE_CODE_SUBAGENT_MODEL` when that is set
+   (the profiles set it to Sonnet 5.5 on Claude Code 2.1.251 or newer); unset, it inherits your session's model. A persona's
+   own `model:` line outranks the variable, as does a model Claude passes for that one call (E36, fetched Oct 2026).
 3. Write the prompt the worker will run without your context. Use `/workbench-core:spawn`, whose template holds the
    goal, the files it may touch and those it may not, constraints, what is pre-authorised, the output shape and when to stop.
 4. Run parallel workers in their own worktrees (`git worktree add`) with disjoint files, three or four at a time.

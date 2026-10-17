@@ -18,10 +18,9 @@ Shell mechanics; the environment itself is `rules/corporate-environment.md`.
   BOM) or use PowerShell 7, which writes UTF-8 without a BOM.
 - The PowerShell tool's path check can misread `/s`, `/inheritance:r` and `*` as `Remove-Item`
   targets when `Remove-Item` shares the command. Run `Remove-Item` alone, with `-LiteralPath`.
-- If script execution is blocked by policy, ask IT. Don't work around it.
-- If `$ExecutionContext.SessionState.LanguageMode` says `ConstrainedLanguage`, the organisation
-  restricts PowerShell on purpose: `Add-Type` and many .NET calls fail by design. Don't try to
-  escape it; use another approved tool or ask IT.
+- If script execution is blocked by policy, ask IT.
+- If `$ExecutionContext.SessionState.LanguageMode` says `ConstrainedLanguage`, `Add-Type` and many
+  .NET calls fail by design: use Git Bash, WSL or another tool, or ask IT.
 
 ## Processes and long jobs
 - **Never fork a subagent:** spawn a fresh one and pass the context. Both settings profiles turn

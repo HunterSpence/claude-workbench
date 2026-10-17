@@ -13,10 +13,16 @@ A newer tagged release is out, or you want the kit gone from this laptop. `<KIT>
    `setup.py doctor --deep` and ends with one line: close every Claude Code window, start a new one, type `go`.
 3. After the restart, your first message starts the verify: one table of PASS, WARN, FAIL and NEEDS-IT rows, the asks for your IT
    team listed once, and a box FOR THE KIT AUTHOR to paste to the author (names and hosts are scrubbed; it is also saved as
-   `<WB>/state/field-report.md`). Nothing else needs you except real approvals and the restart.
-4. Without the skill (0.3.1 or older), or without Claude Code: the by-hand steps are in `IMPORT.md`, section "Updating":
-   download the newer tag, verify its SHA-256, unpack it, run `install.py --apply` with the same `--git-hosts` and `--with` choices
-   (it keeps your earlier knowledge-base and data folders and backs up every file it changes), then `setup.py run --detach`.
+   `<WB>/state/field-report.md`). Nothing else needs you except real approvals and the restart. A `local-patches` row above 0
+   means the installer kept files you had changed in the old kit (with diffs, in `<WB>/state/local-patches/`); Claude re-applies
+   one only when the new release does not already fix the same thing.
+4. No GitHub on this machine: copy the release zip here and say "update the kit from `<file>`, SHA-256 `<hash>`" (the hash from
+   the release notes). That runs `py -3 <KIT>/bootstrap/kit_update.py update --archive <file> --sha256 <hash>`, which checks the
+   hash before it changes anything. A 0.3.4 kit has no `--archive`: use the paste prompt in `IMPORT.md`, section "Updating".
+5. Without the skill (0.3.1 or older), or without Claude Code: the by-hand steps are in `IMPORT.md`, section "Updating":
+   verify the zip's SHA-256, unpack it, run `install.py --apply --profile <profile>` with the same `--with` choices (it keeps
+   your earlier knowledge-base and data folders and backs up every file it changes), then `setup.py run --detach` and
+   `setup.py doctor --deep`.
 
 **Remove**
 1. Dry run: `py -3 bootstrap/install.py --uninstall`. It lists every file it would restore or remove.
@@ -35,7 +41,10 @@ A newer tagged release is out, or you want the kit gone from this laptop. `<KIT>
 ## Common failures
 - **"does not know where its releases live":** run `py -3 <KIT>/bootstrap/kit_update.py --repo OWNER/REPO` once, with the repository of the
   release page you downloaded the kit from; it is remembered.
-- **A hash mismatch:** nothing was installed and the download was deleted; do not retry another way, tell your security team.
+- **A hash mismatch:** nothing was installed (a download is deleted; a carried zip is left as it is). Download the release
+  again from its release page.
+- **A plugin you turned off:** the update keeps it off and the verify shows it as INFO. Turning `workbench-core` off also turns off
+  session memory and the save reminders: `claude plugin enable workbench-core@workbench` brings it back.
 - **"Run the same command again" (exit 6):** the update is a chain of short steps; run the same command again, as often as it says so
   (each call waits about 90 seconds; Claude gives every call a 10-minute timeout).
 - **"this kit remembers ... as the repository":** the kit only takes releases from the repository it remembered. If the project really

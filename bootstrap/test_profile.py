@@ -1,4 +1,4 @@
-"""profile.py: create -> registry entry + a separate config folder (its own KB, index path, allowlist copy) -> launch
+"""profile.py: create -> registry entry + a separate config folder (its own KB and index path) -> launch
 with that config -> remove cleans up, the main install untouched. Temp home only.
 Run: python -m unittest discover -s bootstrap -p "test_profile.py" -v"""
 import json
@@ -34,7 +34,7 @@ class Profiles(unittest.TestCase):
         return r.stdout
 
     def test_create_launch_remove(self):
-        self.run_py("install.py", "--apply", "--no-cli", "--git-hosts", "git.example.com")
+        self.run_py("install.py", "--apply", "--no-cli")
         main_settings = (self.main / "settings.json").read_bytes()
         self.run_py("profile.py", "create", "Bad_Name", code=2)
         self.run_py("profile.py", "create", "client-a", "--", "--no-cli")
@@ -47,8 +47,6 @@ class Profiles(unittest.TestCase):
         self.assertEqual(cfg["knowledge_db"], p["knowledge_db"])
         self.assertEqual(cfg["kb_root"], I.fwd(base / "kb"))
         self.assertTrue((base / "kb" / "_shared" / "HOT.md").exists())
-        allow = json.loads((base / "config" / "workbench" / "corporate-allowlist.json").read_text(encoding="utf-8"))
-        self.assertEqual(allow["git_remote_hosts"], ["git.example.com"], "the main allowlist is copied")
         self.assertEqual((self.main / "settings.json").read_bytes(), main_settings, "the main install is untouched")
         self.run_py("profile.py", "create", "client-a", code=2)
         self.assertIn("client-a", self.run_py("profile.py", "list"))

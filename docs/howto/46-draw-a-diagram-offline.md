@@ -27,7 +27,7 @@ is sent to an online diagram service: a local Edge or Chrome renders it from a f
 5. Open the PNG. Look for clipped or overlapping labels, lines that hide the flow, text too small for where it will be
    used. Fix the `.mmd`, render again, and stop after a round that finds nothing.
 6. Put the PNG or SVG in the document and keep the `.mmd` beside it. To change the drawing by hand, open the
-   `.excalidraw` in an Excalidraw editor your organisation allows, then render from that file
+   `.excalidraw` in an Excalidraw editor, then render from that file
    (`render.py intake.excalidraw` writes the SVG and PNG only) and stop re-rendering the `.mmd`.
 
 ## Verify

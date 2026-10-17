@@ -2,16 +2,19 @@
 the kit does not ship (named only when installed), the always-on claude-api row, and the extra wrap-up phrases. Run:
     python -m unittest discover -s plugins/workbench-core/scripts/tests
 The config dir is a temp folder in every test: nothing here reads the real ~/.claude."""
-import json
 import os
-import shutil
-import subprocess
-import sys
-import tempfile
-import time
-import unittest
-from pathlib import Path
-from unittest import mock
+
+REQUIRE = os.environ.get("WB_REQUIRE_ALL") == "1"   # house convention: nothing below skips; a missing file fails
+
+import json  # noqa: E402
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+import sys  # noqa: E402
+import tempfile  # noqa: E402
+import time  # noqa: E402
+import unittest  # noqa: E402
+from pathlib import Path  # noqa: E402
+from unittest import mock  # noqa: E402
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 PLUGIN = SCRIPTS.parent
@@ -121,11 +124,25 @@ class Rows(unittest.TestCase):
 
     def test_kit_update_row_fires_for_turning_approvals_off_or_on_and_nothing_else(self):
         for q in ("turn off the bash approvals", "please switch off command approvals on this laptop", "turn on approvals again",
-                  "turn the guard way down", "set the guard to minimal", "I want the minimal guard"):
+                  "update the kit", "check for kit updates"):
             self.assertIn("kit-update", self.named(q), q)
         for q in ("the approvals workflow in our PR process", "who approves the budget", "turn off the lights",
-                  "switch on dark mode", "the security guard was down the hall", "a minimal example"):
+                  "switch on dark mode", "the night watchman was down the hall", "a minimal example", "set it to minimal"):
             self.assertNotIn("kit-update", self.named(q), q)
+        self.assertIn("turns command approvals off or on", dict((n, w) for n, _, w in ai.SKILLS)["kit-update"])
+
+    def test_pdf_report_row_wins_over_the_word_row_for_pdf_phrasing_and_stays_quiet_otherwise(self):
+        for q in ("make a PDF report from these notes", "turn this memo into a pdf", "merge these PDFs into one", "fill out this pdf form",
+                  "split the pdf in two", "convert the report to PDF for the board", "html to pdf with a contents page",
+                  "watermark the pdf as draft", "build a PDF handout"):
+            self.assertIn("pdf-report", self.named(q), q)
+        self.assertEqual(self.named("make a PDF report from these notes")[:2], ["pdf-report", "office-docx"], "first by priority")
+        for q in ("write a memo about the outage", "turn these notes into a report", "package the report for the team to read",
+                  "package this for the team as a pdf", "what is the capital of France", "render the pdf and check the layout"):
+            self.assertNotIn("pdf-report", self.named(q), q)
+        self.assertNotIn("pdf-report", ai.USER_ONLY, "the model may start it")
+        self.assertEqual(ai.cmd("pdf-report"), "/workbench-core:pdf-report")
+        self.assertTrue((PLUGIN / "skills" / "pdf-report" / "SKILL.md").is_file())
 
     def test_the_new_hint_alternatives_stay_quiet_on_ordinary_prompts(self):
         self.assertEqual(len(self.QUIET), len(set(self.QUIET)))

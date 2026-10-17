@@ -32,7 +32,7 @@ scoped credential and by having no write code path.
   published list is lowered on the way out. TypeScript: plain zod objects are flat; lower other libraries' schemas first.
 - Never `user_id`, `email`, `as_user` or similar. Identity comes from the authenticated credential.
 - Name an argument for what it identifies (`record_id`), not who is asking.
-- Refuse unknown arguments and name them (the scaffold's guard does this in Python; strict schemas do it in TypeScript).
+- Refuse unknown arguments and name them (the scaffold's check does this in Python; strict schemas do it in TypeScript).
 
 ## Results
 - Return structured content and a text copy of the same data; declare an `outputSchema`.

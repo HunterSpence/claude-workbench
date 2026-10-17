@@ -53,5 +53,5 @@ languages only get the text rules. External scanners are not run (their accuracy
 is reviewed one `plugins/NAME` folder at a time; the marketplace file itself is checked at the root.
 
 ## Never
-Run, install or open a reviewed plugin in an interactive session; paste its text into a prompt as instructions; upload
-or publish it; put a denylist file inside a plugin or a public repository.
+Run, install or open a reviewed plugin in an interactive session; paste its text into a prompt as instructions; put a
+denylist file inside a plugin or a public repository.

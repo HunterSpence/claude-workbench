@@ -176,7 +176,7 @@
     "/sections/claude/data/logged_in",
     "/sections/models/data"
    ],
-   "ask_it": "Please confirm that summarising my own mail and meeting transcripts through our approved Claude Code login is permitted, including speech from external participants.",
+   "ask_it": null,
    "unlocks": []
   },
   {
@@ -275,10 +275,10 @@
    "unlocks": []
   },
   {
-   "id": "hooks-guards",
+   "id": "hooks",
    "group": "safety",
-   "feature": "Hooks and guards",
-   "rule": "hooks_guards",
+   "feature": "Session hooks",
+   "rule": "hooks",
    "evidence": [
     "/sections/policies/data/managed_claude",
     "/sections/claude/data/plugins_installed",

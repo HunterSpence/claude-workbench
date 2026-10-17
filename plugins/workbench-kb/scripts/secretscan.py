@@ -1,6 +1,6 @@
 """Credential-value scanner: generic secret shapes only (public vendor key formats, private-key headers, connection
 strings and URLs with inline passwords, Basic and Bearer headers, NAME=value assignments, passwords written in prose).
-Shared by the cred-check Stop hook, the guards and the KB save driver. Every pattern has a positive control in
+Shared by the cred-check Stop hook, the issues log and the KB save driver. Every pattern has a positive control in
 plugins/workbench-kb/tests/test_secretscan.py, built at run time so no test file holds a credential-shaped string.
 
 ONE pattern set, two copies: workbench-core/scripts/secretscan.py and workbench-kb/scripts/secretscan.py

@@ -4,12 +4,9 @@
                     otherwise SKILLS below: the first few skills whose trigger matches are named, with why.
                     User-invoked skills (USER_ONLY) are only mentioned, never started. A row for a skill the kit does not
                     ship (INSTALLED_ONLY) is named only when that skill exists on this machine.
-  PreToolUse        installing a plugin or skill: no scanner installed -> ask; scanner installed -> deny until the
-                    command carries the scanned marker, then ask (the self-attested marker never passes alone)
 Prints at most one hookSpecificOutput. Always exits 0. Every kit skill has a row (a test checks this)."""
 import os
 import re
-import shutil
 import sys
 from pathlib import Path
 
@@ -24,11 +21,6 @@ WRAPUP = re.compile(
     r"|(?:start(?:ing)?|open(?:ing)?|move to|switch(?:ing)? to) (?:a )?(?:new|fresh) session\b"
     r"|i'?m (?:heading out|logging off|out for (?:now|today|the night))\b"
     r"|(?:write|make|do|need|want|create) (?:a |the |me a )?handoff\b|good ?night\b|hand (?:this|it) off\b)", re.I | re.M)
-INSTALL = re.compile(
-    r"claude\s+plugins?\s+(?:install|marketplace\s+add)\b|npx\s+(?:-y\s+)?skills?\s+add\b"
-    r"|git\s+clone\b[^\n|;&]*(?:skills?|plugins?)\b|(?:cp|copy-item|robocopy|mv|move-item)\b[^\n|;&]*\.claude[\\/](?:skills|plugins)\b",
-    re.I)
-SCANNED = "# skill-scanned"
 _W = r"[^.?!\n]{0,40}"   # same sentence, a few words apart
 
 # (skill, trigger, what to do). Order = priority; at most MAX_HINTS are named per prompt.
@@ -50,6 +42,9 @@ SKILLS = [
     ("draft-reply", rf"\b(?:reply|respond|response|answer|write back|get back){_W}\b(?:e-?mail|mail|message|thread|chat|him|her|"
                     r"them|this|team)\b|\bdraft (?:a |an |the |my )?(?:reply|response|e-?mail|message|answer)\b|\.(?:eml|msg)\b",
      "answer first, then asks with owners and dates; drafts only, never sends"),
+    ("pdf-report", rf"\bpdf\b{_W}\b(?:report|memo|handout|one-?pager|brochure|form)s?\b|\b(?:report|memo|handout|one-?pager)s?\b{_W}\b(?:as|to|into|in) (?:a |an )?pdf\b"
+                   rf"|\b(?:merge|split|rotate|stamp|watermark|fill (?:in|out)){_W}\bpdfs?\b|\b(?:html|markdown) (?:to|into) pdf\b",
+     "HTML or Markdown to a checked PDF through Edge; merge, split, stamp, fill forms"),
     ("office-docx", rf"\b(?:word (?:doc|document|file)|docx|memo|write-?up)\b|\b(?:write|draft|make|create|build|format|turn)"
                     rf"{_W}\b(?:document|doc|report|memo|proposal|brief)\b", "outline or Markdown to .docx, then render and look"),
     ("office-pptx", r"\b(?:deck|slides?|power ?point|pptx|presentation)\b", "outline to .pptx on the template, then render and look"),
@@ -136,9 +131,8 @@ SKILLS = [
     ("onboard", r"\b(?:onboard(?:ing)?|set me up|fill in (?:my )?user\.md|who i am|my work identity)\b",
      "a short interview that fills in USER.md"),
     ("kit-update", r"\b(?:check (?:for )?(?:the )?new stuff|(?:update|upgrade) the (?:workbench )?kit|check for kit updates|"
-                   r"(?:turn|switch) (?:off|on) (?:the |all )?(?:bash |command )?approvals|"
-                   r"(?:turn|set) (?:the )?(?:workbench )?guard (?:way )?(?:down|to minimal)|minimal guard)\b",
-     "updates the kit from its latest release and verifies it after the restart, or sets fewer prompts (approvals, guard level)"),
+                   r"(?:turn|switch) (?:off|on) (?:the |all )?(?:bash |command )?approvals)\b",
+     "updates the kit from its latest release and verifies it after the restart, or turns command approvals off or on"),
     ("vdi-drive", r"\b(?:remote desktop|vdi|citrix|horizon client|virtual desktop|novnc|guacamole)\b",
      "needs the desktop owner's written authorisation and an authorisation note"),
 ]
@@ -191,12 +185,6 @@ def skill_hints(prompt, skip=()):
     return hints
 
 
-def scanner():
-    """True when SkillSpector is installed the way the skill-scan skill finds it."""
-    exe = os.environ.get("SKILLSPECTOR_EXE") or shutil.which("skillspector")
-    return bool(exe and os.path.exists(exe))
-
-
 def main():
     d = _wb.read_event()
     ev = d.get("hook_event_name")
@@ -217,24 +205,6 @@ def main():
             notes.append("Skills that fit this request (use them unless they clearly do not apply): " + "; ".join(hints) + ".")
         if notes:
             _wb.emit(ev, additionalContext="Auto-invoke: " + " ".join(notes))
-    elif ev == "PreToolUse" and d.get("tool_name") in ("Bash", "PowerShell"):
-        command = str((d.get("tool_input") or {}).get("command") or "")
-        if not INSTALL.search(command):
-            return
-        if not scanner():
-            _wb.emit(ev, permissionDecision="ask", permissionDecisionReason=(
-                "Installing a plugin or skill, and no skill scanner (SkillSpector) is installed, so the source cannot be "
-                "scanned first. Approve only if your organisation allows this source and you have read what it runs."))
-        elif SCANNED not in command:
-            _wb.emit(ev, permissionDecision="deny", permissionDecisionReason=(
-                "Installing a plugin or skill: scan the source with /workbench-core:skill-scan first and show the user "
-                f"the result. Then re-run the same command with `{SCANNED}` appended as a trailing comment; the user "
-                "is still asked to confirm."))
-        else:
-            _wb.emit(ev, permissionDecision="ask", permissionDecisionReason=(
-                "Installing a plugin or skill marked as scanned. The marker is not proof: approve only if you saw the "
-                "skill-scan result pass and your organisation allows this source."))
-
 
 if __name__ == "__main__":
     try:

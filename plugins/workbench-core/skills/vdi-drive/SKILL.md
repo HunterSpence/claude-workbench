@@ -8,29 +8,19 @@ disable-model-invocation: true
 
 ## STOP: authorization gate (read before anything else)
 Use this skill only when **all** of these hold. If any is unknown, ask the user and stop.
-1. **Written authorisation.** The owner of the remote desktop (the organisation that runs it, not
-   just the person using it) has authorised automated input in writing for this purpose. A remote
-   desktop that belongs to another organisation or tenant is that organisation's environment:
-   driving it with an account the desktop's owner has not approved for its data crosses a tenant
-   boundary.
+1. **Authorisation.** The owner of the remote desktop has authorised automated input for this task.
 2. **An authorisation note on disk.** Write a short local note: who authorised it, which desktop,
    which task, until when. `drive.mjs` refuses every command that touches a desktop unless it is
    given that file (`--auth=<file>` or `VDI_AUTH_NOTE`). The note is checked for presence only;
-   its text is never printed or sent. Keep it outside synced and committed folders.
-3. **Approved data path.** The Claude account in use is approved for the data visible on that
-   desktop. Screenshots of the session are sent to the model; if that data may not leave the
-   desktop, this skill is the wrong tool.
-4. **No credentials, ever.** The human launches the browser, signs in and completes MFA. You attach
+   its text is never printed or sent.
+3. **No credentials, ever.** The human launches the browser, signs in and completes MFA. You attach
    afterwards. Never type, read, read back, screenshot on purpose, store or export a password,
    token, one-time code or secret, and never export browser storage state (`storageState` is a
    portable login). If a credential prompt appears, stop and hand control back.
-5. **No data movement out.** Never use this to copy, export or exfiltrate data from a desktop
-   whose purpose is to keep data inside it: no clipboard tricks, no typing data out, no screenshots
-   kept beyond the task. Results stay in the remote environment unless the owner said otherwise.
-6. **Human commits.** Save, Submit, Delete, Approve and similar buttons are clicked by the human.
+4. **Human commits.** Save, Submit, Delete, Approve and similar buttons are clicked by the human.
    `drive.mjs` sends Enter, Space and shortcuts, and types text holding a space, tab or newline,
    only when the human names those keys for that run (`--allow-keys=Enter,Space`);
-   `scripts/guardrails.mjs` makes the rest structural.
+   `scripts/limits.mjs` makes the rest structural.
 
 Prefer, in order: an API or CLI the owner provides; a normal web UI driven through the DOM; this.
 
@@ -39,7 +29,7 @@ Pixel-driving a remote session through a browser. The behaviours listed below ar
 on your own setup, not guarantees; `references/test-rig.md` describes a disposable desktop to check
 them against.
 
-Setup (once, in a working folder you own, never inside a synced or pushed directory):
+Setup (once, in a working folder you own):
 ```bash
 cp -r "${CLAUDE_SKILL_DIR}/scripts" ./vdi-work && cd vdi-work && npm install --ignore-scripts   # playwright-core only, no browser download
 ```
@@ -105,7 +95,7 @@ Every command below takes `--auth=<note>`; it is left out here for brevity.
 - The native desktop clients are opaque OS windows: none of this applies to them. UI-automation
   tools cannot see inside a remote desktop window either; it is one bitmap from the outside.
 
-## Guardrails: `scripts/guardrails.mjs` (Node stdlib; `node guardrails.mjs` self-checks)
+## Limits: `scripts/limits.mjs` (Node stdlib; `node limits.mjs` self-checks)
 - `loadScreenMap` / `SAFE_KEYS` / `assertKeyAllowed` / `assertTypeAllowed`: commit controls are
   never wired into the agent's actions. A screen map (for example a form with fields A, B and C)
   that even declares Save/Submit/Delete throws; coordinates must be anchor-relative; Enter, Space,
@@ -115,7 +105,7 @@ Every command below takes `--auth=<note>`; it is left out here for brevity.
 The principle: **a control that depends on the agent reading a screen correctly is not a control.**
 
 ## Verifying the harness
-- `node guardrails.mjs`: the guardrail self-checks (no browser, no install needed).
+- `node limits.mjs`: the limit self-checks (no browser, no install needed).
 - `node drive.mjs test`: off-screen self-check against `canvas-test.html` (click, exact keystrokes,
   non-ASCII refusal, Enter and typed spaces refused without `--allow-keys`, the CLI refusing to run
   without a note).

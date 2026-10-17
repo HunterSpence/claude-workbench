@@ -29,7 +29,8 @@ and `/context` to see your own split before you change anything.
 - **Pick the effort at the start of a task.** On Opus 5.5, Sonnet 5.5, Haiku 5.5 and Fable 5.1 with an API key or a Claude
   subscription, `/effort` mid-session keeps the prompt cache. On Bedrock, Google Cloud (Vertex), a Claude apps gateway, with
   `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` set, under a HIPAA configuration, and on older models, a mid-session change makes
-  the next request re-read the whole conversation uncached, and Claude Code asks you to confirm while the cache is warm.
+  the next request re-read the whole conversation uncached, and Claude Code asks you to confirm while the cache is warm
+  (section 8).
 - **In API conversations, keep effort constant.** If your own script or app calls the API, changing the top-level effort
   between requests invalidates the prompt cache for that conversation. A per-message effort change keeps it, but only with
   the vendor's per-message effort beta header, with adaptive thinking (with thinking off, a per-message change returns an
@@ -146,8 +147,49 @@ signal.
 - **What setup does for the rest.** For skills that are not plugin skills, `setup` measures the whole listing and, when the part
   the kit can control would pass 80 percent of the limit, writes `name-only` tiers for the biggest ones. It keeps the skills the
   kit routes to on, never writes `user-invocable-only` or `off` by itself, never overwrites a value you set, and takes a backup
-  first. The kit's guard refuses most agent edits of your `settings.json` (a change to `skillOverrides` alone asks you first,
-  `settings/SETTINGS.md`), so the tiers are applied by the setup step you run, not by a session on its own.
+  first. A permission rule or the user decides edits to your `settings.json` (`settings/SETTINGS.md`), so the tiers are applied
+  by the setup step you run, not by a session on its own.
 - **Check a skill still gets chosen.** After you shorten a description, measure it: `py -3 <KIT>/tools/skill-probe/skill_probe.py
   --kit` (guide 51) counts how often the kit's skills start on the prompts they should catch.
 
+## 8. Prompt cache
+
+Every request re-sends the whole conversation; the cache lets the API read the unchanged start of it at the cache-read rate
+(a tenth of the input price on Haiku 5.5, a twentieth on Opus 5.5 and Sonnet 5.5, a fortieth on Fable 5.1) instead of
+processing it again. The match is exact from the first token, so a change anywhere early recomputes everything after it. The
+vendor's cost page puts caching first among the cost levers and, in its own measurements, usually the largest (E42, fetched
+Oct 2026).
+
+- **What breaks it** (one slower, dearer turn, then it is cached again; E37): a model switch (each model has its own cache,
+  which includes `opusplan` toggles, a skill whose frontmatter names another model and an automatic model fallback); an effort
+  change outside the conditions in the next point; turning fast mode on; connecting or removing an MCP server when tool
+  definitions load upfront (with tool search, the default, a mid-session change leaves the cache intact); denying a whole tool
+  when tool search is off; compaction (by design); a pause longer than the cache lifetime; many images; a Claude Code upgrade.
+- **What keeps it** (E37): editing `CLAUDE.md` mid-session (the edit does not apply until `/clear`, `/compact` or a restart),
+  changing permission mode, invoking skills, `/rewind`, and spawning a subagent, which warms a cache of its own.
+- **Does an effort change break it?** In Claude Code, no on Opus 5.5, Sonnet 5.5, Haiku 5.5 and Fable 5.1 with an API key or a
+  Claude subscription (E37). Yes on Bedrock, Google Cloud's Agent Platform, a Claude apps gateway, with
+  `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` set, under a HIPAA configuration and on older models, where Claude Code asks you to
+  confirm while the cache is warm. In an API conversation of your own, a top-level effort change does break it (E42). The two
+  sources agree once the conditions are stated. Pick the level at the start of a task anyway, and sweep effort levels in separate
+  sessions so the comparison is clean.
+- **Two lifetime buckets** (E37): the main conversation, and everything else (subagents, workflows, teammates, forks, compaction,
+  session titles). On a Claude subscription within plan usage the main conversation gets one hour and the rest five minutes;
+  with an API key, a cloud provider or usage credits, both get five minutes. Choose a lifetime with `promptCacheTtl` and
+  `subagentPromptCacheTtl` (`5m` or `1h`, Claude Code 2.1.242 or newer) or their environment twins, `ENABLE_PROMPT_CACHING_1H=1`
+  for both buckets, and `FORCE_PROMPT_CACHING_5M=1` to override everything (E37, E41). A one-hour write costs twice the input
+  price (E32), so it pays only when a session idles past five minutes between turns. The corporate profile sets only
+  `subagentPromptCacheTtl` to `5m`, so subagents, whose requests are short-lived, keep the five-minute lifetime. It leaves
+  `ENABLE_PROMPT_CACHING_1H` off: the flag adds nothing for the main conversation on a seat within plan usage and pays only on
+  billed usage with frequent idle gaps (`settings/SETTINGS.md`).
+- **See your own hit rate:** `/usage` adds a `Prompt cache (main)` line after the first response (hit share, misses with a likely
+  cause, warm or cold; main conversation only; Claude Code 2.1.251 or newer, the likely-cause text 2.1.260 or newer; E39, E37).
+  `/insights` writes a report on how you work rather than how many tokens you used (E39).
+- **Agent teams** use roughly seven times the tokens of a standard session when teammates run in plan mode: each teammate has
+  its own context. Use Sonnet for teammates, keep teams small and shut them down when done (E39).
+- **Command-line tools over MCP servers:** `gh`, `aws`, `gcloud` and similar add no per-tool listing, so they are more
+  context-efficient than a tool server, even with tool definitions deferred (E39).
+- **Batch** takes half off input and output for work that can wait, and the vendor says it stacks with the cache multipliers,
+  with best-effort cache hits inside a batch (E43).
+- **Re-run failures, not everything:** when a checker can fail a result, the vendor measured running at `low` effort and
+  re-running only the failures at `high` as cheaper than `high` throughout, at the same or a slightly better pass rate (E42).

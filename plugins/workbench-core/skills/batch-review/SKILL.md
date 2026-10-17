@@ -17,12 +17,10 @@ deserves the strongest model belongs here.
 ## Before you can use it
 - **An API key is required.** It must be an Anthropic Console API key in `ANTHROPIC_API_KEY`. A
   Claude Team or Enterprise seat, or a Claude Code login, is NOT an API key. Your organisation must
-  provide one (and may route it through an approved gateway: set `ANTHROPIC_BASE_URL`). Do not use
-  a personal key for work data.
+  provide one (and may route it through a gateway: set `ANTHROPIC_BASE_URL`).
 - Install the SDK: `"${user_config.python}" -m pip install --user -r "${CLAUDE_SKILL_DIR}/requirements.txt"`.
 - Behind a TLS-inspecting proxy, point Python at the organisation's CA bundle
-  (`SSL_CERT_FILE=<path to the corporate CA .pem>`) rather than disabling verification.
-- Only send content your organisation allows to go to that API.
+  (`SSL_CERT_FILE=<path to the corporate CA .pem>`).
 
 ## Commands
 ```bash

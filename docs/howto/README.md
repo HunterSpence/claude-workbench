@@ -1,6 +1,6 @@
 # How-to library
 
-Fifty-five short task guides for things you do at work with Claude Code and this kit. Read one when you need it; nothing
+Fifty-six short task guides for things you do at work with Claude Code and this kit. Read one when you need it; nothing
 here is loaded into a session by itself.
 
 ## How to use it
@@ -12,7 +12,7 @@ here is loaded into a session by itself.
 - **Locations.** `<KIT>` is the kit folder (the unpacked release, or `<CH>/workbench/kit` after install), `<CH>` is
   `CLAUDE_CONFIG_DIR` or `~/.claude`, `<WB>` is `<CH>/workbench`.
 - **A guide states only commands and paths that exist in the kit.** When a policy blocks a step, the guide tells you to
-  stop and ask IT (guide 03), never to work around it.
+  stop and ask IT (guide 03).
 
 ## Setup and environment
 - [01 Set up Claude Code and the kit on your first day](01-setup-first-day.md)
@@ -35,7 +35,6 @@ here is loaded into a session by itself.
 - [14 Write your own skill or hook, with a test](14-write-a-skill-or-hook.md)
 - [43 Fix a red error message in Claude Code](43-fix-a-red-error-in-claude-code.md)
 - [49 Sweep your repositories for a retiring model id](49-sweep-repositories-for-a-retiring-model-id.md)
-- [50 Write and test a guard rule](50-write-and-test-a-guard-rule.md)
 - [51 Check that skills fire and rules hold](51-check-that-skills-fire-and-rules-hold.md)
 - [53 Audit your setup and clean up dead code](53-audit-and-clean-up.md)
 
@@ -45,7 +44,6 @@ here is loaded into a session by itself.
 - [17 Review code you did not write, safely](17-review-an-unfamiliar-repo-safely.md)
 - [18 Fix a bug with the bug playbook](18-fix-a-bug-with-the-playbook.md)
 - [19 Add Claude to a repository's CI](19-ci-with-claude-code-action.md)
-- [20 Push code only to approved git hosts](20-push-only-to-approved-hosts.md)
 - [42 Add an in-app navigation assistant](42-add-an-in-app-navigation-assistant.md)
 - [48 Build an eval for a feature that calls Claude](48-build-an-eval.md)
 
@@ -71,16 +69,17 @@ here is loaded into a session by itself.
 - [32 Purge indexed or captured data](32-purge-indexed-or-captured-data.md)
 - [41 Unlock meeting transcripts and mail](41-unlock-meeting-transcripts-and-mail.md)
 - [54 Which knowledge tool for which question](54-which-knowledge-tool-for-which-question.md)
+- [56 Decide whether you need a knowledge graph or vector search](56-do-i-need-a-graph-or-vectors.md)
+- [58 Build a grounded, role-aware internal assistant in a visual flow builder](58-build-a-grounded-internal-assistant.md)
 
 ## Business deliverables
 - [33 Turn requirements into user stories](33-requirements-to-stories.md)
 - [34 Turn meeting notes into actions](34-meeting-notes-to-actions.md)
 - [35 Write a status report](35-status-report.md)
 - [36 Scrub a document before sending it](36-scrub-a-document-before-sending.md)
+- [57 Make a report PDF](57-make-a-report-pdf.md)
 
-## Security and compliance
+## Labels, policy blocks and hidden text
 - [37 Labelled and confidential files](37-labelled-and-confidential-files.md)
-- [38 What leaves this machine](38-what-leaves-this-machine.md)
 - [39 When a policy blocks you](39-when-a-policy-blocks-you.md)
-- [40 First steps in an incident](40-incident-first-steps.md)
 - [52 Check a document for hidden text](52-check-a-document-for-hidden-text.md)

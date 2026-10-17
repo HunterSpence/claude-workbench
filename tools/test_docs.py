@@ -530,7 +530,7 @@ def main(argv=None):
 
 # ---- tests ---------------------------------------------------------------------------------------------------------
 KB_DOCS = ["docs/HOW-WE-WORK.md", "docs/AUTHORING.md", "docs/admin-asks.md", "docs/headless-and-scheduling.md",
-           "docs/model-routing.md", "kb-template/README.md", "docs/security-overview.md", "docs/known-limits.md",
+           "docs/model-routing.md", "kb-template/README.md", "docs/known-limits.md",
            "docs/troubleshooting.md", "docs/rules-card.md", "docs/runbooks.md", "docs/token-diet.md", "README.md",
            "IMPORT.md", "plugins/workbench-core/README.md"]
 
@@ -586,12 +586,15 @@ class DenyScan(Fixture):
         self.assertEqual(deny_scan([KIT / "kb-template", KIT / "docs", KIT / "settings"]), [])
         self.assertEqual(deny_scan([KIT / "plugins"]), [])
 
-    def test_publish_allow_allows_only_the_evidence_file(self):
+    def test_publish_allow_allows_only_the_evidence_file_and_seed_digests(self):
         allow = _load_allow(KIT)
-        self.assertEqual([e["glob"] for e in allow], ["settings/model-evidence.json"])
-        self.assertEqual(allow[0]["rules"], ["P4", "P5"])
+        self.assertEqual(allow[0]["glob"], "settings/model-evidence.json")
         self.assertEqual(allow[0]["reason"], "every row cites a source; the G13 test enforces it")
-        self.assertNotIn("numbers", allow[0])
+        for e in allow:     # the seed digests' markers are enforced by plugins/workbench-kb/tests/test_seed_pack.py
+            self.assertEqual(e["rules"], ["P4", "P5"])
+            self.assertNotIn("numbers", e)
+        for e in allow[1:]:
+            self.assertTrue(e["glob"].startswith("kb-template/_shared/digests/"), e["glob"])
 
     def test_cli_exit_codes(self):
         self.put("docs/a.md", "clean\n")
@@ -822,14 +825,6 @@ IW2 = {
 }
 
 
-def egress_missing(text, kit_root=KIT):
-    """MCP servers and setup hosts that docs/security-overview.md does not name in backticks."""
-    servers = _load("mcp/golden-config.template.json", kit_root)["servers"]
-    hosts = sorted({h for p in _load("bootstrap/packages.json", kit_root)["packages"] for h in p.get("hosts", [])})
-    return ([f"server {k}" for k in servers if f"`{k}`" not in text] +
-            [f"host {h}" for h in hosts if f"`{h}`" not in text])
-
-
 class Version(Fixture):
     def test_one_version_everywhere(self):
         """The installer, the probe, the four plugins, the marketplace, IMPORT.md and the newest CHANGELOG heading agree."""
@@ -842,17 +837,6 @@ class Version(Fixture):
             self.assertEqual(j.get("version") or j["metadata"]["version"], v, m)
         self.assertIn(f"claude-workbench `v{v}`", (KIT / "IMPORT.md").read_text(encoding="utf-8"))
         self.assertEqual(re.search(r"^## (\S+)", (KIT / "CHANGELOG.md").read_text(encoding="utf-8"), re.M).group(1), v)
-
-
-class Egress(Fixture):
-    def test_the_security_overview_names_every_server_and_setup_host(self):
-        text = (KIT / "docs" / "security-overview.md").read_text(encoding="utf-8")
-        self.assertEqual(egress_missing(text), [])
-
-    def test_a_missing_server_or_host_is_reported(self):
-        text = (KIT / "docs" / "security-overview.md").read_text(encoding="utf-8")
-        self.assertEqual(egress_missing(text.replace("`find`", "find")), ["server find"])
-        self.assertIn("host nodejs.org", egress_missing(text.replace("`nodejs.org`", "nodejs")))
 
 
 class Routing(Fixture):

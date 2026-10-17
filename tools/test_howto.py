@@ -1,12 +1,12 @@
 """Checker for the how-to library in docs/howto (G20), with its own tests.
 
-  WB_HOWTO_PART=1  checks guides 01-20 and the index only (the first half of the library); without it all 55 guides,
+  WB_HOWTO_PART=1  checks guides 01-19 and the index only (the first part of the library); without it every guide,
                    the >= 40 count and the `find` questions are checked.
   WB_REQUIRE_ALL=1 a missing dependency fails instead of skipping.
 Run: python -m unittest tools/test_howto.py -v   (use the knowledge venv's python for the `find` check).
 Each guide: a title, the four headings in order, one `Automates it:` line; every backticked kit path exists (test_docs
 check_paths); every /<plugin>:<skill> is a skill folder; every `py -3|python|node <script>` names an existing script;
-nothing always-loaded points at docs/howto; the 10 pre-registered questions in questions.json find their guide in the
+nothing always-loaded points at docs/howto; the 15 pre-registered questions in questions.json find their guide in the
 top 3 (keyword mode, scratch index, no model download).
 """
 import os
@@ -32,19 +32,20 @@ NAMES = """01-setup-first-day 02-read-the-capability-report 03-ask-it-for-access
 09-spawn-subagents-and-pick-models 10-save-session-knowledge 11-keep-token-use-low 12-headless-and-scheduled-runs
 13-run-the-doctor-and-backups 14-write-a-skill-or-hook 15-connect-the-github-mcp-server 16-github-enterprise-hosts
 17-review-an-unfamiliar-repo-safely 18-fix-a-bug-with-the-playbook 19-ci-with-claude-code-action
-20-push-only-to-approved-hosts 21-scaffold-a-plugin 22-build-an-mcp-server 23-wrap-an-api-as-mcp
+21-scaffold-a-plugin 22-build-an-mcp-server 23-wrap-an-api-as-mcp
 24-review-a-plugin-or-skill 25-package-a-skill-for-the-web 26-enable-an-enterprise-mcp-server
 27-find-a-file-or-an-answer 28-add-a-library-to-find 29-keep-the-index-fresh 30-capture-intranet-pages
 31-capture-shared-files 32-purge-indexed-or-captured-data 33-requirements-to-stories 34-meeting-notes-to-actions
-35-status-report 36-scrub-a-document-before-sending 37-labelled-and-confidential-files 38-what-leaves-this-machine
-39-when-a-policy-blocks-you 40-incident-first-steps 41-unlock-meeting-transcripts-and-mail
+35-status-report 36-scrub-a-document-before-sending 37-labelled-and-confidential-files
+39-when-a-policy-blocks-you 41-unlock-meeting-transcripts-and-mail
 42-add-an-in-app-navigation-assistant 43-fix-a-red-error-in-claude-code 44-update-the-tools 45-browser-headless
 46-draw-a-diagram-offline 47-lock-a-brand-spec-and-review-a-ui 48-build-an-eval
-49-sweep-repositories-for-a-retiring-model-id 50-write-and-test-a-guard-rule 51-check-that-skills-fire-and-rules-hold
+49-sweep-repositories-for-a-retiring-model-id 51-check-that-skills-fire-and-rules-hold
 52-check-a-document-for-hidden-text 53-audit-and-clean-up 54-which-knowledge-tool-for-which-question
-55-claude-code-on-a-virtual-desktop""".split()
+55-claude-code-on-a-virtual-desktop 56-do-i-need-a-graph-or-vectors 57-make-a-report-pdf
+58-build-a-grounded-internal-assistant""".split()
 FILES = [n + ".md" for n in NAMES]
-MINE = FILES[:20] if PART else FILES
+MINE = [f for f in FILES if int(f[:2]) < 20] if PART else FILES
 HEADINGS = ("## When to use", "## Steps", "## Verify", "## Common failures")
 CODE = re.compile(r"```.*?```|`[^`\n]+`", re.S)
 CMD = re.compile(r"(?<![\w-])(?:py -3|python3?|node)\s+(?:-[A-Za-z]+\s+)*[\"']?([^\s\"'`]+)")
@@ -128,13 +129,15 @@ class Howto(unittest.TestCase):
         qs = json.loads((HOWTO / "questions.json").read_text(encoding="utf-8"))
         self.assertEqual(qs["version"], 1)
         got = [Path(q["expect"]).name for q in qs["questions"]]
-        self.assertEqual(len(got), 10)
-        self.assertEqual(sum(1 for g in got if g in FILES[:20]), 5)
-        self.assertEqual(sum(1 for g in got if g in FILES[20:40]), 5)
+        self.assertEqual(len(got), 15)
+        self.assertEqual([g for g in got if g not in FILES], [], "a question expects a guide the library does not list")
+        nums = [int(g[:2]) for g in got]              # by guide number, not list position: numbers stay, positions shift
+        self.assertGreaterEqual(sum(1 for n in nums if 1 <= n <= 19), 5)
+        self.assertGreaterEqual(sum(1 for n in nums if 21 <= n <= 40), 5)
         self.assertTrue(all(q["expect"] == f"docs/howto/{Path(q['expect']).name}" for q in qs["questions"]))
 
 
-if not PART:   # the questions span guides 01-40: part mode (S9a alone) cannot answer them, so the class is absent
+if not PART:   # the questions span the whole library: part mode cannot answer them, so the class is absent
 
     class FindQuestions(unittest.TestCase):
         def test_find_returns_the_expected_guide_in_the_top_3(self):

@@ -14,13 +14,9 @@ names an application, that application's domain. Neither set of facts is restate
 - Batch remote checks into ONE ssh call and end diagnostic chains with `; true`, so one missing
   container does not abort a sweep. Never nest quotes inside `ssh <host> "..."`: use
   `ssh <host> bash -s <<'EOF'` ... `EOF`.
-- Connect as the least-privileged user that can do the job. Escalating to an admin or root account
-  is break-glass: say why before you do it.
-- Databases: read-only unless told otherwise; run `EXPLAIN` before proposing an index. Code changes
+- Databases: run `EXPLAIN` before proposing an index. Code changes
   in an application repo: find every caller first (`rules/code-graph.md`).
 - If the honest answer is "it is down and needs X changed", state the mechanism before changing it.
-- The deploy, production-database and `.env` Red Lines in CLAUDE.md apply to you. Never build or
-  deploy by hand on a server, even to restore service: fix the pipeline.
 
 ## Bindings
 - Facts: the knowledge base, per `rules/memory-protocol.md`: the domain's `HOT.md` and

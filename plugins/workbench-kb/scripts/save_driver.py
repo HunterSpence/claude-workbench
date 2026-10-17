@@ -12,13 +12,18 @@
                         -> daily log -> clear this session's precompact flag -> `updated:` stamp (only notes named by
                         --files whose bytes changed since --pre; never one past its size cap) -> reindex -> git commit
                         (only when the KB folder is a git repository) -> git push (only with --push AND a remote you
-                        configured) -> metrics -> advisories (the instruction-surface audit, and weekly the legacy scan;
-                        one line each, never an error: a missing or failing tool reads "skipped: ...").
+                        configured) -> metrics -> a detached refresh of the find index (config.json knowledge_python and
+                        knowledge_db; at most every 30 min; off with SAVE_FIND_REFRESH=0) -> advisories (the instruction-
+                        surface audit, at most daily, and weekly the legacy scan; off with SAVE_ADVISORIES=0). Neither
+                        extra is ever an error: a missing, slow or failing tool reads "skipped: ...".
   --post --skip --note TEXT   record that this save was skipped (nothing significant happened).
 
 All state (the save lock, precompact flags, snapshots, metrics, journal windows) lives in kb_audit.STATE, under the
 workbench home and outside the KB. A KB from an earlier kit has it in <KB>/.state/: --pre copies that across once and
 leaves it readable (see migrate_state).
+
+Without CLAUDE_CODE_SESSION_ID in the environment, the newest fresh (<= 7 d) precompact flag is this session's
+(reported as flag_claimed_without_session_id).
 
 Nothing is ever pushed by default. Exit codes: 0 ok (read `action_required` if present) · 1 unexpected error, or an
 --ac-write conflict / busy lock · 2 --ac-write refused (missing draft or base; file untouched) · 3 credentials found ·
@@ -64,6 +69,10 @@ STALE_DAYS = 7
 ADVISORY_TIMEOUT = float(os.environ.get("SAVE_ADVISORY_TIMEOUT") or 20)   # seconds, per advisory tool
 LEGACY_SCAN_DAYS = 7
 LEGACY_STAMP = STATE / "legacy-scan.stamp"
+ADVISORY_STAMP = STATE / "advisories.stamp"      # the surface audit runs at most daily
+FIND_STAMP = STATE / "find-refresh.stamp"
+FIND_REFRESH_MIN = 30
+FIND_TIMEOUT = float(os.environ.get("SAVE_FIND_TIMEOUT") or 15)   # seconds for the detaching call itself
 _read = savelock.read_text
 
 
@@ -91,12 +100,19 @@ def _flag(sid, state=None):
 
 
 def _my_flag():
-    """This session's flag: the local state folder first, then the one an earlier kit wrote in the KB."""
-    for state in (STATE, OLD_STATE):
-        f = _flag(SESSION_ID, state)
-        if SESSION_ID and f.exists():
-            return f
-    return None
+    """This session's flag: the local state folder first, then the one an earlier kit wrote in the KB. The hooks name a flag
+    by the id in the event; with no CLAUDE_CODE_SESSION_ID in this process's environment the id is unknown, so the newest
+    fresh (<= STALE_DAYS) flag is claimed. A stale flag is a dead session's: nobody claims it, --pre's cleanup removes it."""
+    if SESSION_ID:
+        return next((f for f in (_flag(SESSION_ID, st) for st in (STATE, OLD_STATE)) if f.exists()), None)
+    aged = []
+    for p in _flag_files():
+        try:
+            aged.append((p.stat().st_mtime, p))
+        except OSError:
+            continue
+    fresh = [(t, p) for t, p in aged if t >= _now().timestamp() - STALE_DAYS * 86400]
+    return max(fresh, key=lambda x: x[0])[1] if fresh else None
 
 
 def _flag_files():
@@ -185,6 +201,48 @@ def _run(cmd, timeout=120):
         return 1, "", str(e)[-200:]
 
 
+def _stamp_age(f):
+    """How long ago a stamp file (a UTC timestamp line, then optionally the signature of a tool that failed) was written;
+    None when it is missing or unreadable."""
+    try:
+        return _now() - datetime.strptime((_read(f).strip().splitlines() or [""])[0], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _within(age, window):
+    """True when a stamp of this age is still inside `window`. A stamp from the future (a clock set back) is not."""
+    return age is not None and timedelta(0) <= age < window
+
+
+def _touch(f, failed_sig=None):
+    """Stamp `f` with now (and, for a run that failed, the signature of the tool as it was). Never raises: a stamp only
+    saves the next save some work."""
+    try:
+        savelock.atomic_write(f, _now().strftime("%Y-%m-%dT%H:%M:%SZ") + "\n" + (f"{failed_sig}\n" if failed_sig else ""))
+    except OSError:
+        pass
+
+
+def _tool_sig(tool):
+    """Size and mtime of an advisory tool: a failure stamped under one signature is not held against a changed tool."""
+    try:
+        st = tool.stat()
+        return f"{st.st_size}-{st.st_mtime_ns}"
+    except (OSError, AttributeError):
+        return "unknown"
+
+
+def _not_due(f, window, tool):
+    """(age, failed) while the stamp still stands for this period's run: inside `window` and, if that run failed, with the
+    tool unchanged since (a tool the kit updated is tried again at once). Else None."""
+    age = _stamp_age(f)
+    if not _within(age, window):
+        return None
+    sig = _read(f).strip().splitlines()[1:2]
+    return (age, bool(sig)) if not sig or sig[0] == _tool_sig(tool) else None
+
+
 # ── metrics ──────────────────────────────────────────────────────────────────────────────────────────────────
 def _metric_rows():
     """Local rows first, then legacy ones whose key the local file lacks (written by a session on an earlier kit)."""
@@ -211,6 +269,12 @@ def _ts(r, fmt="%Y-%m-%dT%H:%MZ"):
 def _last_full_save():
     ts = [t for r in _metric_rows() if r.get("mode") != "skip" for t in [_ts(r)] if t]
     return max(ts) if ts else None
+
+
+def _recent_saves(now, rows):
+    """Saves recorded in the last RECENT_SAVE_MIN minutes, by any session: [{ts, domains}], at most 5, newest last."""
+    cut = now - timedelta(minutes=RECENT_SAVE_MIN)
+    return [{"ts": r.get("ts"), "domains": r.get("domains")} for r in rows if (_ts(r) or now - timedelta(days=1)) >= cut][-5:]
 
 
 def _append_metric(row):
@@ -393,22 +457,33 @@ def _stamp(files, rows):
 
 
 # ── --post advisories ────────────────────────────────────────────────────────────────────────────────────────
-# Each runs a script of the workbench-core plugin beside this one, in a subprocess with a timeout. None can fail the
+# Each runs a script of the workbench-core plugin (see _core_tool), in a subprocess with a timeout. None can fail the
 # save: a missing, slow, crashing or garbled tool reads "skipped: ..." and nothing else changes.
 def _core_tool(*parts):
-    p = Path(__file__).resolve().parents[2] / "workbench-core" / Path(*parts)
-    return p if p.is_file() else None
+    """A file of the workbench-core plugin: the installed kit first, then its newest plugin-cache copy (a cached plugin
+    sits in its own versioned folder, so this plugin's sibling is not there), then the folder beside this plugin (a checkout)."""
+    cache = kb_audit.workbench_home().parent / "plugins" / "cache" / "workbench" / "workbench-core"
+    try:
+        newest = sorted((d for d in cache.glob("*") if d.is_dir()), key=lambda d: d.stat().st_mtime)[-1:]
+    except OSError:
+        newest = []
+    for base in (kb_audit.workbench_home() / "kit" / "plugins" / "workbench-core", *newest,
+                 Path(__file__).resolve().parents[2] / "workbench-core"):
+        if (base / Path(*parts)).is_file():
+            return base / Path(*parts)
+    return None
 
 
-def _advise(tool, *args):
-    """(parsed JSON, None) from running `tool`, else (None, 'skipped: <why>'). A non-zero exit still counts when it printed JSON."""
+def _advise(tool, *args, py=None, timeout=ADVISORY_TIMEOUT):
+    """(parsed JSON, None) from running `tool` (under `py`, else this Python), else (None, 'skipped: <why>'). A non-zero exit
+    still counts when it printed JSON."""
     if tool is None:
         return None, "skipped: not found"
     try:
-        p = subprocess.run([sys.executable, str(tool), *args], capture_output=True, text=True, timeout=ADVISORY_TIMEOUT,
+        p = subprocess.run([py or sys.executable, str(tool), *args], capture_output=True, text=True, timeout=timeout,
                            encoding="utf-8", errors="replace", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except subprocess.TimeoutExpired:
-        return None, f"skipped: timed out after {ADVISORY_TIMEOUT:g} s"
+        return None, f"skipped: timed out after {timeout:g} s"
     except OSError as e:
         return None, f"skipped: could not start ({type(e).__name__})"
     try:
@@ -418,11 +493,20 @@ def _advise(tool, *args):
 
 
 def _advise_surface():
-    data, why = _advise(_core_tool("skills", "brain-audit", "scripts", "audit.py"), "--surface", "--json")
+    """At most one run a day, whether it answered, failed or timed out: every run costs a process start (seconds on a slow
+    machine). A failed run is tried again at once only when the tool itself changed. A tool that is not there costs nothing."""
+    tool = _core_tool("skills", "brain-audit", "scripts", "audit.py")
+    held = _not_due(ADVISORY_STAMP, timedelta(days=1), tool)
+    if held:
+        return f"not due (ran {int(held[0].total_seconds() // 3600)} h ago{', and failed' if held[1] else ''}; once a day)"
+    data, why = _advise(tool, "--surface", "--json")
+    if tool is not None and not (why or "").startswith("skipped: could not start"):
+        _touch(ADVISORY_STAMP, _tool_sig(tool))   # a failure stamp until the answer proves usable
     if why:
         return why
     sf = data["surface"]
     n = sum(len(sf[k]) for k in ("rules_over_cap", "duplicates", "dead_refs", "generated_drift", "hidden_skills"))
+    _touch(ADVISORY_STAMP)
     return f"{sf['bytes']} B always loaded, {n} finding(s)" + ("; the brain-audit skill lists them" if n else "")
 
 
@@ -430,22 +514,23 @@ def _advise_legacy():
     tool = _core_tool("skills", "cleanup", "scripts", "scan_legacy.py")
     if tool is None:
         return "skipped: not found"
-    try:
-        last = datetime.strptime(_read(LEGACY_STAMP).strip(), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-    except ValueError:
-        last = None
-    if last and _now() - last < timedelta(days=LEGACY_SCAN_DAYS):
-        return f"not due (ran {(_now() - last).days} day(s) ago)"
+    held = _not_due(LEGACY_STAMP, timedelta(days=LEGACY_SCAN_DAYS), tool)
+    if held:
+        return f"not due (ran {held[0].days} day(s) ago{', and failed' if held[1] else ''})"
     data, why = _advise(tool, "--root", str(ROOT), "--json")
+    if not (why or "").startswith("skipped: could not start"):
+        _touch(LEGACY_STAMP, _tool_sig(tool))   # a run that failed or timed out counts too, until the tool changes
     if why:
         return why
-    savelock.atomic_write(LEGACY_STAMP, _now().strftime("%Y-%m-%dT%H:%M:%SZ") + "\n")
+    _touch(LEGACY_STAMP)
     # status: archived is how this KB retires a note on purpose, so it is not a finding
     n = sum(1 for c in data["candidates"] if "status: archived" not in c["reason"])
     return f"{n} note(s) marked deprecated, obsolete or similar" + ("; the cleanup skill reviews them (report only)" if n else "")
 
 
 def _advisories():
+    if os.environ.get("SAVE_ADVISORIES") == "0":
+        return {name: "skipped: SAVE_ADVISORIES=0" for name in ("surface", "legacy_scan")}
     out = {}
     for name, fn in (("surface", _advise_surface), ("legacy_scan", _advise_legacy)):
         try:
@@ -453,6 +538,33 @@ def _advisories():
         except Exception as e:   # noqa: BLE001  an advisory can never fail the save
             out[name] = f"skipped: {type(e).__name__}"
     return out
+
+
+def _find_refresh():
+    """Ask the find index to pick up the notes just saved: one detached, memory-capped refresh of the `kb` root, started at
+    most once per FIND_REFRESH_MIN minutes. -> 'started' | 'skipped: <why>'. The stamp is written before the attempt, so a
+    start that hangs or fails is not retried by the next save either."""
+    if os.environ.get("SAVE_FIND_REFRESH") == "0":
+        return "skipped: SAVE_FIND_REFRESH=0"
+    try:
+        with open(kb_audit.workbench_home() / "config.json", encoding="utf-8-sig") as f:
+            cfg = json.load(f)
+    except (OSError, ValueError):
+        cfg = None
+    py, db = (cfg.get("knowledge_python"), cfg.get("knowledge_db")) if isinstance(cfg, dict) else (None, None)
+    if not (py and db):
+        return "skipped: config.json has no knowledge_python and knowledge_db"
+    tool = kb_audit.workbench_home() / "kit" / "plugins" / "workbench-core" / "skills" / "find" / "scripts" / "doc_index.py"
+    if not tool.is_file():
+        return "skipped: the find script is not installed"
+    age = _stamp_age(FIND_STAMP)
+    if _within(age, timedelta(minutes=FIND_REFRESH_MIN)):
+        return f"skipped: a refresh was started {int(age.total_seconds() // 60)} min ago (at most one per {FIND_REFRESH_MIN} min)"
+    _touch(FIND_STAMP)
+    data, why = _advise(tool, "--db", str(db), "refresh", "--root", "kb", "--detach", "--json", py=str(py), timeout=FIND_TIMEOUT)
+    if why:
+        return why
+    return "started" if data.get("started") is True else "skipped: not started (a refresh is already running, or memcap is missing)"
 
 
 # ── --pre ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -469,6 +581,8 @@ def pre(verbose=False):
     mine = _my_flag()
     _reap(out, keep=mine)
     out["resume_pending"] = mine is not None
+    if mine and not SESSION_ID:
+        out["flag_claimed_without_session_id"] = True
     out["mode_hint"] = "precompact-resume" if mine else "inline"
     out["stamp"] = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %z")   # the clock for history headings
     others = [p.name for p in _flag_files() if not (mine and p.name == mine.name)]
@@ -541,8 +655,7 @@ def pre(verbose=False):
         out["audit"] = rows
 
     mrows = _metric_rows()
-    recent = [r for r in mrows if (_ts(r) or now - timedelta(days=1)) >= now - timedelta(minutes=RECENT_SAVE_MIN)]
-    out["recent_other_saves"] = [{"ts": r.get("ts"), "domains": r.get("domains")} for r in recent][-5:]
+    out["recent_other_saves"] = _recent_saves(now, mrows)
     last = _last_full_save()
     out["last_save_minutes_ago"] = int((now - last).total_seconds() // 60) if last else None   # the skip gate reads it
     out["ac_hash"] = _ac_hash()
@@ -710,6 +823,8 @@ def post(args):
         return 1 if res == "busy" else 0
     mine = _my_flag()
     report["mode"] = "precompact-resume" if mine else "inline"
+    if mine and not SESSION_ID:
+        report["flag_claimed_without_session_id"] = True
 
     files = [_winpath(x) for a in (args.files or []) for x in ([a] if Path(_winpath(a)).exists() else a.split())]
     if AC.exists() and AC.as_posix() not in [Path(f).as_posix() for f in files]:
@@ -757,7 +872,7 @@ def post(args):
                 report["stamp_skipped"] = skipped
             if mine:
                 for state in (STATE, OLD_STATE):   # the legacy copy too, or the next start would raise it again
-                    _flag(SESSION_ID, state).unlink(missing_ok=True)
+                    (state / mine.name).unlink(missing_ok=True)
                 report["flag_cleared"] = mine.name
     except savelock.LockBusy:
         report["daily_log"], report["stamped"] = "skipped: lock busy", []
@@ -774,11 +889,16 @@ def post(args):
     if str(report["git_push"]).startswith("failed"):
         _need(report, "git push failed: the commit is local only")
 
+    report["recent_other_saves"] = _recent_saves(ts, _metric_rows())   # before this save's own row, so they are the others
     key = f"{ts:%Y%m%d}-{domains[0]}-{_ac_hash()}-{_h(args.note or '', 4)}"   # 7. metrics
     res = _append_metric({"ts": report["ts"], "key": key, "mode": report["mode"], "domains": domains,
                           "ac_hash": _ac_hash(), "reindex": str(report["reindex"])[:80], "note": (args.note or "")[:400]})
     report["metrics"] = {"busy": "NOT recorded (lock busy): re-run --post", "already": "already recorded"}.get(res, "recorded")
-    report["advisories"] = _advisories()                                # 8. never an action, never an error
+    try:                                                                # 8. find index: detached, bounded, never an error
+        report["find_refresh"] = _find_refresh()
+    except Exception as e:   # noqa: BLE001  a refresh can never fail the save
+        report["find_refresh"] = f"skipped: {type(e).__name__}"
+    report["advisories"] = _advisories()                                # 9. never an action, never an error
     print(json.dumps(report, indent=1))
     return 0
 

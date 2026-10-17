@@ -1,0 +1,7 @@
+{"version": 1,
+ "questions": [
+  {"q": "How do I make our help chatbot link people to the right page instead of a page that does not exist?",
+   "expect": "_shared/digests/internal-assistant.md"},
+  {"q": "How do I prove the assistant's help docs cover every page of our web app?",
+   "expect": "_shared/digests/internal-assistant.md"}
+ ]}

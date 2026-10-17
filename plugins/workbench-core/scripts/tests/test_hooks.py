@@ -1,4 +1,4 @@
-"""Tests for the workbench-core hooks other than the guard engine, plus the hook wiring itself. Run:
+"""Tests for the workbench-core hooks (session start, precompact, read-flood, checkpoint, ...) and the hook wiring itself. Run:
     python -m unittest discover -s plugins/workbench-core/scripts/tests
 Each hook runs as a subprocess with a temp Claude home, workbench home and knowledge base."""
 import json
@@ -21,6 +21,7 @@ sys.path.insert(0, str(SCRIPTS))
 import _wb  # noqa: E402
 import auto_invoke  # noqa: E402
 KEY = "AKIA" + "X" * 16          # built at runtime: this file holds no credential shape
+WORD = "gu" + "ard"              # the removed feature's name, built at runtime: asserted absent from every banner
 
 
 class Hooks(unittest.TestCase):
@@ -31,7 +32,7 @@ class Hooks(unittest.TestCase):
         (self.tmp / "claude").mkdir()
         self.wb = self.tmp / "claude" / "workbench"
         self.env = {**os.environ, "CLAUDE_CONFIG_DIR": str(self.tmp / "claude"), "WORKBENCH_KB_ROOT": str(self.kb),
-                    "GUARDS_LOG_DIR": str(self.tmp / "logs"), "PYTHONIOENCODING": "utf-8"}
+                    "PYTHONIOENCODING": "utf-8"}
         self.env.pop("WORKBENCH_LOG_INSTRUCTIONS", None)
         # hermetic: no managed policy from this machine, and a stand-in for the capability report (never the real one)
         self.managed = self.tmp / "managed"
@@ -71,7 +72,7 @@ class Hooks(unittest.TestCase):
         self.assertIn("proxy cert rollout", ctx)
         self.assertIn("PINS (user settings; managed policy may override", ctx)
         self.assertIn("main=opus/high", ctx)
-        self.assertIn("a push to a remote host is refused or asked about until the user adds hosts", ctx)
+        self.assertNotIn(WORD, ctx.lower(), "the banner names no removed feature")
         self.kstate().mkdir(parents=True, exist_ok=True)
         (self.kstate() / "precompact-s1.flag").write_text("x")
         ctx = self.hook("session_start.py", {"session_id": "s1"})["hookSpecificOutput"]["additionalContext"]
@@ -106,15 +107,11 @@ class Hooks(unittest.TestCase):
         (self.wb / "instructions").mkdir(parents=True)
         (self.wb / "instructions" / "CLAUDE.md").write_text("x")
         (self.tmp / "claude" / "CLAUDE.md").write_text("# mine\n")
-        (self.tmp / "logs").mkdir()
-        stamp = datetime.datetime.now().isoformat(timespec="seconds")
-        (self.tmp / "logs" / "guards.log").write_text(f"{stamp} sid=s tool=Bash cwd=/x ERROR rule y skipped\n")
         ctx = self.hook("session_start.py", {"session_id": "s1"})["hookSpecificOutput"]["additionalContext"]
         self.assertIn("main=opus/xhigh", ctx, "modelSettings effort beats the top-level effortLevel")
         self.assertIn("worker=sonnet/high", ctx)
         self.assertIn("haiku=haiku-x", ctx)
         self.assertIn("no longer imports the workbench instructions", ctx)
-        self.assertIn("1 guard error(s) since yesterday", ctx)
         self.assertIn(f"OVERDUE - {past} send the report", ctx)
         self.assertNotIn(f"DUE - {far}", ctx)
         self.assertNotIn("OVERDUE - ~~", ctx)
@@ -148,7 +145,7 @@ class Hooks(unittest.TestCase):
         self.assertTrue((self.kstate() / "precompact-s2.flag").exists())
         self.assertEqual(len(list((self.kstate() / "snapshots").glob("active-context-*.md"))), 1)
         self.assertEqual(self.tree(self.kb), before, "the hook writes nothing into the knowledge base")
-        self.assertRegex(json.loads((self.wb / "state" / "guard-heartbeat.json").read_text())["last_precompact"],
+        self.assertRegex(json.loads((self.wb / "state" / "hooks-heartbeat.json").read_text())["last_precompact"],
                          r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
 
     def test_precompact_state_follows_the_kb_root(self):
@@ -161,46 +158,40 @@ class Hooks(unittest.TestCase):
         self.assertTrue((self.kstate(other) / "precompact-s3.flag").exists() and (self.kstate() / "precompact-s3.flag").exists())
 
     def test_heartbeat_keeps_unknown_keys_and_stamps_last_start(self):
-        self.state("guard-heartbeat.json", {"version": 1, "last_fired": None, "sessions_since_fire": 0, "fired_total": 0,
-                                            "note_from_setup": "keep me"})
-        beat = self.wb / "state" / "guard-heartbeat.json"
+        """I3: <WB>/state/hooks-heartbeat.json = {last_start, last_precompact}; every SessionStart source stamps last_start."""
+        self.state("hooks-heartbeat.json", {"note_from_setup": "keep me"})
+        beat = self.wb / "state" / "hooks-heartbeat.json"
         read = lambda: json.loads(beat.read_text())  # noqa: E731
-        self.start("startup")
-        d = read()
-        self.assertEqual((d["note_from_setup"], d["sessions_since_fire"]), ("keep me", 1))
-        self.assertRegex(d["last_start"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
-        d["last_start"] = "2000-01-01T00:00:00Z"
-        beat.write_text(json.dumps(d))
-        self.start("compact")                                                # a compaction proves the hook ran, adds no session
-        d = read()
-        self.assertNotEqual(d["last_start"], "2000-01-01T00:00:00Z")
-        self.assertEqual((d["sessions_since_fire"], d["note_from_setup"]), (1, "keep me"))
+        stamp = r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$"
+        for source in ("startup", "resume", "clear", "compact"):
+            d = read()
+            d["last_start"] = "2000-01-01T00:00:00Z"
+            beat.write_text(json.dumps(d))
+            self.start(source)
+            d = read()
+            self.assertRegex(d["last_start"], stamp, source)
+            self.assertNotEqual(d["last_start"], "2000-01-01T00:00:00Z", source)
+            self.assertEqual(d["note_from_setup"], "keep me", source)
         self.hook("precompact.py", {"session_id": "s2"})
-        self.assertEqual((read()["sessions_since_fire"], read()["note_from_setup"], "last_precompact" in read()), (1, "keep me", True))
+        d = read()
+        self.assertRegex(d["last_precompact"], stamp)
+        self.assertRegex(d["last_start"], stamp)                              # the other stamp is untouched
+        self.assertEqual(sorted(d), ["last_precompact", "last_start", "note_from_setup"])
 
-    def test_self_test_marks_only_self_test_at(self):
-        """H2: the installer's self-test (env WB_SELF_TEST=1) must not look like a real guard fire."""
-        old = "2000-01-01T00:00:00Z"
-        seed = {"version": 1, "last_fired": old, "sessions_since_fire": 5, "fired_total": 7, "last_start": old,
-                "note_from_setup": "keep me"}
-        self.state("guard-heartbeat.json", seed)
-        beat = self.wb / "state" / "guard-heartbeat.json"
-        read = lambda: json.loads(beat.read_text())  # noqa: E731
-        call = {"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": str(self.tmp)}
-        self.hook("guards/pretooluse.py", call, env={"WB_SELF_TEST": "1"})
-        d = read()
-        self.assertRegex(d["self_test_at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
-        self.assertEqual((d["last_fired"], d["fired_total"], d["sessions_since_fire"], d["note_from_setup"]),
-                         (old, 7, 5, "keep me"))
-        self.hook("session_start.py", {"session_id": "s1", "source": "startup"}, env={"WB_SELF_TEST": "1"})   # stamps held back too
-        d = read()
-        self.assertEqual((d["last_start"], d["sessions_since_fire"]), (old, 5))
-        for other in ("0", "", "true"):                                      # only the exact value 1 counts
-            self.hook("guards/pretooluse.py", call, env={"WB_SELF_TEST": other})
-        d = read()
-        self.assertEqual((d["fired_total"], d["sessions_since_fire"]), (10, 0))
-        self.assertNotEqual(d["last_fired"], old)
-        self.assertEqual(self.hook("guards/pretooluse.py", call, env={"WB_SELF_TEST": "1"}), None)   # and the call still goes through
+    def test_heartbeat_is_created_by_the_first_stamp_and_never_raises(self):
+        beat = self.wb / "state" / "hooks-heartbeat.json"
+        self.assertFalse(beat.exists())
+        self.start("startup")
+        self.assertEqual(sorted(json.loads(beat.read_text())), ["last_start"])
+        self.assertEqual(list(beat.parent.glob("*.tmp")), [], "the atomic write leaves no temp file")
+        beat.write_text("{broken")                                           # an unreadable file is replaced, not fatal
+        self.start("startup")
+        self.assertEqual(sorted(json.loads(beat.read_text())), ["last_start"])
+        shutil.rmtree(self.wb / "state")
+        (self.wb / "state").write_text("a file where the folder should be")   # unwritable: heartbeat() returns None
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(self.tmp / "claude")}):
+            self.assertIsNone(_wb.heartbeat("last_start"))
+        self.assertIn("PINS (user settings", self.start("startup"))           # and the banner still prints
 
     def test_statusline(self):
         r = subprocess.run([sys.executable, str(SCRIPTS / "statusline.py")], capture_output=True, text=True,
@@ -233,27 +224,32 @@ class Hooks(unittest.TestCase):
         self.assertEqual(self.status({"prompt_cache": {"hit_ratio": 0.5}}), "[Claude] cache:50%")
         self.assertEqual(self.status({"cost": {}, "context_window": {}}), "[Claude]")
 
-    def test_read_flood_guard(self):
+    def test_read_flood(self):
         big = self.tmp / "big.txt"
         big.write_text(("word " * 20 + "\n") * 2000, encoding="utf-8")
-        out = self.hook("read_flood_guard.py", {"tool_name": "Read", "tool_input": {"file_path": str(big)}})
+        out = self.hook("read_flood.py", {"tool_name": "Read", "tool_input": {"file_path": str(big)}})
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
-        self.assertIsNone(self.hook("read_flood_guard.py", {"tool_input": {"file_path": str(big), "limit": 50}}))
+        self.assertIsNone(self.hook("read_flood.py", {"tool_input": {"file_path": str(big), "limit": 50}}))
         longline = self.tmp / "long.txt"
         longline.write_text("x," * 60_000 + "\n" + "y\n" * 100, encoding="utf-8")   # one huge line
-        out = self.hook("read_flood_guard.py", {"tool_input": {"file_path": str(longline), "limit": 5}})
+        out = self.hook("read_flood.py", {"tool_input": {"file_path": str(longline), "limit": 5}})
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
-        out = self.hook("read_flood_guard.py", {"tool_input": {"file_path": str(self.tmp)}})
+        out = self.hook("read_flood.py", {"tool_input": {"file_path": str(self.tmp)}})
         self.assertIn("directory", out["hookSpecificOutput"]["permissionDecisionReason"])
+        self.assertTrue(out["hookSpecificOutput"]["permissionDecisionReason"].startswith("read-flood: "))
         small = self.tmp / "s.txt"
         small.write_text("hi")
-        self.assertIsNone(self.hook("read_flood_guard.py", {"tool_input": {"file_path": str(small)}}))
-        self.assertIsNone(self.hook("read_flood_guard.py", None, raw="not json"))
+        self.assertIsNone(self.hook("read_flood.py", {"tool_input": {"file_path": str(small)}}))
+        self.assertIsNone(self.hook("read_flood.py", None, raw="not json"))
+        log = self.wb / "logs" / "read-flood.log"
+        self.assertFalse(log.exists())
+        self.assertIsNone(self.hook("read_flood.py", {"tool_input": {"file_path": "no\0such.txt"}}))   # internal error: no decision
+        self.assertIn("READFLOOD unhandled exception", log.read_text(encoding="utf-8"))
         if os.name == "nt":   # a Git Bash path is denied with the Windows path to use, never rewritten
-            out = self.hook("read_flood_guard.py", {"tool_input": {"file_path": "/tmp/" + "no-such-file-wb.txt"}})
+            out = self.hook("read_flood.py", {"tool_input": {"file_path": "/tmp/" + "no-such-file-wb.txt"}})
             self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
             drive = str(small)[0].lower()
-            out = self.hook("read_flood_guard.py", {"tool_input": {"file_path": f"/{drive}" + str(small)[2:].replace("\\", "/")}})
+            out = self.hook("read_flood.py", {"tool_input": {"file_path": f"/{drive}" + str(small)[2:].replace("\\", "/")}})
             self.assertIn(str(small).replace("\\", "/")[2:], out["hookSpecificOutput"]["permissionDecisionReason"])
 
     def transcript(self, text):
@@ -284,19 +280,12 @@ class Hooks(unittest.TestCase):
                                            "prompt": "fix the failing test in the parser"})["hookSpecificOutput"]["additionalContext"]
         self.assertTrue("/workbench-core:repo-fix (" in ctx or "/workbench-core:ratchet (" in ctx, ctx)
 
-    def test_install_gate(self):
-        ev = lambda c: {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": c}}  # noqa: E731
-        plain, marked = "claude plugin install foo@bar", "claude plugin install foo@bar  # skill-scanned"
-        none = {"SKILLSPECTOR_EXE": str(self.tmp / "missing.exe"), "PATH": str(self.tmp)}
-        for cmd in (plain, marked):    # no scanner: ask, marker or not
-            out = self.hook("auto_invoke.py", ev(cmd), env=none)
-            self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "ask", cmd)
-        exe = self.tmp / "skillspector.exe"
-        exe.write_text("x")
-        have = {"SKILLSPECTOR_EXE": str(exe)}
-        self.assertEqual(self.hook("auto_invoke.py", ev(plain), env=have)["hookSpecificOutput"]["permissionDecision"], "deny")
-        out = self.hook("auto_invoke.py", ev(marked), env=have)
-        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "ask", "the marker alone never passes")
+    def test_installing_a_plugin_is_not_gated(self):
+        """auto_invoke makes no permission decision on a shell command, even a plugin install."""
+        ev = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "claude plugin install foo@bar"}}
+        self.assertIsNone(self.hook("auto_invoke.py", ev))
+        self.assertIn("hookSpecificOutput", self.hook("auto_invoke.py", {"hook_event_name": "UserPromptSubmit",
+                                                                         "prompt": "ok, let's wrap up"}), "positive control")
 
     def test_auto_invoke_covers_every_skill(self):
         plugins = PLUGIN.parent
@@ -399,11 +388,12 @@ class Hooks(unittest.TestCase):
 
     def test_session_start_quiet_when_nothing_is_wrong(self):
         ctx = self.start()
-        for text in ("Setup pending", "Model routing", "managed policy changed", "guards have not run", "capability report"):
+        for text in ("Setup pending", "Model routing", "managed policy changed", "have not run", "capability report"):
             self.assertNotIn(text, ctx)
+        self.assertNotIn(WORD, ctx.lower())
         self.assertFalse(self.marker.exists())
 
-    def test_session_start_setup_routing_policy_guards_and_stale_report(self):
+    def test_session_start_setup_routing_policy_and_stale_report(self):
         self.state("setup-state.json", {"version": 1, "phase": "wsl", "running": False, "exit_code": 5,
                                         "next": "/workbench-core:setup resume", "ask_it": [{"item": "wsl", "text": "x"}],
                                         "failed": []})
@@ -413,7 +403,6 @@ class Hooks(unittest.TestCase):
         self.state("policy-snapshot.json", {"version": 1, "classes": {"hooks_locked": False, "marketplaces_closed": False}})
         (self.managed / "managed-settings.json").write_text(json.dumps({"allowManagedHooksOnly": True,
                                                                         "strictKnownMarketplaces": []}))
-        self.state("guard-heartbeat.json", {"version": 1, "last_fired": None, "sessions_since_fire": 2, "fired_total": 0})
         self.state("capability-pre.json", {"version": 1}, age_days=10)
         (self.kb / "active-context.md").write_text("\n".join(f"- line {i} " + "y" * 80 for i in range(400)), encoding="utf-8")
         out = self.hook("session_start.py", {"session_id": "s1", "source": "startup"})
@@ -423,24 +412,11 @@ class Hooks(unittest.TestCase):
         self.assertEqual(rows, ["R-0 persona0 opus-5-5/xhigh", "R-1 persona1 sonnet-5-5/xhigh*", "R-2 persona2 opus-5-5/xhigh",
                                 "R-3 persona3 opus-5-5/xhigh", "R-4 persona4 opus-5-5/xhigh"])       # five rows, fallback marked
         self.assertIn("managed policy changed since setup: hooks_locked, marketplaces_closed; run setup.py doctor", ctx)
-        self.assertIn("guards have not run in 3 sessions", ctx)
         self.assertIn("The capability report is 10 days old: a quick refresh was started in the background.", ctx)
         self.assertEqual(self.called(), ["run", "--phase", "refresh", "--quick", "--detach"])
         self.assertLessEqual(len(json.dumps(out, ensure_ascii=False).encode("utf-16-le")) // 2, 10_000)
         self.assertIn("TRUNCATED", ctx)                       # the notes stay; the active-context tail gives way
-        self.assertEqual(json.loads((self.wb / "state" / "guard-heartbeat.json").read_text())["sessions_since_fire"], 3)
-
-    def test_session_start_counts_sessions_not_clears_and_compactions(self):
-        beat = self.wb / "state" / "guard-heartbeat.json"
-        count = lambda: json.loads(beat.read_text())["sessions_since_fire"]  # noqa: E731
-        self.assertNotIn("guards have not run", self.start("startup") + self.start("resume"))
-        self.assertEqual(count(), 2)
-        self.start("clear")
-        self.start("compact")
-        self.assertEqual(count(), 2)
-        self.assertIn("guards have not run in 3 sessions", self.start("startup"))
-        self.assertIn("guards have not run in 3 sessions", self.start("compact"))   # warns from the saved count, adds nothing
-        self.assertEqual(count(), 3)
+        self.assertIn("last_start", json.loads((self.wb / "state" / "hooks-heartbeat.json").read_text()))
 
     def test_session_start_knowledge_verify_line(self):
         import datetime as dt
@@ -475,7 +451,7 @@ class Hooks(unittest.TestCase):
         self.assertFalse(self.marker.exists())
 
     def test_session_start_survives_broken_state_files(self):
-        for name in ("setup-state.json", "routing.effective.json", "guard-heartbeat.json", "policy-snapshot.json"):
+        for name in ("setup-state.json", "routing.effective.json", "hooks-heartbeat.json", "policy-snapshot.json"):
             (self.wb / "state").mkdir(parents=True, exist_ok=True)
             (self.wb / "state" / name).write_text("{not json", encoding="utf-8")
         (self.managed / "managed-settings.json").write_text("{broken")
@@ -560,43 +536,9 @@ class Hooks(unittest.TestCase):
         self.assertNotEqual(json.loads(self.snap("--json").stdout)["sha256"], base["sha256"])
         self.assertIn("managed policy", self.snap().stdout)
 
-    # ── _wb.config_redirected (profiles registry) ──
-    def test_registered_profile_is_not_redirected(self):
-        main, prof, other = (self.tmp / n for n in ("main", "profiles/a/config", "elsewhere"))
-        (main / "workbench").mkdir(parents=True)
-        (main / "workbench" / "profiles.json").write_text(json.dumps({"version": 1, "profiles": [
-            {"name": "a", "config_dir": str(prof), "kb_root": str(self.tmp / "kb-a"), "knowledge_db": "x", "created": "t"}]}))
-        record = self.tmp / "installed-config.json"
-        record.write_text(json.dumps({"claude_home": str(main)}))
-        def redirected(cfg_dir):
-            with mock.patch.object(_wb, "RECORD", record), mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(cfg_dir)}):
-                return _wb.config_redirected()
-        self.assertFalse(redirected(main))
-        self.assertFalse(redirected(prof))                       # registered: not redirected
-        self.assertTrue(redirected(other))                       # unregistered: redirected
-        self.assertTrue(redirected(prof.parent))
-        if os.name == "nt":                                      # case-insensitive on Windows
-            self.assertFalse(redirected(str(prof).upper()))
-        (main / "workbench" / "profiles.json").write_text("{broken")
-        self.assertTrue(redirected(prof))                        # an unreadable registry registers nothing
-        (main / "workbench" / "profiles.json").unlink()
-        self.assertTrue(redirected(prof))
-        with mock.patch.object(_wb, "RECORD", self.tmp / "none.json"), mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(other)}):
-            self.assertFalse(_wb.config_redirected())            # not installed by the installer: nothing to compare
-
     # ── settings profiles ──
     def profile(self, name):
         return json.loads((REPO / "settings" / "profiles" / f"{name}.fragment.json").read_text(encoding="utf-8"))
-
-    def test_every_github_write_verb_is_an_ask_rule_in_both_profiles(self):
-        verbs = json.loads((SCRIPTS / "guards" / "gh_write_verbs.json").read_text(encoding="utf-8"))["verbs"]
-        want = {f"{sh}(gh {n} {v} *)" for n, vs in verbs.items() for v in vs for sh in ("Bash", "PowerShell")}
-        self.assertEqual(len(want), 168)
-        for name in ("corporate", "permissive"):
-            perms = self.profile(name)["permissions"]
-            self.assertEqual(want - set(perms["ask"]), set(), name)
-            self.assertEqual(set(perms["ask"]) & set(perms.get("allow", [])), set(), f"{name}: an ask rule is also allowed")
-            self.assertEqual(len(perms["ask"]), len(set(perms["ask"])), f"{name}: duplicate ask rule")
 
     def test_profiles_carry_the_16gb_keys_and_telemetry_off(self):
         for name, subagents in (("corporate", "8"), ("permissive", "12")):
@@ -633,10 +575,12 @@ class Wiring(unittest.TestCase):
         def scripts(event, tool=None):
             return {Path(x["args"][-1]).name for g in h.get(event, [])
                     if tool is None or re.fullmatch(g.get("matcher", ".*"), tool) for x in g["hooks"]}
-        self.assertEqual(scripts("PreToolUse", "Bash"), {"pretooluse.py", "auto_invoke.py"})
-        for tool in ("Edit", "Write", "NotebookEdit", "WebFetch", "Agent", "Grep"):
-            self.assertIn("pretooluse.py", scripts("PreToolUse", tool), tool)
-        self.assertEqual(scripts("PreToolUse", "Read"), {"pretooluse.py", "read_flood_guard.py"})
+        self.assertEqual(scripts("PreToolUse", "Read"), {"read_flood.py"})
+        for tool in ("Bash", "PowerShell", "Edit", "Write", "NotebookEdit", "WebFetch", "Agent", "Grep"):
+            self.assertEqual(scripts("PreToolUse", tool), set(), tool)
+        # the whole PreToolUse section: the Read group, nothing else
+        self.assertEqual([(g["matcher"], [Path(x["args"][-1]).name for x in g["hooks"]]) for g in h["PreToolUse"]],
+                         [("Read", ["read_flood.py"])])
         self.assertEqual(scripts("PostToolUse", "Edit"), {"checkpoint.py", "ponytail_auto.py"})
         self.assertEqual(scripts("PostToolUse", "NotebookEdit"), {"ponytail_auto.py"})
         self.assertEqual(scripts("UserPromptSubmit"), {"ponytail_auto.py", "auto_invoke.py"})
@@ -644,30 +588,23 @@ class Wiring(unittest.TestCase):
                       ("InstructionsLoaded", "instructions_loaded.py"), ("SessionStart", "session_start.py")):
             self.assertIn(s, scripts(ev), ev)
 
-    def test_tokensave_edit_tools_are_wired_to_the_guard(self):
-        h = json.loads((PLUGIN / "hooks" / "hooks.json").read_text())["hooks"]
-        def scripts(tool):
-            return {Path(x["args"][-1]).name for g in h["PreToolUse"] if re.fullmatch(g.get("matcher", ".*"), tool)
-                    for x in g["hooks"]}
-        for verb in ("str_replace", "multi_str_replace", "insert_at", "insert_at_symbol", "replace_symbol", "ast_grep_rewrite",
-                     "replace_lines", "delete_symbol"):
-            self.assertEqual(scripts("mcp__tokensave__tokensave_" + verb), {"pretooluse.py"}, verb)
-        for tool in ("search", "callers", "callees", "impact", "context", "status"):
-            self.assertEqual(scripts("mcp__tokensave__tokensave_" + tool), set(), tool)      # read-only: no hook
-        self.assertNotIn("tokensave", (PLUGIN / "hooks" / "hooks.json").read_text().lower())   # the matcher names verbs only
-
-    def test_database_tools_and_the_failure_hook_are_wired(self):
+    def test_tool_hooks_cover_nothing_but_read_and_shell(self):
         h = json.loads((PLUGIN / "hooks" / "hooks.json").read_text())["hooks"]
         def scripts(event, tool):
             return {Path(x["args"][-1]).name for g in h.get(event, []) if re.fullmatch(g.get("matcher", ".*"), tool)
                     for x in g["hooks"]}
-        for tool in ("mcp__postgres-db__execute_sql", "mcp__PoStGrEs__q", "mcp__MySQL__run", "mcp__acme_DataBase__x",
-                     "mcp__mssql__query", "mcp__SQLite__q", "mcp__plugin_x_pg_Sql__exec"):
-            self.assertEqual(scripts("PreToolUse", tool), {"pretooluse.py"}, tool)
-        for tool in ("mcp__github__create_issue", "mcp__context7__query-docs"):
+        for verb in ("str_replace", "multi_str_replace", "insert_at", "insert_at_symbol", "replace_symbol", "ast_grep_rewrite",
+                     "replace_lines", "delete_symbol", "search", "callers", "context", "status"):
+            self.assertEqual(scripts("PreToolUse", "mcp__tokensave__tokensave_" + verb), set(), verb)
+        for tool in ("mcp__postgres-db__execute_sql", "mcp__MySQL__run", "mcp__github__create_issue", "mcp__context7__query-docs"):
             self.assertEqual(scripts("PreToolUse", tool), set(), tool)
-        self.assertIn("mcp__.*([Pp][Oo][Ss][Tt][Gg][Rr][Ee][Ss]|[Ss][Qq][Ll]|[Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee]).*",
-                      (PLUGIN / "hooks" / "hooks.json").read_text())
+        self.assertNotIn("tokensave", (PLUGIN / "hooks" / "hooks.json").read_text().lower())   # code-graph rule: no hook names it
+
+    def test_the_failure_hook_is_wired(self):
+        h = json.loads((PLUGIN / "hooks" / "hooks.json").read_text())["hooks"]
+        def scripts(event, tool):
+            return {Path(x["args"][-1]).name for g in h.get(event, []) if re.fullmatch(g.get("matcher", ".*"), tool)
+                    for x in g["hooks"]}
         for tool in ("Bash", "mcp__x__y"):
             self.assertEqual(scripts("PostToolUseFailure", tool), {"bug_hint.py"}, tool)
         self.assertNotIn("bug_hint.py", scripts("PostToolUse", "Bash"))

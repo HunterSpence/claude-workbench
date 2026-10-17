@@ -25,7 +25,7 @@ CUES = [("00:00:05", "Alice Example", "Welcome everyone, let us start with the r
 class Env:
     """A throwaway workbench home and data folder; `run()` calls ingest.main in-process and returns (exit code, stdout)."""
 
-    def __init__(self, ack=True, extra_env=None):
+    def __init__(self, extra_env=None):
         self.tmp = tempfile.TemporaryDirectory(prefix="wb-ingest-test-")
         t = Path(self.tmp.name)
         self.wb, self.data, self.bin = t / "wb", t / "data", t / "bin"
@@ -37,8 +37,6 @@ class Env:
                     "WB_FAKE_FIND_LOG": str(self.find_log), "WB_FAKE_CLAUDE_LOG": str(self.claude_log), "PYTHONUTF8": "1",
                     "PATH": str(self.bin) + os.pathsep + os.environ.get("PATH", ""), **(extra_env or {})}
         self.P = common.Paths(self.env)
-        if ack:
-            self.settings(infosec_ack="2026-10-08T00:00:00Z")
         self.install_fake_claude()
 
     def close(self):

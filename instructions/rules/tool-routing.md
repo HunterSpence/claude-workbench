@@ -6,27 +6,22 @@ missing capability: say so and let the user fix it; never silently route around 
 
 ## By task
 - **Web research:** native WebSearch and WebFetch; long-form or comparison research goes to the
-  `researcher` agent or `deep-research`. A 403 is not "unreadable": say which fetcher failed. A bot
-  wall or captcha is a stop: hand it to the user. WebSearch is one per-session budget shared with
+  `researcher` agent or `deep-research`. A 403 is not "unreadable": say which fetcher failed. A
+  captcha needs the user. WebSearch is one per-session budget shared with
   every subagent: plan research fan-outs around it.
 - **Work documents:** `find` searches one local index over synced work libraries, captured pages
   and the kit's how-tos; cite the originals.
 - **Which knowledge tool** (guide 54): `find` for documents, `kb_search` for curated notes, `ctx` for past
   sessions, the code graph for symbols, WebSearch for the outside.
-- **Office output:** `office-pptx`, `office-xlsx` and `office-docx` build files; `office-render`
-  renders them so you check the result first, and scrubs a copy before an Office file leaves the
-  organisation. Editing inside Office: the Claude for Microsoft 365 add-ins, if your admin allows them.
+- **Office output:** `office-pptx`, `office-xlsx` and `office-docx` build files, `pdf-report` a report PDF; `office-render`
+  renders them so you check the result first, and scrubs hidden content from a copy. Editing inside
+  Office: the Claude for Microsoft 365 add-ins.
 - **GitHub:** the `gh` CLI against your enterprise host (`--hostname`, or `GH_HOST`); the `github`
   skill covers the details.
-- **Framework or SDK docs:** the vendor's site through WebFetch, or a docs MCP your organisation
-  approved. Claude models, pricing, limits and evals: the bundled `claude-api` skill, never memory.
+- **Framework or SDK docs:** the vendor's site through WebFetch, or a docs MCP. Claude models, pricing, limits and evals: the bundled `claude-api` skill, never memory.
 - **Code graph:** `rules/code-graph.md`. **Browser:** `rules/browser.md`.
-- **Databases:** read-only unless the user asks otherwise; production writes are a Red Line.
-- **Servers:** ssh as the least-privileged user that can do the job; an admin or root login is
-  break-glass, so say why first.
-- **Reports** meant for someone else: an Artifact link when your organisation's Claude offers
-  Artifacts (your own organisation's data only; the user decides who sees it), else a Markdown
-  file in the workspace, with its path.
+- **Reports** meant for someone else: an Artifact link when your Claude offers Artifacts, else a
+  Markdown file in the workspace, with its path.
 - **Review:** the bundled `/code-review`, `/security-review` for the branch's security diff,
   `/simplify` for cleanup.
 - **How-to guides:** search them with `find` (its root `howto`); read on demand, never always-loaded.
@@ -41,18 +36,13 @@ read) · `grilling` (stress-test a plan) · `playwright-cli` · `kit-update` ("c
   `onboard` (suggest it while USER.md holds placeholders), `/workbench-capture:capture`, `/workbench-capture:ingest`, and
   the authoring and admin skills `batch-review`, `mcp-heal`, `plugin-factory`, `plugin-review`, `web-packager`,
   `mcp-builder`, `api-bridge` (REST to MCP), `app-navigator` and `brand-spec`.
-- **Before installing any plugin or skill:** check your organisation allows it, and run
-  `skill-scan` on its source first.
 
 ## MCP servers
-- **No personal MCP servers** on the work machine, and nothing that sends work data to a
-  service your organisation hasn't approved.
-- If your organisation manages MCP servers, theirs is the only list: don't add servers around it.
-- Otherwise keep one golden config as the single source of truth
-  (`{{WORKBENCH_HOME}}/kit/mcp/README.md`) and change it rather than hand-editing `~/.claude.json`.
+- Keep one golden config as the single source of truth (`{{WORKBENCH_HOME}}/kit/mcp/README.md`)
+  and change it rather than hand-editing `~/.claude.json`. A managed MCP list wins over it.
 
 ## What a subagent inherits
 Custom and built-in subagents load your CLAUDE.md, its imports and the project CLAUDE.md, **except
-the built-in `Explore` and `Plan` agents, which load none of it**: no Red Lines, no tenant rules.
-Paste the constraints a task needs into their prompt, and prefer `general-purpose` for anything
-touching infrastructure, credentials, another tenant's data or money.
+the built-in `Explore` and `Plan` agents, which load none of it**: none of these rules. Paste the
+constraints a task needs into their prompt, and prefer `general-purpose` for anything touching
+infrastructure or money.

@@ -26,8 +26,8 @@ before first use.
 | **document-skills** (docx, pptx, xlsx, pdf) | `anthropics/skills` | **Proprietary, source-available**: their LICENSE.txt forbids copying them outside Anthropic's services, derivative works and redistribution | `/plugin marketplace add anthropics/skills` then `/plugin install document-skills@anthropic-agent-skills`, only after legal or IT has read the licence. Never copy these files into a repository. This kit's office-pptx, office-xlsx and office-render skills are independent and use only the open-source libraries below |
 
 ## Not recommended on a managed laptop
-These are permissively licensed and popular, but each does something a managed corporate laptop
-usually should not allow without a security review. They are kept out of the default
+These are permissively licensed and popular, but each does something worth knowing before you add it on a managed
+laptop. They are kept out of the default
 `tools/fetch-upstream` set and listed only in `tools/fetch-upstream/upstream.optional.lock.json`.
 
 | What | Source | Licence | Why not by default |
@@ -43,11 +43,12 @@ organisation enabled that. Ask IT; neither needs anything from this repository.
 ## Tools the skills call (install yourself)
 | Tool | Used by | Source | Licence | Install |
 |---|---|---|---|---|
-| tokensave | MCP code graph | `aovestdipaperino/tokensave` | MIT | pinned release 7.12.1 + `SHA256SUMS`, see `mcp/README.md`. Held there on purpose (2026-10): from 7.13.0 the first launch of a new version silently reinstalls its agent integrations, rewriting rules text and git-hook sections, which this kit has not reviewed against its always-loaded budget and guards. `--with update-latest` does not move it (release-asset tools are never upgraded past their pin) |
+| tokensave | MCP code graph | `aovestdipaperino/tokensave` | MIT | pinned release 7.12.1 + `SHA256SUMS`, see `mcp/README.md`. Held there on purpose (2026-10): from 7.13.0 the first launch of a new version silently reinstalls its agent integrations, rewriting rules text and git-hook sections, which this kit has not reviewed against its always-loaded budget and permission rules. `--with update-latest` does not move it (release-asset tools are never upgraded past their pin) |
 | ctx | ctx-agent-history-search | `ctxrs/ctx` | Apache-2.0 | with `--with ctx`, setup fetches pinned release 2.2.8 (`ctx-windows-x64.exe`, about 212 MB), checks it against the SHA-256 in `bootstrap/packages.json`, and turns analytics, the daemon and self-upgrade off (see the skill) |
 | SkillSpector | skill-scan | `NVIDIA/skillspector` | Apache-2.0 | clone a pinned tag, `uv sync`, set `SKILLSPECTOR_EXE` |
 | GitHub CLI | github skill | `cli/cli` | MIT | your organisation's software portal, `winget install GitHub.cli`, or the release page |
 | LibreOffice (optional) | office-render, office-xlsx fallback | libreoffice.org | MPL-2.0 | usually needs IT on Windows; real Office via COM is used first |
+| Microsoft Edge | pdf-report (HTML to PDF engine) | Microsoft | Microsoft product terms | already on Windows 11; the skill never downloads a browser |
 | uv (optional) | the postgres MCP entry (`uvx`) | `astral-sh/uv` | MIT or Apache-2.0 | your software portal, or the release page |
 
 ## Node packages (from each skill's `scripts/package.json`; installed with `npm install --ignore-scripts`)
@@ -114,9 +115,11 @@ The React widget uses the app's own React (18 or later) and adds no package.
 | lxml (5 or newer) | office-render (`scrub.py`) | BSD-3-Clause |
 | python-pptx | office-pptx | MIT |
 | openpyxl | office-xlsx | MIT |
-| pypdfium2 | office-render | BSD-3-Clause or Apache-2.0 (bundles PDFium, BSD-3-Clause) |
-| Pillow | office-render, office-pptx | MIT-CMU |
+| pypdfium2 | office-render; pdf-report (check and PNG steps) | BSD-3-Clause or Apache-2.0 (bundles PDFium, BSD-3-Clause) |
+| Pillow | office-render, office-pptx, pdf-report (blank-page check) | MIT-CMU |
 | python-docx | office-docx (and find's tests) | MIT |
+| pypdf 6.19.0 | pdf-report (merge, split, rotate, metadata, forms, structure checks) | BSD-3-Clause |
+| Markdown 3.11 | pdf-report (Markdown to HTML) | BSD-3-Clause |
 | olefile | draft-reply, reading Outlook `.msg` files | BSD-2-Clause style (its LICENSE also carries the original PIL notice) |
 | anthropic | batch-review | MIT |
 | PyMuPDF | **not used** | AGPL-3.0: deliberately avoided |

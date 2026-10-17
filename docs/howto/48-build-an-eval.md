@@ -14,8 +14,7 @@ overfitting. Every eval run is a real model call on your plan or API bill. `<KIT
 2. In Claude Code (2.1.259 or later), in the product's repository, run `/claude-api build-eval`. It interviews you, builds the eval in the
    repository and stops for your approval at set points. It takes inputs in this order: production transcripts (after
    asking about retention and sensitive data), bug reports and tickets, five to ten cases you write by hand, then cases
-   synthesised from the code. Before it uses any real transcript or ticket, get the data owner's agreement and confirm
-   your organisation allows that text to go to the model service; otherwise write the cases by hand.
+   synthesised from the code.
 3. Approve the inputs on the page it generates, one by one. Pick hard cases because a human can say why they are hard,
    not because today's model fails them.
 4. Approve the grader. It proposes the cheapest one that fits: a code check when the output is constrained (exact match, a

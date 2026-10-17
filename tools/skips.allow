@@ -8,7 +8,6 @@ test_find::Captured.test_long_path_captured_file  # Windows-only feature (long-p
 test_live_controls::Live.*  # WB_LIVE=1 on Windows only: re-reads the ledger of a live run
 test_setup::Flows.*  # Windows-only: fake .cmd programs; skips on other platforms
 test_install::SetupChain.*  # Windows-only: fake .cmd programs; skips on other platforms
-test_guards::Generic.test_msys_paths  # Windows-only path form
 test_review::LocalModeTest.test_copy_skips_symlinks_and_git_metadata_and_reports_them  # skips only where the OS refuses symlinks for this user
 test_review::LocalModeTest.test_local_run_records_skipped_links_in_the_findings_header  # skips only where the OS refuses symlinks for this user
 test_review::PruneTest.test_a_symlink_named_like_a_secret_is_removed_and_its_target_left_alone  # skips only where the OS refuses symlinks for this user
@@ -23,3 +22,5 @@ test_setup::DayOne.test_the_run_records_the_checks_then_starts_the_full_refresh 
 test_setup::DayOne.test_a_named_fail_fails_the_run_and_a_warning_with_an_ask_is_an_it_item  # Windows-only: fake .cmd programs; skips on other platforms
 test_knowledge_verify::Steps.test_browser_cli_opens_and_closes_headless_edge_and_a_policy_block_is_a_warn_with_the_ask  # Windows-only: fake .cmd programs; skips on other platforms
 test_knowledge_verify::Steps.test_kb_machinery_passes_under_a_detached_pythonw_setup_run  # Windows-only: pythonw exists only there
+test_kb::Junctions.test_kb_index_skips_a_junction  # junctions exist only on Windows
+test_find::Junctions.test_walk_skips_a_junction  # junctions exist only on Windows

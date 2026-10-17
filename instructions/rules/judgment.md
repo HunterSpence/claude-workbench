@@ -33,11 +33,11 @@ fact may be stale: surface it, check the owning note, record a SUPERSEDED line.
 **Rule:** do anything reversible and in scope. Escalate only the specific blocked step, never the
 whole task. Never present work the Standing Orders already allow as "awaiting your approval".
 1. Reversible (revertable, restartable, re-runnable) and inside the task? Do it; don't narrate it.
-2. A Red Line, real money, anything a third party sees, or an irreversible deletion? Stop that one
-   step, name it in one sentence, and keep going on everything else.
+2. A Red Line, real money, or an irreversible deletion? Stop that one step, name it in one
+   sentence, and keep going on everything else.
 3. A merge or deploy blocked by checks? Fix the blocker or name it exactly.
 4. Ship the surrounding work with the escalation. Build and test right up to the gated step, then
-   name that step with its cost or recipients and wait for an explicit yes.
+   name that step with its cost and wait for an explicit yes.
 **Smell:** ending a turn with "shall I proceed?" for something reversible, or "let me know if you'd
 like Y" when Y was in the original request.
 
@@ -95,7 +95,7 @@ retry bigger. Unsure: round up, model and effort. The user's named pick wins.
 1. Trace the real flow end to end. Find every caller of what you're about to touch.
 2. Climb the ladder: does it need to exist, is there a helper, the standard library, a platform
    feature, one line, and only then new code.
-3. One guard in the shared function beats a guard in every caller.
+3. One check in the shared function beats a check in every caller.
 4. Non-trivial logic leaves one runnable check behind, not a test framework.
 **Smell:** a diff smaller than your understanding warrants (sibling callers left broken), or an
 abstraction with one caller.

@@ -1,4 +1,4 @@
-"""Ingest: the drop folder (transcripts become one meeting file each) and the InfoSec gate."""
+"""Ingest: the drop folder (transcripts become one meeting file each); runs need no acknowledgement step."""
 import hashlib
 import json
 import os
@@ -156,20 +156,18 @@ class FileNameTests(unittest.TestCase):
                     common.safe_join(t, bad)
 
 
-class GateTests(unittest.TestCase):
-    def test_runs_exit_5_until_the_acknowledgement_is_recorded(self):
-        e = H.Env(ack=False)
+class NoAcknowledgementTests(unittest.TestCase):
+    def test_a_fresh_profile_runs_at_once_and_an_old_acknowledgement_key_is_ignored(self):
+        e = H.Env()
         self.addCleanup(e.close)
-        for argv in (("meetings", "run"), ("mail", "run", "--experimental", "--source", "com"), ("digest", "--pending")):
-            code, out = e.run(*argv)
-            self.assertEqual(code, 5, argv)
-            self.assertIn("ack-infosec", out)
-        self.assertEqual(e.reports(), [])
-        code, out = e.run("ack-infosec")
-        self.assertEqual(code, 0)
-        self.assertIn("security team", out)
-        self.assertRegex(common.load_settings(e.P)["infosec_ack"], r"^\d{4}-\d\d-\d\dT")
-        self.assertEqual(e.run("meetings", "run", "--no-digest")[0], 0)
+        e.P.settings_file.parent.mkdir(parents=True, exist_ok=True)
+        e.P.settings_file.write_text(json.dumps({"infosec_ack": "2026-01-01T00:00:00Z", "digest_max_per_day": 7}), "utf-8")
+        self.assertNotIn("infosec_ack", common.load_settings(e.P), "a key an older kit wrote is dropped")
+        self.assertEqual(common.load_settings(e.P)["digest_max_per_day"], 7, "positive control: the file was read")
+        code, out = e.run("meetings", "run", "--no-digest")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(e.reports()), 1, "the run went ahead and wrote its report")
+        self.assertEqual(e.run("digest", "--pending")[0], 0)
 
     def test_config_and_status(self):
         e = H.Env()
@@ -180,7 +178,8 @@ class GateTests(unittest.TestCase):
         self.assertEqual(e.run("config", "set", "infosec_ack", "x")[0], 4)
         code, out = e.run("status", "--json")
         st = json.loads(out)
-        self.assertEqual((code, st["infosec_ack"], st["digest_max_per_day"], st["meetings_files"]), (0, True, 5, 0))
+        self.assertEqual((code, st["digest_max_per_day"], st["meetings_files"]), (0, 5, 0))
+        self.assertNotIn("infosec_ack", st)
 
 
 if __name__ == "__main__":

@@ -157,7 +157,7 @@ def hints(entry):
                            idempotentHint=bool(entry.get("idempotency_header") or entry.get("idempotent") or not write), openWorldHint=True)
 
 
-async def guard(ctx, call_next):
+async def check_call(ctx, call_next):
     """Refuse unknown tool arguments by name (the SDK drops them silently)."""
     if ctx.method == "tools/call":
         params = ctx.params or {}
@@ -177,7 +177,7 @@ def load(path=None):
     return ws
 
 
-mcp = MCPServer("api-bridge", instructions=INSTRUCTIONS, middleware=[guard])
+mcp = MCPServer("api-bridge", instructions=INSTRUCTIONS, middleware=[check_call])
 for _entry in sorted(worksheet.kept(load()), key=lambda e: e["name"]):
     mcp.add_tool(build_tool(_entry), name=_entry["name"], title=_entry["title"], description=_entry["description"], annotations=hints(_entry))
 

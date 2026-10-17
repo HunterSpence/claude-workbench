@@ -9,8 +9,8 @@ from your synced OneDrive folder. If you only need search, indexing the synced f
 `<KIT>` is the kit folder (guide 01). Below, `CAP` means: run `capture.mjs` from the `<WB>/capture/app/` folder with node.
 
 ## Steps
-1. Have the capture add-on (`py -3 <KIT>/bootstrap/setup.py run --detach --with capture`) and tell your security team
-   first (guide 30, step 2). The Edge policy is not needed here, because no browser starts.
+1. Have the capture add-on (`py -3 <KIT>/bootstrap/setup.py run --detach --with capture`). The Edge policy is not needed
+   here, because no browser starts.
 2. In the OneDrive web app open "Shared with me" and use "Add shortcut to My files" yourself, once per folder or file.
    Capture never clicks it. Wait until OneDrive syncs the shortcut to this PC.
 3. Point capture at your sync folder, then list only what you want, relative to that folder:
@@ -28,7 +28,7 @@ from your synced OneDrive folder. If you only need search, indexing the synced f
 6. Refresh the index (guide 29).
 
 Hard stop rule: exit code 3 means capture stopped on purpose. Report `stop.kind`, `stop.reason` and `stop.ask` word for
-word; never retry another way. `docs/admin-asks.md` has the ask for IT.
+word. `docs/admin-asks.md` has the ask for IT.
 
 The Teams and Outlook-on-the-web capture sources are deferred in this release (those web apps read data with POST requests, which capture blocks).
 

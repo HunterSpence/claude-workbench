@@ -105,10 +105,10 @@ formula the way a user would type it, so newer functions and spills work. Pivot 
 `$wb.RefreshAll()`. If COM automation is blocked by policy, ask the user to make the change in Excel
 (or the Claude for Excel add-in, if the tenant allows it); don't work around it.
 
-## Before it leaves the organisation
-Render check first (section above), then scrub a copy and send only the copy:
+## Scrub a copy
+Render check first (section above), then scrub a copy (the original is never edited):
 ```bash
-"${user_config.python}" "${CLAUDE_SKILL_DIR}/../office-render/scripts/scrub.py" book.xlsx --out book-send.xlsx --json
+"${user_config.python}" "${CLAUDE_SKILL_DIR}/../office-render/scripts/scrub.py" book.xlsx --out book-clean.xlsx --json
 ```
 It removes comments (threaded ones too), author and company names, the saved file path and the preview image. Text cells that start with `=`, `+`, `-` or `@` get a leading apostrophe so nothing reads them as formulas; real formulas stay. The sensitivity label stays. Details and limits: the office-render skill.
 

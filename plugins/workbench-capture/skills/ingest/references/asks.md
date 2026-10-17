@@ -25,11 +25,6 @@ Please ask the Entra administrator to approve a read-only public-client app regi
 - Licensing: does the user hold a Microsoft 365 Copilot licence (a prerequisite of the insights permission above; ingest itself does not use that route)?
 - Meeting policy: may the user download transcripts of meetings they attend, and is any copy restriction set?
 - Outlook: will classic Outlook stay on this device, and is a local read-only script reading the user's own cached mailbox permitted?
-- InfoSec: sign-off for an own-access local copy on this device (never a personal cloud), the expected volume of mailbox
-  reads for a Graph backfill, and how labelled or encrypted items are to be handled.
-- Claude: may the user's approved Claude sign-in process their mail and meeting transcripts, including the speech of
-  participants from other organisations, and what are the retention terms?
-- If a community Microsoft 365 server is enabled in the catalog: a security review of its pinned version.
 
 ## Known limits
 - The Teams on the web Recap Download step is deferred: the page reads its data with POST requests, which capture's no-non-GET rule stops. The user downloads the transcript by hand and drops it in the folder.

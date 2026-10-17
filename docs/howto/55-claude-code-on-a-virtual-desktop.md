@@ -76,8 +76,8 @@ is the installed kit (guide 01).
    shared computer activation: "you have to use the Office Deployment Tool and enable shared computer activation to do the
    installation." The new Outlook has no object model; use the Graph route (guide 41).
 7. **Install the kit inside the desktop** as on any managed laptop (guide 01 or `docs/SETUP-RUNBOOK.md`), then keep a backup
-   you have restored once (guide 13): `py -3 <KIT>/bootstrap/setup.py backup` writes a zip to `<DATA>/backup/`; keep it
-   where your organisation allows, not only on the desktop.
+   you have restored once (guide 13): `py -3 <KIT>/bootstrap/setup.py backup` writes a zip to `<DATA>/backup/`; keep a copy
+   off the desktop.
 
 ## Verify
 - `py -3 <KIT>/bootstrap/setup.py doctor --deep` exits 0, and the placement row reads OK.

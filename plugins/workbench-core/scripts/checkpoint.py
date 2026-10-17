@@ -1,18 +1,18 @@
 """PostToolUse(Edit|Write|MultiEdit|NotebookEdit): the post-edit hook.
 
-1. Hook self-check: after an edit to a .py file in this scripts folder, compile it and run the guard on two benign
-   calls. The guards fail open, so a typo would otherwise switch a check off without a sound.
+1. Hook self-check: after an edit to a .py file in this scripts folder, compile it, so a typo cannot switch a hook off
+   without a sound.
 2. Journal cadence: every 25 edits in the main session (15-minute cooldown) remind Claude to journal one line with
-   the save skill's `save_driver.py --inbox-add`, so a long session's state survives compaction.
-Never blocks a tool call. Always exits 0.
+   the save skill's `save_driver.py --inbox-add`. The reminder carries the full command (python and driver paths), so a
+   long session's state survives compaction without a lookup.
+Never blocks a tool call. Always exits 0. Starts no process.
 """
 import datetime as dt
 import json
 import os
 import re
-import subprocess
+import shutil
 import sys
-import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -21,12 +21,41 @@ import _wb  # noqa: E402
 
 THRESHOLD = 25
 COOLDOWN_MIN = 15
-REMINDER = (f"JOURNAL CHECKPOINT ({THRESHOLD} edits). Before your next tool call, journal one line with the save "
-            "skill's journal command: save_driver.py --inbox-add \"<what changed + what is open>\" (under 2 KB, no "
-            "backticks). Do not edit active-context.md directly. Then continue the user's task.")
-SMOKE = ({"tool_name": "Bash", "tool_input": {"command": "ls"}},
-         {"tool_name": "Write", "tool_input": {"file_path": os.path.join(tempfile.gettempdir(), "wb-smoke.txt"),
-                                               "content": "x"}})
+DRIVER = Path("workbench-kb", "scripts", "save_driver.py")
+
+
+def console_python():
+    """config.json `python`, else this interpreter; never pythonw (it would swallow the driver's output)."""
+    py = _wb.config().get("python")
+    if not (isinstance(py, str) and py):
+        py = None
+    elif not os.path.isfile(py):
+        py = shutil.which(py)            # a bare name ("pythonw") becomes its path, so the console check below sees the file
+    p = Path(py or sys.executable or "python")
+    if p.stem.lower() == "pythonw" and p.with_name("python" + p.suffix).is_file():
+        p = p.with_name("python" + p.suffix)
+    return p.as_posix()
+
+
+def driver_path():
+    """save_driver.py: the installed kit first, then the newest plugin-cache copy, then this repo's layout."""
+    try:
+        cache = sorted((_wb.claude_home() / "plugins" / "cache" / "workbench" / "workbench-kb").glob("*/scripts/save_driver.py"),
+                       key=lambda p: p.stat().st_mtime)[-1:]
+    except OSError:
+        cache = []
+    cands = [_wb.workbench_home() / "kit" / "plugins" / DRIVER, *cache, HERE.parents[1] / DRIVER]
+    return next((p for p in cands if p.is_file()), None)
+
+
+def reminder():
+    drv = driver_path()
+    # ponytail: paths sit in double quotes; a path holding a quote, dollar or backtick is not escaped (Windows paths cannot).
+    cmd = f'"{console_python()}" "{drv.as_posix()}" --inbox-add' if drv else "the save skill's save_driver.py --inbox-add"
+    return (f"JOURNAL CHECKPOINT ({THRESHOLD} edits). Before your next tool call, journal one line with the Bash tool "
+            f"(in PowerShell put & and a space in front): {cmd} "
+            "\"<what changed + what is open>\" (under 2 KB, no backticks). Do not edit active-context.md directly. "
+            "Then continue the user's task.")
 
 
 def hooks_gate(d):
@@ -41,19 +70,7 @@ def hooks_gate(d):
     try:
         py_compile.compile(path, doraise=True)
     except py_compile.PyCompileError as e:
-        return f"HOOK EDIT BROKE {path}: {e.msg}"
-    with tempfile.TemporaryDirectory() as logs:
-        for p in SMOKE:
-            r = subprocess.run([sys.executable, str(HERE / "guards" / "pretooluse.py")], capture_output=True,
-                               timeout=30, input=json.dumps({**p, "session_id": "smoke", "cwd": str(HERE)}).encode(),
-                               env={**os.environ, "GUARDS_LOG_DIR": logs})
-            if r.returncode or b'"deny"' in r.stdout:
-                return f"HOOK EDIT: the guard rejects a benign {p['tool_name']} call: {(r.stdout + r.stderr)[:300]!r}"
-        logf = Path(logs) / "guards.log"
-        bad = [ln for ln in (logf.read_text(encoding="utf-8").splitlines() if logf.exists() else [])
-               if "skipped" in ln or "ERROR" in ln]
-        if bad:
-            return f"HOOK EDIT: a guard rule crashed on a benign call, so that check is OFF: {bad[0][:300]}"
+        return f"HOOK EDIT: {path} does not compile: {e.msg}"
     return None
 
 
@@ -97,7 +114,7 @@ def main():
         state.write_text(json.dumps({"count": count, "last_fired": last}), encoding="utf-8")
     except OSError:
         pass
-    msgs = [x for x in (gate, REMINDER if fire else None) if x]
+    msgs = [x for x in (gate, reminder() if fire else None) if x]
     if msgs:
         emit("\n\n".join(msgs))
 

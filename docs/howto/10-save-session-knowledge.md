@@ -1,6 +1,6 @@
 # Save what a session learned
 
-Automates it: /workbench-kb:save
+Automates it: `/save` or `/workbench-kb:save`
 
 ## When to use
 Before `/compact`, when you wrap up, or after a root cause, a decision a later session needs, a number that changed, or
@@ -11,7 +11,8 @@ a file edited outside the knowledge base (KB). `<KIT>` is the kit folder (guide 
    `py -3 <KIT>/plugins/workbench-kb/scripts/save_driver.py --inbox-add "status, what is open, which note holds detail"`
    Keep it under 2 KB and write no backticks: a shell runs what sits between two of them before the driver sees the text, and
    the driver warns when it finds one. Refer to a secret by name, never its value.
-2. To save, run `/workbench-kb:save`. It runs `--pre`, then you (or Claude) write the notes it asks for, then `--post`.
+2. To save, run `/save` (or `/workbench-kb:save`; both start the same skill). It runs `--pre`, then you (or Claude) write
+   the notes it asks for, then `--post`.
    By hand: `py -3 <KIT>/plugins/workbench-kb/scripts/save_driver.py --pre`
 3. Notes go in the KB root (`<KB>/`) under a domain folder that has a `HOT.md`. One fact has one home; change a fact by
    keeping the old line marked `SUPERSEDED` and adding the new one.

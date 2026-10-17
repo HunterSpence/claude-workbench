@@ -4,8 +4,7 @@ Automates it: /workbench-core:github
 
 ## When to use
 Your code lives on an enterprise GitHub host: managed users on github.com, a `<tenant>.ghe.com` data-residency tenant, or
-Enterprise Server such as `ghe.example.com`. Sign in only through your organisation's single sign-on, never with a
-personal account or token on this laptop.
+Enterprise Server such as `ghe.example.com`. Sign in through your organisation's single sign-on.
 
 ## Steps
 1. Sign in once per host (the web flow keeps the token in the system credential store; never use `--insecure-storage`):
@@ -17,7 +16,6 @@ personal account or token on this laptop.
 5. Call the API with the short path: `gh api --hostname <host> repos/<owner>/<repo> --jq .default_branch`. For Enterprise Server `gh`
    adds `/api/v3` itself; a `.ghe.com` tenant's API host is `api.<tenant>.ghe.com`, never `api.github.com`.
 6. Token variables, if you use them: `GH_TOKEN` applies to github.com and `*.ghe.com`; `GH_ENTERPRISE_TOKEN` applies to Enterprise Server.
-7. Add the host to the push allowlist (guide 20) before you ask Claude to push.
 
 ## Verify
 - `gh auth status` lists the host with your organisation account.

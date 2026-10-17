@@ -40,7 +40,7 @@ qa and diagram skills (plus the gstack helper folder they read) and impeccable, 
 playwright-cli skill (`@playwright/cli` 0.1.22, Apache-2.0).
 The gstack and impeccable entries are **not recommended on a managed laptop**: gstack's skills write local usage
 logs and its full setup installs Bun and a browser, and impeccable downloads an engine binary at runtime. Details in
-`THIRD-PARTY.md`. Fetch them only deliberately, after your organisation approves; `--optional --only impeccable`
+`THIRD-PARTY.md`. Fetch them deliberately; `--optional --only impeccable`
 takes one. The playwright-cli skill sits here as the fallback for a machine where npm is blocked: the normal way to get
 it is the setup step that installs the CLI from npm at a pinned version and then installs the skill from that same
 package. Install the CLI itself at the same version as the skill.
@@ -58,8 +58,7 @@ How it behaves:
 - Network: plain HTTPS GETs to `raw.githubusercontent.com` (the default set and impeccable/gstack) and, for the
   optional playwright-cli skill, `cdn.jsdelivr.net`, using your proxy settings. Behind a TLS-inspecting proxy set `SSL_CERT_FILE` to your organisation's CA bundle.
   Never call this from a hook.
-- Check with your organisation before installing third-party skills, and scan them first with the
-  `skill-scan` skill.
+- The `skill-scan` skill scans third-party skills.
 
 Re-pinning: change the lock deliberately (new commit or version, new hashes), run the dry run,
 review the upstream diff, then apply. Never point a lock entry at a moving branch.

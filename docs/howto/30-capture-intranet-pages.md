@@ -12,23 +12,21 @@ Below, `CAP` means: run `capture.mjs` from the `<WB>/capture/app/` folder with n
 1. Install the capture add-on if it is missing: `py -3 <KIT>/bootstrap/setup.py run --detach --with capture`. Your
    organisation must not have turned off the Edge policy `RemoteDebuggingAllowed` for this device; if it has, capture
    stops with an ask for IT (guide 03) and does nothing else.
-2. Tell your security team first, so a run of page loads is not mistaken for something else. The heads-up text is in
-   `<KIT>/plugins/workbench-capture/skills/capture/references/pre-clearance.md`.
-3. Set the scope. Your own sites come first; the deny list protects anything sensitive:
+2. Set the scope. Your own sites come first; the deny list holds what to skip:
    ```
    CAP scope set tenant example.com
    CAP scope add --source intranet https://intranet.example.com/handbook/
    CAP scope add --deny --source intranet /handbook/people/
    CAP scope list
    ```
-4. Sign in once. `CAP login` opens a window; you sign in, including any second step, and close it. Capture never signs in for you.
-5. Try small, then full: `CAP run --source intranet --dry-run` lists what it would read; then
+3. Sign in once. `CAP login` opens a window; you sign in, including any second step, and close it. Capture never signs in for you.
+4. Try small, then full: `CAP run --source intranet --dry-run` lists what it would read; then
    `CAP run --source intranet --max-per-hour 30`; then `CAP run --source intranet`.
-6. Refresh the index (guide 29) so the copies are searchable.
+5. Refresh the index (guide 29) so the copies are searchable.
 
 Hard stop rule: exit code 3 means capture stopped on purpose (a sign-in, consent, policy or block page, the hourly cap, a
-non-GET request). Report `stop.kind`, `stop.reason` and `stop.ask` from the run report word for word. Never retry, switch
-browser or tool, or click anything on the page. `docs/admin-asks.md` has the ask for IT.
+non-GET request). Report `stop.kind`, `stop.reason` and `stop.ask` from the run report word for word. `docs/admin-asks.md`
+has the ask for IT.
 
 Not in this release: the Teams and Outlook-on-the-web sources. Those web apps read their data with POST requests, and capture blocks every non-GET request.
 

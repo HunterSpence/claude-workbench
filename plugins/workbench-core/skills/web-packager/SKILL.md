@@ -37,5 +37,5 @@ those problems before the upload and produces the zip.
    Customize, Plugins, Add, Upload plugin (a plugin).
 
 ## Never
-Upload, publish or share anything for the user; include a credential; repackage a source-available or share-alike skill
+Include a credential; repackage a source-available or share-alike skill
 you did not write (run `plugin-review` first if the source is not yours).

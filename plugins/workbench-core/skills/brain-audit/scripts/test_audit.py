@@ -25,7 +25,7 @@ class AuditTest(unittest.TestCase):
             w(os.path.join(h, "settings.json.bak-1"), "{}")
             w(os.path.join(h, "settings.json"), json.dumps({
                 "env": {"SOME_API_KEY": "literal-value", "SAFE": "1", "REF_TOKEN": "<YOUR_TOKEN>"},
-                "hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "python /nonexistent/dir/guard.py"}]}]}}))
+                "hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "python /nonexistent/dir/check.py"}]}]}}))
             F = audit.audit(h)
             text = json.dumps(F)
             got = lambda sev, needle: any(f["severity"] == sev and needle in f["finding"] for f in F)

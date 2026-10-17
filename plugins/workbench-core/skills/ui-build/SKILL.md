@@ -34,8 +34,7 @@ Keyboard: everything reachable with Tab, visible focus, Escape closes overlays.
 ## 3. Run it locally
 Use the project's own command (`npm run dev`, `pnpm dev`, `npm run storybook`, `make run`; check
 `package.json` scripts and the README). Run it in the background and note the local URL. If it needs
-secrets or a backend you do not have, ask the user; do not point it at a shared or production
-environment.
+secrets or a backend you do not have, ask the user.
 
 ## 4. Screenshot and check
 Setup once, in a working folder outside the repo:
@@ -55,8 +54,7 @@ node shoot.mjs http://localhost:3000/settings --out ../shots --label before   # 
   filter, and below it a proxy to nowhere that only loopback bypasses, with no DNS for other names
   and no WebRTC around the proxy. Redirect chains that leave the local app are listed under
   `redirects`, and service workers cannot register. `--allow-fonts` lets Google Fonts through
-  (`fonts.googleapis.com` and `fonts.gstatic.com`, nothing else) when the design depends on them and
-  your organisation allows it. If the page needs anything else to render, tell the user rather than
+  (`fonts.googleapis.com` and `fonts.gstatic.com`, nothing else) when the design depends on them. If the page needs anything else to render, tell the user rather than
   unblocking it.
 - Checks horizontal overflow at each width (`document.documentElement.scrollWidth` wider than the
   viewport) and names the elements that cause it; the CLI prints an `OVERFLOW` line. At phone width
@@ -94,4 +92,4 @@ you checked, the widths and schemes, the a11y result, and anything you could not
 ## Optional design skills
 `impeccable` and gstack's `design-review` and `qa` add critique and polish passes. They are not
 installed by default (runtime downloads and local telemetry; see `THIRD-PARTY.md`);
-`tools/fetch-upstream` installs them with `--optional` after your organisation approves.
+`tools/fetch-upstream` installs them with `--optional`.

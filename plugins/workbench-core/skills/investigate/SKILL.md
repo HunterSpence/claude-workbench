@@ -40,7 +40,7 @@ Ask what is constant across every failure and what differs from a working case.
 
 ## 4. Fix at the root
 - Before editing, find every caller of the function you will touch (grep or the code graph). One
-  guard in the shared function beats a guard in each caller.
+  check in the shared function beats a check in each caller.
 - Smallest change that removes the cause. Remove debugging scaffolding before you finish.
 - Add one regression test that fails without the fix. Watch it fail, then pass.
 

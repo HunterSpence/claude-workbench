@@ -3,7 +3,7 @@
 Automates it: none (the drafts are in `docs/admin-asks.md`)
 
 ## When to use
-Setup or a guard stops with an "ask IT" item, a capability row says NEEDS-IT or BLOCKED-BY-POLICY, or a hook, plugin
+Setup stops with an "ask IT" item, a capability row says NEEDS-IT or BLOCKED-BY-POLICY, or a hook, plugin
 source, model or MCP server is refused on your managed laptop.
 
 ## Steps
@@ -13,7 +13,7 @@ source, model or MCP server is refused on your managed laptop.
    restricted, permissions locked, a proxy that re-signs HTTPS, WSL2 and virtualization, package sources, git host and sign-in.
 3. Fill the `<...>` placeholders. Ask for the smallest thing that unlocks the step, name the exact setting, folder or
    host, and offer the alternative that needs no change ("or I skip this feature").
-4. Send it yourself. The kit never sends anything.
+4. Send it yourself.
 5. Keep the answer. When IT acts, refresh: `py -3 <KIT>/bootstrap/report.py run --phase refresh`, then
    `py -3 <KIT>/bootstrap/setup.py run --detach`.
 

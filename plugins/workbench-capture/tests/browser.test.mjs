@@ -320,7 +320,7 @@ describe('end to end: intranet crawl -> files -> find (G12, G5)', NEEDS_EDGE, ()
     }
     const r = await spawnCapture(wb, ['run', '--source', 'intranet']);
     assert.equal(r.code, 0, r.stderr + r.stdout.slice(-600));
-    assert.match(r.stdout, /security team/i, 'the first run prints the InfoSec note');
+    assert.doesNotMatch(r.stdout, /security team/i, 'the first run starts at once, with no note to acknowledge');
     const summary = JSON.parse(r.stdout.trim().split('\n').at(-1));
     assert.equal(summary.status, 'done');
     const rep = JSON.parse(fs.readFileSync(summary.report, 'utf8'));

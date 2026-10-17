@@ -24,7 +24,7 @@ step and is waiting for a restart. `<KIT>` is the kit folder (guide 01).
 ## Verify
 - `wsl -l -v` lists `Ubuntu-24.04` with version 2.
 - `py -3 <KIT>/bootstrap/setup.py status --json` shows `"reboot_pending": false` and, at the end, phase `done`.
-- Inside WSL, `python3 --version` prints a version and the kit's guard test from guide 01 is blocked.
+- Inside WSL, `python3 --version` prints a version and the rule check from guide 01 stops to ask.
 
 ## Common failures
 - **Nothing happens after the restart:** run the `resume` command above; the automatic value only fires at sign-in.

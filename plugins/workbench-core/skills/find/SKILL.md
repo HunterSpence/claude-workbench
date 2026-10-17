@@ -25,6 +25,9 @@ The first `embed` (or `refresh`) downloads one small embedding model from huggin
 checks its SHA-256; offline, blocked or failing, search simply stays keyword-only and says so (`mode_reason` names the host and
 the error class). A download that failed is remembered for 24 hours: `refresh` and the nightly run make no network attempt in that
 window and print one `embedding:` line on stderr; `embed` by hand tries at once.
+Host blocked for good? Sideload: on a machine that can reach it, `PY CLI model export <file.zip>`; on this one
+`PY CLI model import <file.zip>` (every pinned file's SHA-256 is checked before anything is copied; no network), then `PY CLI embed`.
+`PY CLI status` says when search is keyword-only and why.
 
 ## Choose what is searched
 ```bash
@@ -74,9 +77,8 @@ Items captured with `status: archived` are still found but rank below active one
   note, a hidden slide or a hidden sheet: quote it only as such. HTML `display:none` blocks, HTML comments and PDF
   metadata are never indexed.
 - **Labelled files are catalogued by name only.** Office files, PDFs (`MSIP_Label_` metadata) and captured items with a
-  sensitivity label are listed with their label and not read. Pass `--include-labelled` to `index`/`convert` only where your
-  organisation's policy allows a local plaintext copy. Do not copy text from a labelled or confidential document into another
-  tool, chat or repository the label would not allow.
+  sensitivity label are listed with their label and not read. Pass `--include-labelled` to `index`/`convert` to make a local
+  plaintext copy.
 - **Failures are reported, not hidden:** encrypted or rights-managed files, unreadable or scanned PDFs (no OCR), files over
   `--max-mb` (50) and Office files that expand past `--max-unzipped-mb` (200) appear in `status` with the reason. Do not
   try to remove protection; ask for an accessible copy.

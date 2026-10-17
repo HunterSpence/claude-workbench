@@ -1,0 +1,19 @@
+{"version": 1,
+ "questions": [
+  {"q": "Should I combine keyword search with embeddings, and how do I merge and rerank the two result lists?",
+   "expect": "_shared/digests/enterprise-rag-retrieval.md"},
+  {"q": "Vector search returns too few hits when a user can only see a small slice of the documents. What should I change?",
+   "expect": "_shared/digests/enterprise-rag-retrieval.md"},
+  {"q": "Can a generated summary or an entity merged from several documents expose content a user is not allowed to read?",
+   "expect": "_shared/digests/enterprise-rag-architecture.md"},
+  {"q": "When an AI agent acts on behalf of an employee, whose access rights should it get?",
+   "expect": "_shared/digests/enterprise-rag-architecture.md"},
+  {"q": "How fast do revoked file permissions reach the search index, and can I rely on webhooks for that?",
+   "expect": "_shared/digests/enterprise-rag-ingestion.md"},
+  {"q": "How should I split documents into chunks, and should every chunk get its title and heading path before embedding?",
+   "expect": "_shared/digests/enterprise-rag-ingestion.md"},
+  {"q": "How can I prove my assistant never leaks restricted documents to the wrong user?",
+   "expect": "_shared/digests/enterprise-rag-evaluation.md"},
+  {"q": "What surprising bugs show up when building permission-filtered search on Postgres or OpenSearch?",
+   "expect": "_shared/digests/enterprise-rag-failure-modes.md"}
+ ]}

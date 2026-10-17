@@ -273,7 +273,7 @@ class ScrubScan(unittest.TestCase):
                                                        ("kb-template/dead.md", 1, "D3"), ("kb-template/dead.md", 1, "G5"),
                                                        ("kb-template/term.md", 1, "D2")])
 
-    def test_template_link_rule_agrees_with_kb_index_resolve(self):
+    def test_template_link_rule_is_a_strict_subset_of_kb_index_resolve(self):
         scripts = HERE.parent / "plugins" / "workbench-kb" / "scripts"
         with mock.patch.dict(os.environ, {"WORKBENCH_KB_ROOT": str(self.tmp / "kb"), "CLAUDE_CONFIG_DIR": str(self.tmp / "cc")}):
             sys.path.insert(0, str(scripts))
@@ -286,9 +286,13 @@ class ScrubScan(unittest.TestCase):
         notes = {k[len("kb-template/"):] for k in self.NOTES}
         for src in ("ai/HOT.md", "ops/note.md", "00-index.md", "projects/demo/00-index.md"):
             for target in ("00-index", "ops/note", "note", "note|alias", "ops/note#h", "ops/note.md", "projects/demo", "Bug-Cards",
-                           "bug-cards", "HOT", "ops/missing", "nowhere", "../docs/x", "", "|alias", "ops\\note", "demo"):
-                self.assertEqual(scrub_scan.template_link_ok(target, src, notes), kb_index.resolve(target, src, notes) is not None,
-                                 f"{target!r} from {src}")
+                           "bug-cards", "HOT", "ops/missing", "nowhere", "../docs/x", "", "|alias", "ops\\note", "demo",
+                           "Ops/Note", "ops/NOTE", "Bug Cards"):
+                ok, res = scrub_scan.template_link_ok(target, src, notes), kb_index.resolve(target, src, notes) is not None
+                self.assertTrue(res or not ok, f"{target!r} from {src}: the scan accepts what the KB cannot resolve")
+        # positive control: resolve is the looser rule, the scan stays canonical on case and spaces
+        self.assertTrue(kb_index.resolve("Ops/Note", "ai/HOT.md", notes) is not None)
+        self.assertFalse(scrub_scan.template_link_ok("Ops/Note", "ai/HOT.md", notes))
 
 
 if __name__ == "__main__":

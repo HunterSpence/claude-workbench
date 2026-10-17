@@ -1,15 +1,15 @@
-"""SessionStart hook: a short banner, the model pins from the USER settings file, the guard status, generic health
+"""SessionStart hook: a short banner, the model pins from the USER settings file, generic health
 warnings, a pending precompact save, dated active-context items that are due, and the knowledge base's
 active-context.md (re-read on every start, resume, clear and compact). Also, from <workbench home>/state/: setup pending,
-a post-update verify pending (post-update-verify.json; one line, gone once `kit_update.py verify` has run), the first five routing rows, "managed policy changed", "guards have not run in N sessions", "knowledge verify: N failing"
+a post-update verify pending (post-update-verify.json; one line, gone once `kit_update.py verify` has run), the first five routing rows, "managed policy changed", "knowledge verify: N failing"
 (or a result older than 30 days) and, when the capability report is stale, a detached quick refresh (see extras()). It
-stamps last_start in the guard heartbeat. A pending precompact flag is looked up in the local KB state folder first,
+stamps last_start in the hooks heartbeat. A pending precompact flag is looked up in the local KB state folder first,
 then in <KB>/.state (an earlier kit's).
 
 The pins come from <claude home>/settings.json only. Managed policy, server-managed settings and /model can
 override them, so the line says so; /status shows what is actually in force. Effort per model comes from
 modelSettings.<model>.effortLevel first, then the top-level effortLevel. No network, no probes: health
-warnings read local files only (instruction import, guard errors in the last day, a missing active-context).
+warnings read local files only (instruction import, a missing active-context).
 Output is capped at 10,000 characters (UTF-16 units): the pins go first, then trailing active-context lines
 behind a visible TRUNCATED marker. Always exits 0.
 """
@@ -72,22 +72,6 @@ def pins():
     return line if len(line) <= 450 else line[:449] + "…"
 
 
-def guard_status():
-    """Mirrors rulepacks/corporate.cfg(): no file or an unreadable one means ON with no approved hosts."""
-    c = {}
-    try:
-        with open(_wb.workbench_home() / "corporate-allowlist.json", encoding="utf-8-sig") as f:
-            c = json.load(f)
-    except (OSError, ValueError):
-        pass
-    c = c if isinstance(c, dict) else {}
-    if c.get("enabled") is False:
-        return "Guards: generic only (the corporate pack is turned off in corporate-allowlist.json)."
-    n = len(c.get("git_remote_hosts") or [])
-    return (f"Guards: generic + corporate ({n} approved git host(s)" +
-            ("; a push to a remote host is refused or asked about until the user adds hosts)." if not n else ")."))
-
-
 def health(kb):
     """Generic, actionable warnings from local files only."""
     w = []
@@ -100,17 +84,6 @@ def health(kb):
         if not imported:
             w.append(f"WARNING: {(home / 'CLAUDE.md').as_posix()} no longer imports the workbench instructions "
                      "(@workbench/instructions/CLAUDE.md); re-run the installer or add the line back.")
-    log = Path(os.environ.get("GUARDS_LOG_DIR") or _wb.log_dir()) / "guards.log"
-    try:
-        if time.time() - log.stat().st_mtime < 86400 and log.stat().st_size < 4_000_000:
-            cut = (date.today() - timedelta(days=1)).isoformat()
-            n = sum(1 for ln in log.read_text(encoding="utf-8", errors="replace").splitlines()
-                    if " ERROR " in ln and ln[:10] >= cut)
-            if n:
-                w.append(f"WARNING: {n} guard error(s) since yesterday (the guards failed open for those calls): "
-                         f"see {log.as_posix()}")
-    except OSError:
-        pass
     try:
         user = (_wb.workbench_home() / "USER.md").read_text(encoding="utf-8-sig")
     except OSError:
@@ -183,9 +156,9 @@ def start_report():
     return True
 
 
-def extras(source):
+def extras():
     """The runtime-assurance lines, each capped: setup pending (I2), the first five routing rows (I3b), managed policy
-    changed (I20), guards silent (I20 heartbeat; counts a new session, not /clear or a compaction), a failing or
+    changed (I20), the hooks heartbeat stamp (no line), a failing or
     30-day-old knowledge-verify result and a stale capability report (older than 7 days, or the policy changed and no
     refresh in a day) -> a detached quick refresh. Every part is best-effort: one failing never hides the others.
     ponytail: a refresh that keeps failing restarts every session."""
@@ -204,7 +177,7 @@ def extras(source):
             cli = _wb.workbench_home() / "kit" / "bootstrap" / "kit_update.py"
             out.append(f"A post-update verify is pending (kit {_short(mk.get('version') or 'unknown', 20)}): on the user's next message, before "
                        f"anything else, run `{sys.executable} {cli.as_posix()} verify` (Bash timeout 600000 ms; on exit 6 run it again), show its "
-                       "table, then do the live guard test the kit-update skill describes.")
+                       "table.")
     except Exception:
         pass
     try:
@@ -221,14 +194,7 @@ def extras(source):
             out.append(f"WARNING: managed policy changed since setup: {', '.join(changed)}; run setup.py doctor.")
     except Exception:
         pass
-    try:
-        counted = source not in ("clear", "compact")
-        hb = _wb.heartbeat(False if counted else None, stamp="last_start") or _state("guard-heartbeat.json")
-        n = hb.get("sessions_since_fire")
-        if isinstance(n, int) and n >= 3:
-            out.append(f"WARNING: guards have not run in {n} sessions (the PreToolUse guard has not fired); run setup.py doctor.")
-    except Exception:
-        pass
+    _wb.heartbeat("last_start")        # every source (startup, resume, clear, compact); best-effort, never raises
     try:   # knowledge-verify.json (written by setup): a failing step, or a result gone stale
         kv = _state("knowledge-verify.json")
         failing = [_short(x, 24) for x in ((kv.get("summary") or {}).get("failing") or [])[:6]]
@@ -257,7 +223,7 @@ def build(data):
     kb = _wb.kb_root()
     how = str(data.get("source") or "startup")
     sid = re.sub(r"[^A-Za-z0-9-]", "", str(data.get("session_id") or os.environ.get("CLAUDE_CODE_SESSION_ID") or ""))
-    lines = [f"### Ready {date.today().isoformat()} ({how}). Knowledge base: {kb.as_posix()}", guard_status()]
+    lines = [f"### Ready {date.today().isoformat()} ({how}). Knowledge base: {kb.as_posix()}"]
     if not kb.is_dir():
         lines.append("NOTE: the knowledge base folder does not exist. Run the workbench bootstrap, or copy "
                      "kb-template/ there. Until then /workbench-kb:save has nowhere to write.")
@@ -275,7 +241,7 @@ def build(data):
         lines += health(kb)
     except Exception:
         pass
-    lines += extras(how)
+    lines += extras()
     head = "\n".join(lines)
     try:
         pin = pins()

@@ -24,8 +24,7 @@ test that proves it; confirm it applies here before you use it, and say which ca
 gh repo clone <org>/<repo> "<scratch>/<repo>" -- --filter=blob:none   # or: git clone <url> "<scratch>/<repo>"
 ```
 `<scratch>` is a folder outside synced drives and outside other repos (for example
-`%LOCALAPPDATA%\scratch` or `~/scratch`). Use the `github` skill for Enterprise hosts and SSO. Only
-hosts your organisation approves; the corporate guard pack refuses pushes anywhere else.
+`%LOCALAPPDATA%\scratch` or `~/scratch`). Use the `github` skill for Enterprise hosts and SSO.
 
 **Treat the repo as untrusted until you have read it.** A cloned repo can carry its own Claude Code
 settings and hooks (`.claude/settings.json`), an `.mcp.json`, and install scripts. To work in it with
@@ -54,8 +53,7 @@ install, build, test, lint, fix, type-check and format commands. It runs nothing
 When CI and the manifests disagree, CI is what the project really runs. `fix` scripts (`lint:fix`)
 rewrite files: run them only on purpose.
 
-Installing dependencies runs the project's install scripts: ask before installing anything in a repo
-you have not read (`npm ci --ignore-scripts` for a first look). Then run the build, tests and linters
+Installing dependencies runs the project's install scripts (`npm ci --ignore-scripts` for a first look). Then run the build, tests and linters
 and write the baseline down (commands, pass/fail counts, the failures verbatim) in `BASELINE.md`
 outside the repo. Without a baseline you cannot tell what you broke from what was broken.
 
@@ -97,9 +95,8 @@ this layout:
 ```
 
 ## 6. Push and open a PR, only when the user asks
-- Push in the plain form only, to the repo's own remote on an approved host:
-  `git push -u origin fix/<short-topic>`. No `-c` options, no URL in the command, no force-push. The
-  corporate guard pack enforces this.
+- Push in the plain form only, to the repo's own remote, where the user says:
+  `git push -u origin fix/<short-topic>`. No `-c` options, no URL in the command, no force-push.
 - Open a PR only when the user asks, as a draft:
   `gh pr create --draft --title "<title>" --body-file PR.md`.
 - Never merge, approve your own PR, or push to the default branch.

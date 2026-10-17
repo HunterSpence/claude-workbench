@@ -89,8 +89,9 @@ def kb_template_notes(root):
 
 def template_link_ok(target, src_rel, notes):
     """True when a wikilink target names a note in `notes`: <t>.md from the template root, beside the source,
-    <t>/00-index.md, or a bare name that is the file name of exactly one note. (The rule of kb_index.resolve; a test
-    holds the two together.)"""
+    <t>/00-index.md, or a bare name that is the file name of exactly one note. Deliberately stricter than kb_index.resolve
+    (no case-folded paths, spaces or titles), so the kit's own links stay canonical; a test holds that whatever this accepts,
+    resolve accepts too."""
     t = target.split("|", 1)[0].split("#", 1)[0].strip().replace("\\", "/").strip("/")
     if not t:
         return False

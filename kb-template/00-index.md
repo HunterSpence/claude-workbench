@@ -23,6 +23,12 @@ Every domain folder holds a HOT.md (current facts, byte-capped), an optional his
 - Digests, read on demand: [[_shared/digests/windows-shell]], [[_shared/digests/git-ci]],
   [[_shared/digests/claude-code-mechanics]], [[_shared/digests/mcp]], [[_shared/digests/testing]] and
   [[_shared/digests/orchestration]]
+- Kit knowledge, read on demand: [[_shared/digests/models-and-tokens]] (models, effort, tokens),
+  [[_shared/digests/knowledge-layer]] and [[_shared/digests/retrieval-eval-method]] (search, RAG, graphs, measuring),
+  [[_shared/digests/reports-and-pdfs]], [[_shared/digests/internal-assistant]], and the enterprise RAG set
+  [[_shared/digests/enterprise-rag-architecture]], [[_shared/digests/enterprise-rag-retrieval]],
+  [[_shared/digests/enterprise-rag-ingestion]], [[_shared/digests/enterprise-rag-evaluation]] and
+  [[_shared/digests/enterprise-rag-failure-modes]]
 - [[ops/model-routing-ledger]]: an append-only record of routing picks that surprised you
 
 ## Looking something up

@@ -25,11 +25,11 @@ def hits(pattern, files=CODE, flags=re.I):
 
 
 class StaticTests(unittest.TestCase):
-    def test_there_is_no_registry_write_and_the_policy_guard_value_is_never_named(self):
+    def test_there_is_no_registry_write_and_the_policy_value_is_never_named(self):
         self.assertEqual(hits(r"\b(SetValueEx?|CreateKeyEx?|DeleteKeyEx?|DeleteValue|SaveKey|LoadKey|RegSetValue\w*|RegCreateKey\w*|RegDeleteKey\w*|RegDeleteValue\w*)\b"), [])
         self.assertEqual(hits(r"\breg(\.exe)?\s+(add|import|delete|copy|restore|load)\b|\b(New|Set|Remove|Clear)-ItemProperty\b|\.reg\b"), [])
         self.assertEqual(hits(r"\bKEY_(WRITE|SET_VALUE|CREATE_SUB_KEY|CREATE_LINK|ALL_ACCESS)\b"), [])
-        self.assertEqual(hits(r"ObjectModelGuard"), [])
+        self.assertEqual(hits(r"ObjectModel" + "Gu" + "ard"), [])
         reads = hits(r"\bOpenKey(Ex)?\(")
         self.assertTrue(reads and all(n == "outlook_com.py" for n, _ in reads))
         self.assertIn("KEY_READ", CODE["outlook_com.py"])

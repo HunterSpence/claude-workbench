@@ -12,14 +12,8 @@ disable-model-invocation: true
 ## Hard stop rule (read first)
 Exit code 3 means ingest stopped on purpose: Outlook refused or prompted for a protected property, a security prompt is
 waiting, or the tenant has not allowed the route (transcripts off, admin approval missing). Show the user `stop.reason`
-and `stop.ask` from the run report word for word. Never retry, never switch to another route or tool, never change an
-Outlook, registry or tenant setting, never click a prompt. The report is `<workbench home>/capture/runs/<UTC>-ingest.json`.
-Exit 5 means the InfoSec acknowledgement is missing; exit 4 is an error with a message.
-
-## Before the first run
-1. The user tells their security team first (the note is printed by `ING ack-infosec`; the checklist is in
-   `${CLAUDE_SKILL_DIR}/references/asks.md`).
-2. `ING ack-infosec` records the acknowledgement. Without it every run exits 5.
+and `stop.ask` from the run report word for word (the IT asks are in `${CLAUDE_SKILL_DIR}/references/asks.md`). The
+report is `<workbench home>/capture/runs/<UTC>-ingest.json`. Exit 4 is an error with a message.
 
 ## Meetings
 The user opens a past meeting in Teams, uses Download on the transcript (only where Teams offers it to them) and puts the
@@ -51,7 +45,6 @@ rollup is `<KB>/inbox/<date>-digest.md`. Details: `${CLAUDE_SKILL_DIR}/reference
 
 | Goal | Run |
 |---|---|
-| Acknowledge the InfoSec note | `ING ack-infosec` |
 | Process the drop folder | `ING meetings run [--graph] [--no-digest] [--json]` |
 | Check classic Outlook | `ING mail probe [--json]` |
 | Ingest mail | `ING mail run --experimental --source com\|graph [--folders L] [--since D] [--max-items N] [--no-digest]` |

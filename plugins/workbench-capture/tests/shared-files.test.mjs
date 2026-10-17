@@ -57,10 +57,8 @@ describe('shared-files (no browser, real find CLI)', () => {
     const plan = fs.readFileSync(files.find((x) => x.includes('plan')), 'utf8');
     assert.match(plan, /^---\nsource: "shared-files"\nurl: "sync-folder:Reports\/plan.md"\ntitle: "plan"\nauthor: null\nmodified: "[^"]+"\ncaptured_at: "[^"]+"\nlabels: \[\]\nscope: "folder:Reports\/plan.md"\n---\n\n/);
     assert.equal(r.report.label, null);
-    // the first run prints the InfoSec note once
-    assert.match(r.out, /security team/i);
-    const again = await runCapture(main, wb, ['run', '--source', 'shared-files', '--scope', f], { clock });
-    assert.ok(!/security team/i.test(again.out.split('\n')[0]), 'the note is printed on the first run only');
+    // the first run starts at once: no note to acknowledge
+    assert.doesNotMatch(r.out, /security team/i);
     // the knowledge layer finds the copies with url and source
     const db = `${wb}/index.sqlite`;
     assert.equal(findCli(py, ['--db', db, 'add-root', `${wb}/data/captured`, '--label', 'captured']).code, 0);

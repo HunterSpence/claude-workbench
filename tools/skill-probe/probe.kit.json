@@ -481,6 +481,38 @@
      "delete the old config backup"
     ]
    }
+  },
+  "pdf-report": {
+   "should": [
+    "\\b(make|build|create)\\b.{0,30}\\bpdf report\\b",
+    "\\b(export|convert|turn)\\b.{0,40}\\b(to|into) (a )?pdf\\b",
+    "\\bprint\\b.{0,20}\\bto pdf\\b",
+    "\\b(merge|split|rotate|stamp)\\b.{0,30}\\bpdfs?\\b",
+    "\\bfill\\b.{0,20}\\bpdf form\\b"
+   ],
+   "should_not": [
+    "\\bread\\b.{0,30}\\bpdf\\b",
+    "\\bsummari[sz]e\\b.{0,30}\\bpdf\\b",
+    "\\bwhat is a pdf\\b",
+    "\\bword (doc|document)\\b",
+    "\\bslide deck\\b"
+   ],
+   "examples": {
+    "should": [
+     "make a pdf report of the quarterly status",
+     "export this markdown to a pdf",
+     "print this page to pdf",
+     "merge these two pdfs into one",
+     "fill in the pdf form with my details"
+    ],
+    "should_not": [
+     "read this pdf and tell me the totals",
+     "summarise the attached pdf",
+     "what is a pdf file format",
+     "make this a word document",
+     "build a slide deck for the review"
+    ]
+   }
   }
  }
 }

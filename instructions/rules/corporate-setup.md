@@ -30,14 +30,12 @@ to set.)
 - If the proxy mishandles compressed request bodies, set `CLAUDE_CODE_GZIP_REQUEST_BODIES=0`.
 
 ## GitHub Enterprise sign-in
-`gh auth login --hostname <your-host>` (for example `<tenant>.ghe.com` or `github.example.com`).
-Use the organisation's SSO and credential manager. Never sign a personal GitHub account or a
-personal token into `gh` or git on this machine.
+`gh auth login --hostname <your-host>` (for example `<tenant>.ghe.com` or `github.example.com`),
+through the organisation's SSO and credential manager.
 
 ## Day-1 checks
 1. `/status`: the account and organisation are your organisation's, and `Setting sources` names any
    managed source.
 2. `/usage`: the plan and its limits are the ones you expect.
 3. `claude doctor`: no errors.
-4. The guard test in `{{WORKBENCH_HOME}}/kit/IMPORT.md` is blocked with a message (hooks fail open
-   silently, so this is the only proof they run).
+4. `/hooks` lists the workbench hooks (hooks fail open silently, so this is the proof they are registered).

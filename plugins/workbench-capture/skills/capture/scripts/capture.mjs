@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // capture: read the user's work surfaces through a dedicated, signed-in Edge profile (or the OneDrive sync folder)
-// into Markdown the knowledge layer can search. Read-only, paced, scoped. See ../references/guardrails.md.
+// into Markdown the knowledge layer can search. Read-only, paced, scoped. See ../references/limits.md.
 //   capture.mjs login | run --source NAME [flags] | scope add|remove|list|set | status | purge | logout | --version
 // Exit codes: 0 done, 3 stopped by an interstitial or policy (a report is written), 4 error.
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -82,11 +82,6 @@ function converter(P, env) {
 
 const quiet = (m) => String(m).replace(/(https?:\/\/[^\s?#"')]+)[?#][^\s"')]*/g, '$1').slice(0, 300); // no query strings in reports
 
-function infosecNote(P) {
-  const f = [`${P.wb}/kit/bootstrap/infosec-note.txt`, path.resolve(HERE, '../../../../../bootstrap/infosec-note.txt')].find((x) => fs.existsSync(x));
-  return f ? fs.readFileSync(f, 'utf8').trim() : 'Tell your security team before the first full run (see references/pre-clearance.md).';
-}
-
 // The hourly cap must hold across runs, so the last hour of action times is kept next to the run reports.
 const readPace = (file, now) => {
   try { return fs.readFileSync(file, 'utf8').split('\n').map(Number).filter((t) => t > now - 3_600_000 && t <= now + 60_000); } catch { return []; }
@@ -112,8 +107,6 @@ async function cmdRun(o, d) {
   if (src.experimental && !o.experimental) throw new Error(`${src.name} is experimental: add --experimental to run it`);
   const perHour = o['max-per-hour'] === undefined ? 200 : Number(o['max-per-hour']);
   if (!(perHour >= 1)) throw new Error('--max-per-hour must be 1 or more');
-  const first = !fs.existsSync(P.runs) || !fs.readdirSync(P.runs).some((f) => f.endsWith('.json'));
-  if (first) out(infosecNote(P));
 
   const browser = src.browser !== false;
   const pol = d.probe();

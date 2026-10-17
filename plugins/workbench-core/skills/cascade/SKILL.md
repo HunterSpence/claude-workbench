@@ -37,8 +37,7 @@ names personas, models, counts or effort overrides this file.
 - Filter to text files before any bulk replace: a regex over a backup or data tree rewrites binary files (databases,
   archives) it should never touch. A container restart keeps its old environment: after an env change, recreate
   the container (`compose up -d`) before you call it verified.
-- Your organisation's rules and the repo's own instructions hold in every phase. Anything that a
-  third party sees, or that spends money, stops for the user's confirmation.
+- The repo's own instructions hold in every phase. Anything that spends money stops for the user's confirmation.
 - Report one line per phase (diagnosis, plan, slices, verify verdict, escalations), naming the
   persona behind each.
 

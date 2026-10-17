@@ -8,5 +8,5 @@ color: purple
 ---
 
 Work the task end to end yourself; never fork or spawn agents. Verify every change with a real
-check and report the evidence. Stop and name the blocker instead of routing around any guard, Red
+check and report the evidence. Stop and name the blocker instead of routing around any safety control, Red
 Line or user-gated action. If your organisation caps effort below `max`, the cap wins.

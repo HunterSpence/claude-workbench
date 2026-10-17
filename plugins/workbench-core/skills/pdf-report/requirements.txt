@@ -1,0 +1,4 @@
+# pdf-report: pypdf (BSD-3-Clause) and Markdown (BSD-3-Clause), exact pins. The check and the page images also use pypdfium2 and Pillow,
+# which office-render's requirements.txt already pins. Never PyMuPDF (AGPL-3.0), fpdf2, pikepdf, WeasyPrint or Jinja2.
+pypdf==6.19.0
+Markdown==3.11

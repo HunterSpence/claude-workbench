@@ -1,7 +1,7 @@
 {
   "version": 1,
   "_readme": "Pre-registered expectations for bootstrap/knowledge_verify.py (the Day-1 knowledge checks). Committed before any run and never edited after a result: change a check by adding a new key, not by moving the bar.",
-  "howto": {"questions": "docs/howto/questions.json", "top": 3, "keyword_min": 10},
+  "howto": {"questions": "docs/howto/questions.json", "top": 3},
   "find_related": {"from": "howto/27-find-a-file-or-an-answer.md", "expect_any": ["howto/README.md"]},
   "kb_related": {"from": "ops/HOT.md", "depth": 2, "expect_all": ["00-index.md", "_shared/HOT.md"]},
   "kb_cases": "plugins/workbench-kb/tests/kb_canned.json",

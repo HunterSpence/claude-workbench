@@ -33,7 +33,7 @@ folder, `${user_config.KEY}` a saved option. User-config substitution is rejecte
 
 What a plugin cannot do: set permissions, environment, model or status line; load a CLAUDE.md or `rules/`; give a plugin
 agent its own hooks, servers or permission mode; override managed policy; run sandboxed (hooks, servers and mods run with
-your user rights, outside the sandbox). A lasting guard therefore still needs a bootstrap or managed settings.
+your user rights, outside the sandbox). A lasting control therefore still needs a bootstrap or managed settings.
 
 ## 2. Surfaces: what loads where
 | Surface | Loads |
@@ -66,12 +66,12 @@ on `pip install` or downloads; route outside data through connectors.
   flow); exit 2 blocks and shows stderr to Claude. Decide on purpose whether a failure should fail open or closed, and
   say so in the script header.
 - **A hook cannot overrule a permission rule.** PreToolUse decisions combine as deny, then defer, then ask, then allow,
-  and deny and ask rules from settings are evaluated whatever a hook returns. A guard hook adds checks; it never grants
+  and deny and ask rules from settings are evaluated whatever a hook returns. A hook adds checks; it never grants
   what a managed deny rule forbids.
 - Keep state in `${CLAUDE_PLUGIN_DATA}`. No network calls, environment credential reads, `eval`, inline `-c` programs
   or recursive deletes without a stated reason; the reviewer flags each.
 - Test a hook by piping a recorded event into it and asserting the exit code and output, including a Windows path and a
-  folder with a space in it. The guard template ships six such tests.
+  folder with a space in it. The tool-check template ships six such tests.
 
 ## 4. MCP servers in plugins
 - Remote servers: `type` `http`, an https URL, OAuth where the service supports it. Claude's connector client follows

@@ -13,7 +13,7 @@ The bootstrap copies this folder to your KB root (default `~/claude-kb`) once an
 | `<domain>/history.md` | Session records; old ones roll into `history/YYYY-MM.md` | the save skill and the driver |
 | `<domain>/<topic>.md` | Reusable knowledge (runbooks, configs, patterns), with frontmatter | the save skill; the driver stamps `updated:` |
 | `daily/YYYY-MM-DD.md` | One line per save | the driver |
-| `_shared/digests/*.md` | Six on-demand topic digests (Windows and shell, git and CI, Claude Code, MCP, testing, orchestration) | shipped with the kit |
+| `_shared/digests/*.md` | On-demand topic digests: Windows and shell, git and CI, Claude Code, MCP, testing, orchestration, models and tokens, the knowledge layer, retrieval evaluation, reports and PDFs, the internal assistant, and enterprise RAG (five notes) | shipped with the kit |
 | `_shared/bug-cards.md`, `_shared/bug-detectors.json` | Recurring failures with their fixes, and the error patterns that point to them | shipped with the kit |
 | `_shared/facts.json` | The fact registry: facts that must have one home (see Pinned facts) | you; checked by `kb_health.py facts` |
 | `inbox/` | Drops awaiting triage (daily digests, pasted notes); nothing in it is promoted automatically | the ingest skill, you |
@@ -75,8 +75,7 @@ records, `daily/`, `inbox/` and README files are not checked. An empty registry 
   whose content changed since the save began. It never adds a front matter block to a note that has none, and it leaves
   a HOT.md alone when the stamp would take it past its cap.
 - No credentials, ever. The save driver refuses to finish while a file it writes holds a credential-shaped value.
-- Work data stays where your organisation allows it. If you make this folder a git repository, the save driver
-  commits locally; it pushes only when you configured a remote yourself AND pass `--push`.
+- If you make this folder a git repository, the save driver commits locally; it pushes only when you configured a remote yourself AND pass `--push`.
 
 ## Tools (in the workbench-kb plugin's `scripts/`)
 `save_driver.py` (the save skill's driver), `kb_search.py` (search), `kb_health.py` (checks), `kb_facts.py` (the

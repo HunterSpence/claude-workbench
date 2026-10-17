@@ -5,7 +5,7 @@ _shared/HOT.md. The interview itself is the onboard skill's job; this file only 
   onboard.py --answers answers.json [--dry-run]
 
 answers.json keys (all optional; a missing or empty one is left out):
-  name, role_team, timezone_hours, ai_policy, git_hosts, secret_store, kb_data           strings
+  name, role_team, timezone_hours, ai_policy                                            strings
   sign_off, greeting, tone, avoid                                                       strings (how I write)
   work_prefs, repos, tools, review_norms, never, facts                                  lists of strings
 
@@ -26,8 +26,7 @@ import _wb  # noqa: E402
 import secretscan  # noqa: E402
 
 START, END = "<!-- onboard:start -->", "<!-- onboard:end -->"
-STRINGS = ("name", "role_team", "timezone_hours", "ai_policy", "git_hosts", "secret_store", "kb_data",
-           "sign_off", "greeting", "tone", "avoid")
+STRINGS = ("name", "role_team", "timezone_hours", "ai_policy", "sign_off", "greeting", "tone", "avoid")
 LISTS = ("work_prefs", "repos", "tools", "review_norms", "never", "facts")
 
 
@@ -45,7 +44,7 @@ def clean(answers):
     bad = [k for k, v in out.items() if secretscan.scan_text(v if isinstance(v, str) else "\n".join(v))]
     if bad:
         raise ValueError("these answers look like credentials and were not written: " + ", ".join(bad)
-                         + ". Name the secret store instead; never the secret.")
+                         + ". Never write a credential value into USER.md.")
     return out
 
 
@@ -60,9 +59,7 @@ def user_md(a):
              "     or edit this file to change it. -->", "",
              "## Who", *line("Name I go by", "name"), *line("Role and team", "role_team"),
              *line("Time zone and working hours", "timezone_hours"), "",
-             "## Where the rules live", *line("Organisation policies that apply to AI tools", "ai_policy"),
-             *line("Approved git remotes and hosts", "git_hosts"), *line("Secret store", "secret_store"),
-             *line("Data the KB may hold", "kb_data"), "",
+             "## Where the rules live", *line("Organisation policies that apply to AI tools", "ai_policy"), "",
              "## How I like to work", *items("work_prefs"), "",
              "## How I write (draft-reply reads this)", *line("Sign-off name", "sign_off"),
              *line("Greeting style", "greeting"), *line("Tone", "tone"), *line("Phrases to avoid", "avoid"), "",

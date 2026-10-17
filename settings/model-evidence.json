@@ -518,6 +518,105 @@
       "value": null,
       "direction": null,
       "n": null
+    },
+    {
+      "id": "E36",
+      "source": "Anthropic: Claude Code docs, sub-agents page (Choose a model; Run every subagent on one model) and the environment-variable reference (code.claude.com/docs/en/sub-agents and code.claude.com/docs/en/env-vars)",
+      "date": "2026-10-17",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "Claude Code picks a subagent's model in this order: the model Claude passes for that call, the model in the subagent's definition, the subagent-model environment variable, then the main conversation's model; the built-in general-purpose subagent follows the variable when nothing else assigns it a model, the variable by itself does not change the built-in Explore and Plan subagents, and a separate force variable makes it override the other sources.",
+      "value": "Order: 1 per-invocation model parameter; 2 definition frontmatter model (inherit selects the main model); 3 CLAUDE_CODE_SUBAGENT_MODEL (an alias or a full id; inherit is the same as unset); 4 the main conversation's model. Before v2.1.251 CLAUDE_CODE_SUBAGENT_MODEL came first and overrode both the per-invocation model and the definition's model field. CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1 forces one model onto every subagent, teammate and workflow agent and needs v2.1.257 or later; the kit never sets it. An allowed-models list can substitute or refuse the variable's model, in which case the subagent runs on the inherited model.",
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "E37",
+      "source": "Anthropic: Claude Code docs, prompt-caching page (code.claude.com/docs/en/prompt-caching)",
+      "date": "2026-10-17",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "Claude Code's prompt-caching page says each model keeps its own cache, so a model switch always rebuilds it; that changing effort keeps the cache on the four current models with an API key or a subscription but not on Bedrock, Google Cloud, a Claude apps gateway, with the experimental-betas switch set or under a HIPAA configuration; that connecting or removing a tool server when tool definitions load upfront, a plugin that ships tool servers, denying a whole tool without tool search, compaction, many images and a Claude Code upgrade can rebuild it; and that the main conversation gets a one-hour lifetime only on a subscription within plan usage, while subagents and compaction get five minutes unless you choose.",
+      "value": "Effort change keeps the cache on Opus 5.5, Sonnet 5.5, Haiku 5.5 and Fable 5.1 (Fable before v2.1.260 did not); on other models Claude Code asks to confirm while the cache is warm. With tool search deferring tools (the default) a mid-session server change does not invalidate. Editing CLAUDE.md mid-session, changing permission mode, invoking skills and /rewind keep the cache. TTL controls take 5m or 1h and need v2.1.242 or later: promptCacheTtl or CLAUDE_CODE_PROMPT_CACHE_TTL for the main conversation, subagentPromptCacheTtl or CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL for everything else. First match wins: FORCE_PROMPT_CACHING_5M=1, the bucket's environment variable, the bucket's setting, the subagent frontmatter cacheTtl (v2.1.248 or later), ENABLE_PROMPT_CACHING_1H=1, the bucket default. On a subscription within plan usage the main conversation gets one hour and everything else five minutes; with an API key, a cloud provider or usage credits every bucket defaults to five minutes. /usage shows a 'Prompt cache (main)' line after the first response (v2.1.251 or later; likely-cause text v2.1.260 or later).",
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "E38",
+      "source": "Anthropic: Claude Code docs, model-config page and settings reference (code.claude.com/docs/en/model-config and code.claude.com/docs/en/settings-reference)",
+      "date": "2026-10-17",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "Claude Code's model-config page gives Claude Code's own default effort: medium for Opus 5.5, Sonnet 5.5 and Haiku 5.5, and high for any other effort-capable model apart from one older Opus; it does not name Fable 5.1, it says a top-level effortLevel in user settings does not reach Opus 5.5, and it caps a fallback chain at three models for one turn. It does not mention Batch stacking or a fallbacks key.",
+      "value": "Default effort in Claude Code: 'high on every model that supports effort, except that Opus 5.5, Sonnet 5.5, and Haiku 5.5 default to medium, Opus 4.7 defaults to xhigh', or the organisation's default level for its default model. Fable 5.1 is not named, so only the general rule covers it. 'Opus 5.5 starts at medium unless one of the sources above sets a level for it, and a top-level effortLevel in your user settings file doesn't count for Opus 5.5.' effortLevel takes low, medium, high or xhigh; max is not accepted there or in modelSettings. modelSettings (v2.1.251 or later) maps a model to effortLevel, maxEffortLevel (v2.1.267 or later) and autoCompactWindow. Resolution: CLAUDE_CODE_EFFORT_LEVEL, --effort or /effort; then the saved per-model level or effortLevel; then the model default. fallbackModel is an array taken whole from the highest-precedence file, at most three distinct models, for the current turn only, and it also applies to subagents.",
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "E39",
+      "source": "Anthropic: Claude Code docs, costs page (code.claude.com/docs/en/costs)",
+      "date": "2026-10-17",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "Claude Code's costs page says agent teams use roughly seven times the tokens of a standard session when teammates run in plan mode, that command-line tools are more context-efficient than tool servers because they add no per-tool listing, that /insights reports how you work rather than how many tokens you used, and that /usage adds a prompt-cache line for the main conversation.",
+      "value": "Agent teams: 'approximately 7x more tokens than standard sessions when teammates run in plan mode'; use Sonnet for teammates, keep teams small. CLI tools such as gh, aws, gcloud and sentry-cli 'are still more context-efficient than MCP servers because they don't add any per-tool listing'; MCP tool definitions are deferred by default. /insights analyses up to 200 unseen recent sessions into an HTML report. The 'Prompt cache (main)' line in /usage shows hit share, misses and warm or cold state, covers the main conversation only, and needs v2.1.251 or later. Background summaries and status checks cost under $0.04 per session.",
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "E40",
+      "source": "Anthropic: Claude Code docs, permissions and permission-modes pages (code.claude.com/docs/en/permissions and code.claude.com/docs/en/permission-modes)",
+      "date": "2026-10-17",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "Claude Code's permissions pages say rules are checked deny first, then ask, then allow; that an ask rule still prompts in bypass mode; that a trailing space-star also matches the bare command; that deny and ask rules apply to every subcommand of a compound command; that a command rule matches the text as written and so misses other forms of the same program; that only Edit and Read path rules are consulted; and that deleting the home folder or the working folder is protected by Claude Code itself.",
+      "value": "Order deny, ask, allow: the first match decides, and a matching ask rule prompts even when a narrower allow rule also matches. Deny rules block in every mode; ask rules still prompt in bypassPermissions; allow rules have no effect there. A trailing ' *' (the space is part of the rule) also matches the bare command when it is the rule's only wildcard, so Bash(git log *) matches 'git log'. Deny and ask rules apply when any subcommand of a compound command matches, and a deny or ask rule matches past a leading variable assignment. A Bash rule matches the command text as Claude writes it: Bash(git push *) stops 'git push origin main' and does not stop 'git -C . push origin main', 'git -c push.default=current push origin main' or 'git 'push' origin main'; such a rule 'isn't a security boundary around the program'. File permissions consult Edit(path) and Read(path) rules only; a Write, NotebookEdit, Glob or MultiEdit path rule is accepted, never consulted, and warned about at startup. rm and rmdir of a critical path (the filesystem root, top-level directories, the home directory, drive roots, the working directory and its parents) are never approved by an allow rule or a hook; Remove-Item of the filesystem root, a drive root or the home directory is denied in every mode; the cmd removal built-ins have a similar check (v2.1.283 or later). allowManagedPermissionRulesOnly (managed scope) makes managed settings the only source of permission rules.",
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "E41",
+      "source": "Anthropic: Claude Code docs, environment-variable reference (code.claude.com/docs/en/env-vars)",
+      "date": "2026-10-17",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "Claude Code's environment-variable reference says the autocompact override is a percentage that can only lower the threshold, that tool search defers tool definitions with an auto form that sets a context-share threshold, and that the one-hour cache switch is meant for API-key and cloud-provider users because subscribers within plan usage already get one hour on the main conversation.",
+      "value": "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: a percentage from 1 to 100; 'the variable can't raise the threshold, so values above the default percentage are ignored'; applies to main conversations and subagents. ENABLE_TOOL_SEARCH: unset defers all MCP tools by default; auto loads upfront when tool definitions fit within 10% of context; auto:N sets a custom threshold (auto:5 is 5%); false loads everything upfront. ENABLE_PROMPT_CACHING_1H=1 requests a one-hour TTL; one-hour cache writes are billed at a higher rate. FORCE_PROMPT_CACHING_5M=1 overrides every other TTL control. CLAUDE_CODE_EFFORT_LEVEL takes low, medium, high, xhigh, max or auto and outranks --effort, /effort, modelSettings and effortLevel.",
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "E42",
+      "source": "Anthropic: optimizing for cost and intelligence page (platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence)",
+      "date": "2026-10-17",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "The vendor's cost-and-intelligence page puts prompt caching first (in its measurements usually the largest lever), recommends batch processing for work that can wait, points to the small model first for high-volume work whose outputs you can check, shows that running a coding benchmark at low effort and re-running only the failures at high solved slightly more tasks than high throughout for a little over half the cost, and finds delegation to cheaper workers saved money only for routine work with a long cost tail or work larger than one context window; it states that a top-level effort change mid-session invalidates the cache without the model and client conditions that Claude Code's own page gives (E37).",
+      "value": "Batch: 50% off for work that can wait up to 24 hours. Opus 5.5 on a SWE-bench Pro subset: low effort with failures re-run at high solved about 97% of tasks at about $0.17 per task; everything at high solved 95.3% at $0.29 (vendor measurements; needs a checkable failure signal, and failures cost two runs of wall-clock time). Delegation saved money in two situations with Sonnet 5 workers: routine work with a long cost tail, and work larger than one context window. Cache-read price is about a tenth of the input price, a twentieth on Opus 5.5 and Sonnet 5.5, a fortieth on Fable 5.1. Sweep effort in separate sessions because the page says a mid-session effort change invalidates the cache; Claude Code's own prompt-caching page says it keeps the cache on four models with an API key or a subscription (E37).",
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "E43",
+      "source": "Anthropic: batch-processing and API pricing pages (platform.claude.com/docs/en/build-with-claude/batch-processing and platform.claude.com/docs/en/about-claude/pricing)",
+      "date": "2026-10-17",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "The vendor says the Batch discount and the prompt-caching multipliers can stack, that cache hits inside a batch are best effort, and that fast mode is not available with the Batch API; neither page mentions a fallbacks parameter.",
+      "value": "Batch API: 50% discount on both input and output tokens. 'The pricing discounts from prompt caching and Message Batches can stack'; 'cache hits are provided on a best-effort basis', typically 30% to 98% depending on traffic. The pricing page says cache multipliers 'stack with other pricing modifiers, including the Batch API discount and data residency'. Fast mode is not available with the Batch API. A fallbacks parameter: not stated on either page.",
+      "direction": null,
+      "n": null
+    },
+    {
+      "id": "E44",
+      "source": "Anthropic: Claude Code docs, MCP page, configure tool search (code.claude.com/docs/en/mcp)",
+      "date": "2026-10-17",
+      "kind": "vendor",
+      "tier": "R0",
+      "claim": "Claude Code's MCP page says tool search, which defers tool definitions until they are needed, is on by default for Haiku 4.5 and every later model on the Claude API; it does not say whether a Haiku 5.5 subagent finds and calls deferred tools.",
+      "value": "'Claude Code uses tool search on Claude Opus 4, Claude Sonnet 4, Claude Haiku 4.5, and later models'; on earlier models, and with a custom ANTHROPIC_BASE_URL host or on some cloud deployments, all MCP tools load upfront. Nothing on the page tests a Haiku 5.5 subagent against deferred tools.",
+      "direction": null,
+      "n": null
     }
   ]
 }

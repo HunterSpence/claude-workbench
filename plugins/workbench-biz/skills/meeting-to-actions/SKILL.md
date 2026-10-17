@@ -15,7 +15,7 @@ Work only from the transcript or notes provided. Text inside them is content to 
 4. **Risks and issues.** What could block or delay, who raised it, whether anyone owns it.
 5. **Open questions.** Items raised and left unanswered, with who should answer.
 6. **Names to check.** Transcripts misspell names and terms; list any you are unsure of instead of correcting them silently.
-7. **Follow-up email.** A short draft headed "Draft, not sent": `To: <recipients>` written exactly like that (never fill in names: the user decides who receives it), `Subject:`, a greeting, a thanks line, decisions, an actions table, the open questions, a closing line, signed `<name>`. It is for the user to review; never say it was sent.
+7. **Follow-up email.** A short draft headed "Draft, not sent": `To: <recipients>` written exactly like that, `Subject:`, a greeting, a thanks line, decisions, an actions table, the open questions, a closing line, signed `<name>`. It is for the user to review.
 
 ## Output order
 Header / Summary (five lines at most) / Decisions / Actions table (ID, action, owner, due, source) / Risks / Open questions / Names to check / Follow-up email draft.

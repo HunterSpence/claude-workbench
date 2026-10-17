@@ -5,7 +5,7 @@ Automates it: py -3 <KIT>/tools/skill-probe/skill_probe.py and py -3 <KIT>/tools
 ## When to use
 You wrote or changed a skill and want to know whether Claude starts it when it should and leaves it alone when it should not,
 or you wrote or changed a rule and want to know whether a fresh session obeys it. Both checks run offline on your machine and
-neither prints your prompts. The skill probe reads transcripts you already have. The rules quiz uses twelve short model calls
+neither prints your prompts. The skill probe reads transcripts you already have. The rules quiz uses four short model calls
 on your plan, one per scenario, and the grading itself calls no model. `<KIT>` is the kit folder (guide 01).
 
 ## Steps
@@ -46,7 +46,7 @@ on your plan, one per scenario, and the grading itself calls no model. `<KIT>` i
    py -3 <KIT>/tools/rules-quiz/rules_quiz.py list
    ```
 7. Put each prompt, as written, to a fresh session with no tools, from the folder whose rules you want to test, and save the
-   reply as `<id>.txt` in one folder. A scripted version in PowerShell (twelve short model calls):
+   reply as `<id>.txt` in one folder. A scripted version in PowerShell (four short model calls):
    ```
    $q = py -3 <KIT>/tools/rules-quiz/rules_quiz.py list --json | ConvertFrom-Json
    New-Item -ItemType Directory -Force answers | Out-Null
@@ -56,7 +56,7 @@ on your plan, one per scenario, and the grading itself calls no model. `<KIT>` i
    ```
    py -3 <KIT>/tools/rules-quiz/rules_quiz.py grade --answers answers
    ```
-9. Under nine of ten (11 of the 12) the tool says to reword the rule and names each failed scenario and the rule it tests. Open
+9. Under nine of ten (all 4 of the 4) the tool says to reword the rule and names each failed scenario and the rule it tests. Open
    the failed reply, and reword that rule: one imperative with its reason, as `docs/AUTHORING.md` section 5 describes. Start a
    new session and run steps 7 and 8 again.
 

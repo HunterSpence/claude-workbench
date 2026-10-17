@@ -82,7 +82,7 @@ Re-run after every corpus change.
 - [ ] Caching: the second call logs `cache_read > 0` (or the live eval says so). Zero means the prefix changes per call
   (a timestamp or per-user text before the breakpoint, unstable file order) or is under the minimum.
 - [ ] Security: the corpus is trusted content, user text is untrusted; the model has no tools and no data; answers are
-  rendered as text plus in-app links only; the app's own authorization still guards every page (a leaked link must
+  rendered as text plus in-app links only; the app's own authorization still protects every page (a leaked link must
   give a 403, never data).
 - [ ] Failures: refusal, cut-off, empty reply and provider outage all show the error with the support link.
 - [ ] Data: questions leave for the model provider; confirm that is allowed for this app's users before launch.

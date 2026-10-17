@@ -8,7 +8,7 @@ settings, knowledge base and search index. `<KIT>` is the kit folder (guide 01).
 
 ## Steps
 1. Create a profile. Options after `--` go to the installer:
-   `py -3 <KIT>/bootstrap/profile.py create project-a -- --profile corporate --git-hosts ghe.example.com`
+   `py -3 <KIT>/bootstrap/profile.py create project-a -- --profile corporate`
    The names are `[a-z0-9-]` and at most 32 characters. It creates `<HOME>/.claude-profiles/project-a/config` and
    `.../kb`, installs the kit into `config`, and gives the profile its own index.
 2. The knowledge base stays local. To use an approved cloud folder, add `--kb <folder>` before the `--`. Never put a
@@ -20,11 +20,11 @@ settings, knowledge base and search index. `<KIT>` is the kit folder (guide 01).
    unless you add `--purge-kb`.
 
 ## Verify
-- `list` shows the profile and `<WB>/profiles.json` records it (guards accept a `CLAUDE_CONFIG_DIR` registered there).
+- `list` shows the profile and `<WB>/profiles.json` records it.
 - In the launched session, a knowledge-base search for a word that exists only in another profile's notes finds nothing.
 
 ## Common failures
-- **Guards act as if the kit were missing:** `CLAUDE_CONFIG_DIR` points somewhere not registered. Start the profile
+- **The session acts as if the kit were missing:** `CLAUDE_CONFIG_DIR` points at another folder. Start the profile
   with `launch`, not by setting the variable by hand.
 - **Name rejected:** use lowercase letters, digits and hyphens only.
 - **Cross-client leakage:** it came from a shared folder, not the profile. Keep each client's files, repos and

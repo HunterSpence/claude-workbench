@@ -19,13 +19,19 @@ on every call, so the lever is context size, not shorter answers.
    that telling the model to answer directly did not stop it thinking. Set the level at the start of a task: on some setups
    (Bedrock, Google Cloud, a gateway, older models) a mid-session change makes the next request re-read the conversation
    uncached, and Claude Code asks you to confirm (`docs/token-diet.md`).
-6. Keep always-loaded files short: your `CLAUDE.md` and everything it imports are re-read every call. Check the kit's
+6. Protect the prompt cache. A model switch, a tool server joining or leaving when tools load upfront, compaction and a pause
+   longer than the cache lifetime make the next turn re-read everything; an effort change does not on Opus 5.5, Sonnet 5.5,
+   Haiku 5.5 and Fable 5.1 with an API key or a subscription. The main conversation's cache lives one hour on a subscription
+   within plan usage and five minutes otherwise, subagents' five minutes (E37, fetched Oct 2026; `docs/token-diet.md`, section 8).
+   Read your own hit rate on the `Prompt cache (main)` line of `/usage`, and run `/insights` to see how you work. Agent teams
+   cost about seven times a standard session, and command-line tools beat tool servers on context (E39).
+7. Keep always-loaded files short: your `CLAUDE.md` and everything it imports are re-read every call. Check the kit's
    budget with `py -3 <KIT>/tools/test_docs.py --budget`.
-7. Check what a session costs before you type anything: run `py -3 <KIT>/tools/token-split/token_split.py startup`. A long skill
+8. Check what a session costs before you type anything: run `py -3 <KIT>/tools/token-split/token_split.py startup`. A long skill
    listing is part of it, and a listing over budget silently drops skill descriptions; `/doctor` shows the listing's estimate
    and its biggest contributors (`docs/token-diet.md`, "The skill listing").
-8. Leave MCP servers you are not using disconnected and keep tool search on (do not set `ENABLE_TOOL_SEARCH=false`).
-9. Measure again after a normal week, with comparable work. `docs/token-diet.md` explains what was measured, what to skip,
+9. Leave MCP servers you are not using disconnected and keep tool search on (do not set `ENABLE_TOOL_SEARCH=false`).
+10. Measure again after a normal week, with comparable work. `docs/token-diet.md` explains what was measured, what to skip,
    and which popular tricks cost more than they save. `<KIT>` is the kit folder (guide 01).
 
 ## Verify

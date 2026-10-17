@@ -395,7 +395,7 @@ class Ctx:
         self.no_nightly = bool(no_nightly or opts.get("no_nightly"))
         self.no_update = bool(no_update or opts.get("no_update"))
         self.st = {"version": 1, "phase": None, "running": False, "pid": None,
-                   "exit_code": None, "next": None, "updated": None, "reboot_pending": False, "infosec_shown": False,
+                   "exit_code": None, "next": None, "updated": None, "reboot_pending": False,
                    "ask_it": [], "failed": [], **st, "kit_version": I.VERSION}      # the running kit decides, never the old file
         self.st["options"] = {"with": sorted(self.with_), "no_nightly": self.no_nightly, "no_update": self.no_update}
         self.probe = {}
@@ -1361,7 +1361,7 @@ def cmd_update(ctx, check=False, as_json=False):
     def body():
         out["doc"] = do_update(ctx, check)
         return 0
-    rc = body() if check else guarded(ctx, body)
+    rc = body() if check else locked(ctx, body)
     doc = out.get("doc")
     if doc is None:
         return rc
@@ -1380,10 +1380,6 @@ def do_onboard(ctx):
 
 
 def do_knowledge(ctx):
-    note = HERE / "infosec-note.txt"
-    if not ctx.st.get("infosec_shown") and note.exists():
-        ctx.log("INFOSEC NOTE (shown once): " + note.read_text(encoding="utf-8").strip())
-        ctx.save(infosec_shown=True)
     find = ctx.find_cli()
     if not Path(find).is_file():
         return ctx.fail("knowledge", f"the find CLI is not in this kit ({fwd(find)})")
@@ -1398,8 +1394,9 @@ def do_knowledge(ctx):
             return ctx.fail("knowledge", f"creating the venv failed ({hx(rc)})")
     skills = KIT / "plugins" / "workbench-core" / "skills"
     for req, key in ((skills / "find" / "requirements.txt", "knowledge_requirements_sha256"),
-                     (skills / "office-render" / "requirements.txt", "office_requirements_sha256")):
-        if req.exists() and ctx.cfg.get(key) != sha(req):       # the same venv: find, then the office renderer
+                     (skills / "office-render" / "requirements.txt", "office_requirements_sha256"),
+                     (skills / "pdf-report" / "requirements.txt", "pdf_requirements_sha256")):
+        if req.exists() and ctx.cfg.get(key) != sha(req):       # the same venv: find, the office renderer, the pdf report
             rc, _ = ctx.run([str(kpy), "-m", "pip", "install", "--disable-pip-version-check", "-r", str(req)],
                             alias="pip", timeout=3600)
             if rc != 0:
@@ -1437,13 +1434,48 @@ def do_knowledge(ctx):
 
 RELAY_KEY = "settings:stopfailure-relay"
 EXEC_FORM_MIN_CC = (2, 1, 139)   # official CHANGELOG 2.1.139: hook `args` (exec form), which the relay entries use
+KIT_LEDGER = "kit-written.json"  # I7: <WB>/state/kit-written.json; setup reads and writes only its `relay_hooks` key
+
+
+def relay_mark(ctx):
+    """The ledger's relay_hooks: "written", "removed-by-user" or None (missing or unreadable ledger, or any other value)."""
+    d = jload(ctx.state_dir / KIT_LEDGER)
+    v = d.get("relay_hooks") if isinstance(d, dict) else None
+    return v if v in ("written", "removed-by-user") else None
+
+
+def relay_mark_set(ctx, value):
+    """Set only relay_hooks; every other ledger key is kept as read. A missing or unreadable ledger is started with the I7 shape."""
+    p = ctx.state_dir / KIT_LEDGER
+    d = jload(p)
+    if not isinstance(d, dict):
+        if value is None:
+            return
+        keys = ("permissions.ask", "permissions.deny", "permissions.allow", "permissions.additionalDirectories")
+        d = {"version": 1, "lists": {k: [] for k in keys}, "user_removed": {k: [] for k in keys}, "plugins": {}, "updated": now()}
+    if d.get("relay_hooks") != value:
+        d["relay_hooks"] = value
+        jwrite(p, d)
+
+
+def relay_pair_present(user):
+    """Both relay hooks (a bug_hint.py command under StopFailure and under UserPromptSubmit) are in this settings object."""
+    try:
+        hooks = user.get("hooks") if isinstance(user.get("hooks"), dict) else {}
+        return all(any("bug_hint.py" in json.dumps(h.get("args") or h.get("command") or "")
+                       for g in hooks.get(ev) or [] if isinstance(g, dict) for h in g.get("hooks") or [] if isinstance(h, dict))
+                   for ev in ("StopFailure", "UserPromptSubmit"))
+    except Exception:
+        return True      # an odd shape is no proof the user removed anything
 
 
 def relay_hooks(ctx):
     """IR3: two user-settings hooks for the StopFailure relay (StopFailure -> bug_hint.py; UserPromptSubmit -> bug_hint.py
     --pending), only when this kit's bug_hint.py carries STOPFAILURE_MIN_CC and Claude Code is at or above it. Never in
     the plugin's static hooks.json. Merged with install.py's settings merge; the ops are ledger-recorded for undo-config.
-    An earlier run's entries are undone first, so a moved kit or a new python never leaves a stale pair behind."""
+    An earlier run's entries are undone first, so a moved kit or a new python never leaves a stale pair behind.
+    I7 ledger: a pair the ledger says setup wrote but settings.json no longer holds was removed by the user: it is
+    never added again."""
     script = KIT / "plugins" / "workbench-core" / "scripts" / "bug_hint.py"
     sp = ctx.ch / "settings.json"
     try:
@@ -1452,6 +1484,11 @@ def relay_hooks(ctx):
         return ctx.notes.append(f"StopFailure relay: {fwd(sp)} is not valid JSON ({e}); nothing was changed")
     old = next((e for e in ctx.ledger()["entries"] if e.get("key") == RELAY_KEY), None)
     before = json.dumps(user, sort_keys=True)
+    mark = relay_mark(ctx)
+    gone = mark == "written" and not relay_pair_present(user)   # judged before setup's own undo below
+    if gone:
+        mark = "removed-by-user"
+        relay_mark_set(ctx, mark)
     if old:
         I.undo_settings(user, old.get("ops") or [])
     floor = KV.stopfailure_floor(script)
@@ -1459,8 +1496,12 @@ def relay_hooks(ctx):
     managed = {}
     for _src, d in I.managed_sources():
         I.deep_merge(managed, d)
-    ops, notes = [], []
-    if floor is None:
+    ops, notes, added = [], [], False
+    if mark == "removed-by-user":      # the user's choice: one note when it is first seen, silence after
+        if gone:
+            ctx.notes.append("StopFailure relay: you removed these hooks from settings.json, so they are not added again "
+                             f"(state/{KIT_LEDGER}, key relay_hooks)")
+    elif floor is None:
         ctx.notes.append("StopFailure relay: this kit's bug_hint.py does not ship it; nothing installed")
     elif not ver or vkey(ver) < max(floor, EXEC_FORM_MIN_CC):
         ctx.notes.append(f"StopFailure relay: needs Claude Code {'.'.join(map(str, max(floor, EXEC_FORM_MIN_CC)))} or later, this machine has "
@@ -1473,6 +1514,7 @@ def relay_hooks(ctx):
                                            "timeout": 10}]}] for ev, extra in (("StopFailure", []),
                                                                                ("UserPromptSubmit", ["--pending"]))}}
         I.merge_settings(user, frag, managed, False, ops, notes)
+        added = True
     if json.dumps(user, sort_keys=True) != before:
         atomic_write(sp, json.dumps(user, indent=2, ensure_ascii=False) + "\n")
     if ops:      # replaces the earlier entry
@@ -1481,6 +1523,10 @@ def relay_hooks(ctx):
         led = ctx.ledger()
         led["entries"] = [e for e in led["entries"] if e.get("key") != RELAY_KEY]
         jwrite(ctx.state_dir / "provision-ledger.json", led)
+    if added:
+        relay_mark_set(ctx, "written")
+    elif mark == "written":      # setup removed its own pair and could not add it back: nothing is written now
+        relay_mark_set(ctx, None)
 
 
 def do_knowledge_verify(ctx):
@@ -1853,7 +1899,7 @@ def after_wsl(ctx, plan):
     return finish(ctx)
 
 
-def guarded(ctx, body):
+def locked(ctx, body):
     """Run body under the lock with running/pid in the state; exit 2 when another runner holds the lock."""
     if ctx.data_error:
         print("ERROR: " + ctx.data_error)
@@ -1902,7 +1948,7 @@ def cmd_run(ctx):
             jwrite(ctx.state_dir / "plan.json", plan)
             return 5
         return after_wsl(ctx, plan)
-    return guarded(ctx, body)
+    return locked(ctx, body)
 
 
 def make_plan_posix(ctx):
@@ -1937,7 +1983,7 @@ def cmd_resume(ctx):
             install_distro(ctx, it, ["--web-download"] if plan.get("store_blocked") else [])
         ctx.save(reboot_pending=False)
         return after_wsl(ctx, plan)
-    return guarded(ctx, body)
+    return locked(ctx, body)
 
 
 def cmd_plan(ctx):
@@ -2150,6 +2196,7 @@ def undo_config(apply=False):
                 if apply:
                     I.undo_settings(user, e.get("ops") or [])
                     atomic_write(sp, json.dumps(user, indent=2, ensure_ascii=False) + "\n")
+                    relay_mark_set(ctx, None)      # setup took its own pair out: the ledger no longer says "written"
         elif k == "mcp":                # the find MCP server setup registered: removed through the healer, which backs up
             say(f"remove the user MCP server {e['name']} from {e['config']}")
             if apply and Path(e["config"]).is_file():
@@ -2212,7 +2259,6 @@ def find_git(root, depth=4, budget=20000):
 
 def placement_rows(ctx):
     rows = []
-    _, personal, every = I.onedrive_roots()
     work, cands = I.work_onedrive()
     if I.in_onedrive(ctx.ch):
         rows.append(("placement: config dir", "FAIL", f"{fwd(ctx.ch)} is inside OneDrive; keep it local"))
@@ -2224,8 +2270,6 @@ def placement_rows(ctx):
             continue
         if e.get("placement") == "local-only" and I.in_onedrive(p):
             rows.append(("placement: " + e["path"], "FAIL", f"{fwd(p)} must stay local, it is inside OneDrive"))
-        if e.get("placement") == "work-cloud-ok" and any(I.under(p, q) for q in personal):
-            rows.append(("placement: " + e["path"], "FAIL", f"{fwd(p)} is in a personal OneDrive; work data never goes there"))
     for r in {fwd(x) for x in (ctx.data, ctx.kb, work) if x}:
         g = find_git(r) if I.in_onedrive(r) else None
         if g:
@@ -2280,7 +2324,7 @@ def claude_sweep(ctx):
 def plugin_option_row(ctx):
     """(status, detail): every enabled workbench plugin whose manifest declares userConfig.python has pluginConfigs.<id>.options.
     python set to an interpreter that runs. Unset means every hook of that plugin fails with `Plugin option "python" isn't set`
-    and the guards fail open, while the heartbeat can still read OK (the installer self-test calls the guard itself)."""
+    and no hook runs, while the heartbeat can still read OK from an earlier session."""
     sp = ctx.ch / "settings.json"
     try:
         user = I.read_json(sp) if sp.exists() else {}
@@ -2298,8 +2342,8 @@ def plugin_option_row(ctx):
             bad.append(f"{i}: {py} does not run")
     if bad:
         fix = ctx.cfg.get("python") or fwd(PY)
-        return "FAIL", ("; ".join(bad) + ". Every hook of that plugin fails with `Plugin option \"python\" isn't set` and the "
-                        f"guards do not run. Fix, for each: claude plugin install <id> --config python={fix}")
+        return "FAIL", ("; ".join(bad) + ". Every hook of that plugin fails with `Plugin option \"python\" isn't set`, so "
+                        f"none of its hooks run. Fix, for each: claude plugin install <id> --config python={fix}")
     return "OK", f"{len(on)} plugin(s) have a python option that runs"
 
 
@@ -2360,13 +2404,12 @@ def cmd_doctor(ctx, as_json=False, bundle=None, deep=False):
         add("TLS + network", "WARN" if bad_rt or blocked_ep or rev else "OK",
             ", ".join([f"TLS fails: {', '.join(bad_rt)}"] * bool(bad_rt) + [f"blocked: {', '.join(blocked_ep)}"] * bool(blocked_ep)
                       + rev) or "every runtime verifies TLS; every endpoint answers")
-    hb = jload(ctx.state_dir / "guard-heartbeat.json")
-    if not hb or not hb.get("last_fired"):        # only a real fire counts: the installer's self-test is filed as self_test_at
-        add("guard heartbeat", "WARN", "the guard has not fired in a Claude Code session yet (the installer's self-test does "
-                                       "not count): start Claude Code and run any tool once")
+    hb = jload(ctx.state_dir / "hooks-heartbeat.json")      # I3: SessionStart stamps last_start; never a FAIL
+    last = hb.get("last_start") if isinstance(hb, dict) else None
+    if isinstance(last, str) and last:
+        add("hooks heartbeat", "OK", f"last session start {last}")
     else:
-        n = int(hb.get("sessions_since_fire") or 0)
-        add("guard heartbeat", "FAIL" if n >= 3 else "OK", f"last fired {hb.get('last_fired')}; {n} session(s) since")
+        add("hooks heartbeat", "WARN", "no Claude Code session has started since the install: start one, then run the doctor again")
     add("plugin python option", *plugin_option_row(ctx))
     add("skill listing", *ST.row(ST.measure(ctx.ch, KIT, Path.cwd(), managed=managed_settings()))[:2])
     user_mcp = (ctx.ch / ".claude.json") if os.environ.get("CLAUDE_CONFIG_DIR") else ctx.home / ".claude.json"
@@ -2464,14 +2507,14 @@ def make_bundle(ctx, out, outputs):
 
 # ── backup / restore ─────────────────────────────────────────────────────────────────────────────────────────
 def backup_sources(ctx):
-    """[(archive name, path)]: KB notes (no index), USER.md, workbench config, capture scope, profiles, allowlist, and
+    """[(archive name, path)]: KB notes (no index), USER.md, workbench config, capture scope, profiles, and
     the user's own CLAUDE.md, rules, agents and skills (Markdown only). settings.json goes in redacted, as reference."""
     out = []
     if ctx.kb.is_dir():
         out += [(f"KB/{fwd(p.relative_to(ctx.kb))}", p) for p in sorted(ctx.kb.rglob("*.md")) if ".git" not in p.parts]
         if (ctx.kb / "inbox.jsonl").is_file():          # the journal: lines not yet folded into active-context
             out.append(("KB/inbox.jsonl", ctx.kb / "inbox.jsonl"))
-    for rel in ("USER.md", "config.json", "profiles.json", "corporate-allowlist.json", "capture/scope.json"):
+    for rel in ("USER.md", "config.json", "profiles.json", "capture/scope.json"):
         if (ctx.wb / rel).is_file():
             out.append((f"WB/{rel}", ctx.wb / rel))
     if (ctx.ch / "CLAUDE.md").is_file():

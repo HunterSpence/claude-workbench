@@ -16,7 +16,7 @@ export class Stop extends Error {
   constructor(kind, reason, url) {
     super(reason);
     this.name = 'Stop';
-    this.guard = true;
+    this.stop = true;
     this.kind = kind;
     this.url = url ? cleanUrl(url) : null;
   }
@@ -25,7 +25,7 @@ export class Refused extends Error {
   constructor(reason) {
     super(reason);
     this.name = 'Refused';
-    this.guard = true;
+    this.stop = true;
   }
 }
 

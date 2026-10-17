@@ -1,6 +1,6 @@
 ---
 name: office-docx
-description: "Build or rebuild a Word document (.docx) with python-docx from an outline, Markdown or a corporate template, read a .docx back as Markdown, then render every page and fix what looks wrong. Use for \"write a memo\", \"make this a Word doc\", \"use our template\", \"turn these notes into a report\"."
+description: "Build a Word document (.docx) from an outline, Markdown or a corporate template. Use for \"write a memo\", \"make this a Word doc\", \"use our template\", \"turn notes into a report\"."
 when_to_use: "ALWAYS load before creating or editing a Word document, even a short memo."
 ---
 
@@ -78,10 +78,10 @@ render. Tracked changes and comments are not supported by python-docx: for a rev
 user to apply your suggested edits in Word with Track Changes on, or produce a new version plus a
 change list. Never overwrite the user's original; write a new file.
 
-## Before it leaves the organisation
-Render check first (section above), then scrub a copy and send only the copy:
+## Scrub a copy
+Render check first (section above), then scrub a copy (the original is never edited):
 ```bash
-"${user_config.python}" "${CLAUDE_SKILL_DIR}/../office-render/scripts/scrub.py" memo.docx --out memo-send.docx --json
+"${user_config.python}" "${CLAUDE_SKILL_DIR}/../office-render/scripts/scrub.py" memo.docx --out memo-clean.docx --json
 ```
 It accepts tracked changes (deleted text is gone) and removes comments, author and company names and the preview image. The sensitivity label stays. Details and limits: the office-render skill.
 

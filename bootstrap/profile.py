@@ -2,13 +2,13 @@
 """profile.py: per-client Claude Code profiles. Each has its own config folder, KB and knowledge index, so nothing
 from one client's work is visible in another's sessions (Python 3.10+, stdlib only).
 
-  profile.py create NAME [--kb DIR] [-- install.py options]   e.g. -- --profile corporate --git-hosts git.example.com
+  profile.py create NAME [--kb DIR] [-- install.py options]   e.g. -- --profile corporate
   profile.py list [--json]
   profile.py remove NAME [--purge-kb]                         uninstalls that copy; the KB stays unless --purge-kb
   profile.py launch NAME [-- claude arguments]                runs claude with that profile's config folder
 
 Folders: <home>/.claude-profiles/<name>/{config,kb}; its index <LAD>/doc-index/knowledge-<name>/index.sqlite. The
-registry is <main install>/workbench/profiles.json; the guard accepts a CLAUDE_CONFIG_DIR registered there. The KB
+registry is <main install>/workbench/profiles.json. The KB
 stays local unless --kb points at the client's (or employer's) approved cloud folder. Exit: 0 ok, 2 usage, else the
 installer's or claude's exit code.
 """
@@ -67,9 +67,7 @@ def create(name, kb, extra):
     if rc != 0:
         print(f"install into the profile exited {rc}; the profile was not registered ({I.fwd(base)} kept for a look)")
         return rc
-    wb, main_wb = cfg_dir / "workbench", main_home() / "workbench"
-    if (main_wb / "corporate-allowlist.json").is_file():
-        shutil.copyfile(main_wb / "corporate-allowlist.json", wb / "corporate-allowlist.json")
+    wb = cfg_dir / "workbench"
     db = I.lad() / "doc-index" / f"knowledge-{name}" / "index.sqlite"
     cfg = jload(wb / "config.json", {}) or {}
     jwrite(wb / "config.json", {**cfg, "knowledge_db": I.fwd(db), "profile_of": I.fwd(main_home())})

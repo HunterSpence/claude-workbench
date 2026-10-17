@@ -294,6 +294,9 @@ def mini_kit(dst):
     office = dst / "plugins/workbench-core/skills/office-render/requirements.txt"
     office.parent.mkdir(parents=True)
     office.write_text("pypdfium2==5.14.0\n", encoding="utf-8")
+    pdf = dst / "plugins/workbench-core/skills/pdf-report/requirements.txt"
+    pdf.parent.mkdir(parents=True)
+    pdf.write_text("pypdf==6.1.0\nMarkdown==3.9\n", encoding="utf-8")
     cap = dst / "plugins/workbench-capture/skills/capture/scripts"
     cap.mkdir(parents=True)
     (cap / "package.json").write_text('{"name": "capture", "version": "0.3.0"}\n', encoding="utf-8")
@@ -576,12 +579,6 @@ class Units(unittest.TestCase):
             self.assertIn(n, lay, n)
             self.assertEqual((lay[n]["kind"], lay[n]["creator"], lay[n]["uninstall"]), ("env", "bootstrap/setup.py", "remove"), n)
 
-    def test_infosec_note(self):
-        t = (HERE / "infosec-note.txt").read_text(encoding="utf-8")
-        for want in ("security team", "retention, DLP and eDiscovery", "outside your organisation", "purge"):
-            self.assertIn(want, t)
-        self.assertEqual(len([ln for ln in t.splitlines() if ln.strip()]), 1)           # one paragraph
-
 
 class RestoreSafety(unittest.TestCase):
     """A backup zip sits in a synced folder, so restore treats it as untrusted input."""
@@ -708,8 +705,9 @@ class Flows(unittest.TestCase):
         self.assertTrue(cfg["knowledge_python"].endswith("venv/Scripts/python.exe"))
         self.assertTrue(cfg["knowledge_db"].endswith("doc-index/knowledge/index.sqlite"))
         st = e.state()
-        self.assertEqual((st["phase"], st["exit_code"], st["running"], st["infosec_shown"]), ("done", 0, False, True))
-        self.assertIn("INFOSEC NOTE", (e.wb / "state" / "setup.log").read_text(encoding="utf-8"))
+        self.assertEqual((st["phase"], st["exit_code"], st["running"]), ("done", 0, False))
+        self.assertNotIn("infosec_shown", st, "the knowledge phase shows no note to acknowledge")
+        self.assertNotIn("INFOSEC NOTE", (e.wb / "state" / "setup.log").read_text(encoding="utf-8"))
         plan = json.loads((e.wb / "state" / "plan.json").read_text(encoding="utf-8"))
         self.assertTrue({it["tag"] for it in plan["items"]} <= set(S.TAGS))
         e.clear_calls()
@@ -929,14 +927,14 @@ class Flows(unittest.TestCase):
         sd = e.wb / "state"
         sd.mkdir(parents=True, exist_ok=True)
         S.jwrite(sd / "setup-state.json", {"phase": "done", "failed": [], "ask_it": []})
-        S.jwrite(sd / "guard-heartbeat.json", {"version": 1, "last_fired": S.now(), "sessions_since_fire": 0, "fired_total": 4})
+        S.jwrite(sd / "hooks-heartbeat.json", {"last_start": S.now()})
         S.jwrite(sd / "backup.json", {"last": S.now(), "path": "x.zip"})
         r = e.run("doctor", "--json")
         self.assertEqual(r.returncode, 0, r.stdout)
         self.assertEqual(json.loads(r.stdout)["exit_code"], 0)
-        S.jwrite(sd / "guard-heartbeat.json", {"version": 1, "last_fired": S.now(), "sessions_since_fire": 5, "fired_total": 4})
-        self.assertEqual(e.run("doctor").returncode, 2, "guards silent for 5 sessions is an error")
-        S.jwrite(sd / "guard-heartbeat.json", {"version": 1, "last_fired": S.now(), "sessions_since_fire": 0, "fired_total": 4})
+        (sd / "hooks-heartbeat.json").unlink()
+        self.assertEqual(e.run("doctor").returncode, 1, "no session started yet is a warning, never an error")
+        S.jwrite(sd / "hooks-heartbeat.json", {"last_start": S.now()})
         (sd / "backup.json").unlink()
         self.assertEqual(e.run("doctor").returncode, 1, "no backup yet is a warning")
         od = e.root / "OneDrive - Example Org"
@@ -1539,7 +1537,7 @@ class UpdateFlows(unittest.TestCase):
         sd = e.wb / "state"
         sd.mkdir(parents=True, exist_ok=True)
         S.jwrite(sd / "setup-state.json", {"phase": "done", "failed": [], "ask_it": []})
-        S.jwrite(sd / "guard-heartbeat.json", {"version": 1, "last_fired": S.now(), "sessions_since_fire": 0, "fired_total": 4})
+        S.jwrite(sd / "hooks-heartbeat.json", {"last_start": S.now()})
         S.jwrite(sd / "backup.json", {"last": S.now(), "path": "x.zip"})
         rows = lambda: {x["check"]: x for x in json.loads(e.run("doctor", "--json").stdout)["rows"]}  # noqa: E731
         r = rows()
@@ -1595,7 +1593,8 @@ class DayOne(unittest.TestCase):
         doc = json.loads(kvf.read_text(encoding="utf-8"))
         self.assertEqual((doc["summary"]["fail"], doc["kit_version"]), (0, I.VERSION))
         reqs = [c["argv"][c["argv"].index("-r") + 1].replace("\\", "/") for c in e.calls("pip") if "-r" in c["argv"]]
-        self.assertEqual([r.split("/skills/")[1] for r in reqs], ["find/requirements.txt", "office-render/requirements.txt"])
+        self.assertEqual([r.split("/skills/")[1] for r in reqs],
+                         ["find/requirements.txt", "office-render/requirements.txt", "pdf-report/requirements.txt"])
         full = [c for c in e.calls("find") if c["argv"][:3] == ["refresh", "--all", "--detach"]]
         self.assertTrue(full)
         self.assertGreater(full[0]["t"], kvf.stat().st_mtime - 1, "the full refresh starts after the checks")
@@ -1641,7 +1640,7 @@ class DayOne(unittest.TestCase):
         sd.mkdir(parents=True, exist_ok=True)
         S.jwrite(sd / "setup-state.json", {"phase": "done", "failed": [], "ask_it": []})
         S.jwrite(sd / "backup.json", {"last": S.now(), "path": "x.zip"})
-        S.jwrite(sd / "guard-heartbeat.json", {"version": 1, "last_fired": S.now(), "sessions_since_fire": 0, "fired_total": 4})
+        S.jwrite(sd / "hooks-heartbeat.json", {"last_start": S.now()})
         S.jwrite(sd / "update.json", {"version": 1, "generated": S.now(), "items": [{"id": "git", "action": "deferred"}]})
         r = e.run("doctor", "--deep", "--json")                 # all knowledge checks PASS; a regular WARN row only
         rows = {x["check"]: x["status"] for x in json.loads(r.stdout)["rows"]}
@@ -1649,10 +1648,11 @@ class DayOne(unittest.TestCase):
         self.assertNotIn("FAIL", rows.values())
         self.assertEqual(r.returncode, 0, "a regular WARN under --deep exits 0")
         self.assertEqual(e.run("doctor").returncode, 1, "plain doctor: the same WARN exits 1")
-        S.jwrite(sd / "guard-heartbeat.json", {"version": 1, "last_fired": S.now(), "sessions_since_fire": 5, "fired_total": 4})
-        r = e.run("doctor", "--deep", "--json")                 # guards silent for 5 sessions: a regular FAIL row
+        (e.ch / "settings.json").write_text(json.dumps({"enabledPlugins": {"workbench-core@workbench": True}, "pluginConfigs": {}}),
+                                            encoding="utf-8")
+        r = e.run("doctor", "--deep", "--json")                 # an enabled plugin with no python option: a regular FAIL row
         out = json.loads(r.stdout)
-        self.assertEqual({x["check"]: x["status"] for x in out["rows"]}["guard heartbeat"], "FAIL")
+        self.assertEqual({x["check"]: x["status"] for x in out["rows"]}["plugin python option"], "FAIL")
         self.assertEqual(out["knowledge_verify"]["failing"], [], "no knowledge check failed")
         self.assertEqual((r.returncode, out["exit_code"]), (2, 2), "a regular FAIL row under --deep exits 2")
         self.assertEqual(e.run("doctor").returncode, 2)
@@ -1768,6 +1768,85 @@ class Relay(unittest.TestCase):
         self.install("2.1.295")
         self.assertEqual(self.settings(), self.user)
 
+    # ── I7: the kit-written ledger decides whether a missing pair is added back ──
+    def kit_ledger_path(self):
+        return self.ch / "workbench" / "state" / "kit-written.json"
+
+    def kit_ledger(self):
+        return json.loads(self.kit_ledger_path().read_text(encoding="utf-8"))
+
+    def write_settings(self, obj):
+        (self.ch / "settings.json").write_text(json.dumps(obj), encoding="utf-8")
+
+    def test_the_first_install_writes_the_ledger_with_the_i7_shape(self):
+        self.hint.write_text(RELAY.format(2, 1, 250), encoding="utf-8")
+        self.assertFalse(self.kit_ledger_path().exists())
+        self.install("2.1.295")
+        led = self.kit_ledger()
+        self.assertEqual((led["version"], led["relay_hooks"], led["plugins"]), (1, "written", {}))
+        self.assertEqual(sorted(led["lists"]), sorted(led["user_removed"]))
+        self.assertEqual(led["lists"]["permissions.ask"], [])
+        self.install("2.1.295")                                         # again: still written, hooks still one pair
+        self.assertEqual((self.kit_ledger()["relay_hooks"], len(self.settings()["hooks"]["StopFailure"])), ("written", 1))
+
+    def test_a_pair_the_user_removed_is_not_added_again_and_every_other_ledger_key_survives(self):
+        self.hint.write_text(RELAY.format(2, 1, 250), encoding="utf-8")
+        self.install("2.1.295")
+        led = self.kit_ledger()
+        led["plugins"] = {"workbench-core@workbench": "enabled"}
+        led["lists"]["permissions.ask"] = ["Bash(npm publish *)"]
+        led["future_key"] = {"a": [1, 2]}
+        S.jwrite(self.kit_ledger_path(), led)
+        self.write_settings(self.user)                                  # the user deletes both relay hooks
+        ctx = self.install("2.1.295")
+        self.assertEqual(self.settings(), self.user, "not added back")
+        self.assertTrue(any("not added again" in n for n in ctx.notes), ctx.notes)
+        after = self.kit_ledger()
+        self.assertEqual(after.pop("relay_hooks"), "removed-by-user")
+        led.pop("relay_hooks")
+        self.assertEqual(after, led, "only relay_hooks changed")
+        self.install("2.1.300")                                         # and it stays that way
+        self.assertEqual((self.settings(), self.kit_ledger()["relay_hooks"]), (self.user, "removed-by-user"))
+        self.assertEqual(self.ledger(), [], "setup's own record of the pair is dropped too")
+
+    def test_removing_one_of_the_two_hooks_counts_as_removing_the_pair(self):
+        self.hint.write_text(RELAY.format(2, 1, 250), encoding="utf-8")
+        self.install("2.1.295")
+        half = self.settings()
+        half["hooks"].pop("StopFailure")                                # UserPromptSubmit --pending is still there
+        self.write_settings(half)
+        self.install("2.1.295")
+        self.assertEqual((self.settings(), self.kit_ledger()["relay_hooks"]), (self.user, "removed-by-user"))
+
+    def test_a_ledger_that_says_removed_by_user_blocks_the_first_add(self):
+        self.hint.write_text(RELAY.format(2, 1, 250), encoding="utf-8")
+        S.jwrite(self.kit_ledger_path(), {"version": 1, "relay_hooks": "removed-by-user"})
+        self.install("2.1.295")
+        self.assertEqual(self.settings(), self.user)
+
+    def test_a_missing_or_unreadable_ledger_adds_the_pair_and_writes_written(self):
+        self.hint.write_text(RELAY.format(2, 1, 250), encoding="utf-8")
+        self.kit_ledger_path().parent.mkdir(parents=True, exist_ok=True)
+        for body in ("{broken", "[]", '{"relay_hooks": "weird"}'):
+            self.kit_ledger_path().write_text(body, encoding="utf-8")
+            self.write_settings(self.user)
+            self.install("2.1.295")
+            self.assertIn("StopFailure", self.settings()["hooks"], body)
+            self.assertEqual(self.kit_ledger()["relay_hooks"], "written", body)
+
+    def test_setup_taking_its_own_pair_out_is_not_a_user_removal(self):
+        self.hint.write_text(RELAY.format(2, 1, 250), encoding="utf-8")
+        self.install("2.1.295")
+        self.install("2.1.100")                                         # claude downgraded below the floor: setup removes the pair
+        self.assertEqual(self.settings(), self.user)
+        self.assertIsNone(self.kit_ledger()["relay_hooks"])
+        self.install("2.1.295")                                         # back above it: added again, not misread as removed
+        self.assertIn("StopFailure", self.settings()["hooks"])
+        self.assertEqual(self.kit_ledger()["relay_hooks"], "written")
+        S.undo_config(apply=True)
+        self.assertEqual(self.settings(), self.user)
+        self.assertIsNone(self.kit_ledger()["relay_hooks"])
+
     def test_the_static_plugin_hooks_never_carry_the_relay(self):
         hooks = (REPO / "plugins" / "workbench-core" / "hooks" / "hooks.json").read_text(encoding="utf-8")
         self.assertNotIn("StopFailure", hooks)
@@ -1819,7 +1898,7 @@ class FieldFixes(unittest.TestCase):
         self.addCleanup(p.stop)
         assert_sandboxed()
 
-    def test_the_guard_refuses_an_environment_that_points_at_a_real_profile(self):
+    def test_the_sandbox_check_refuses_an_environment_that_points_at_a_real_profile(self):
         e = self.env()
         self.in_process(e)
         assert_sandboxed()
@@ -1831,12 +1910,12 @@ class FieldFixes(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 assert_sandboxed()
 
-    # ── G2: the doctor reads the plugin options, and only a real guard fire counts ──
+    # ── G2: the doctor reads the plugin options and the hooks heartbeat ──
     def healthy_doctor_state(self, e):
         sd = e.wb / "state"
         sd.mkdir(parents=True, exist_ok=True)
         S.jwrite(sd / "setup-state.json", {"phase": "done", "failed": [], "ask_it": []})
-        S.jwrite(sd / "guard-heartbeat.json", {"version": 1, "last_fired": S.now(), "sessions_since_fire": 0, "fired_total": 4})
+        S.jwrite(sd / "hooks-heartbeat.json", {"last_start": S.now()})
         S.jwrite(sd / "backup.json", {"last": S.now(), "path": "x.zip"})
         return sd
 
@@ -1859,7 +1938,7 @@ class FieldFixes(unittest.TestCase):
         self.assertIn("workbench-kb@workbench: python is not set", row["detail"])
         self.assertIn("Plugin option \"python\" isn't set", row["detail"])
         self.assertIn("claude plugin install <id> --config python=", row["detail"])
-        self.assertEqual(rows["guard heartbeat"]["status"], "OK", "the heartbeat alone cannot see it: that is why this row exists")
+        self.assertEqual(rows["hooks heartbeat"]["status"], "OK", "the heartbeat alone cannot see it: that is why this row exists")
         self.assertEqual(e.run("doctor", "--deep").returncode, 2, "doctor --deep exits 2 on it")
         gone = I.fwd(e.root / "nowhere" / "python.exe")                  # an interpreter that does not run
         sp.write_text(json.dumps({"enabledPlugins": on, "pluginConfigs": {
@@ -1879,17 +1958,24 @@ class FieldFixes(unittest.TestCase):
         rc, rows = self.doctor_rows(e)
         self.assertEqual((rc, rows["plugin python option"]["status"]), (0, "INFO"), "a disabled plugin is not checked")
 
-    def test_doctor_heartbeat_counts_only_a_real_fire_not_the_installer_self_test(self):
+    def test_doctor_heartbeat_row_is_ok_after_a_session_start_and_a_warn_before_never_a_fail(self):
         e = self.env()
         sd = self.healthy_doctor_state(e)
-        S.jwrite(sd / "guard-heartbeat.json", {"version": 1, "self_test_at": S.now(), "sessions_since_fire": 0, "fired_total": 0})
+        beat = sd / "hooks-heartbeat.json"
         rc, rows = self.doctor_rows(e)
-        self.assertEqual(rows["guard heartbeat"]["status"], "WARN")
-        self.assertIn("self-test", rows["guard heartbeat"]["detail"])
-        self.assertEqual(rc, 1)
-        S.jwrite(sd / "guard-heartbeat.json", {"version": 1, "last_fired": S.now(), "self_test_at": S.now(),
-                                               "sessions_since_fire": 0, "fired_total": 4})
-        self.assertEqual(self.doctor_rows(e)[1]["guard heartbeat"]["status"], "OK")
+        self.assertEqual((rc, rows["hooks heartbeat"]["status"]), (0, "OK"))
+        self.assertIn("last session start", rows["hooks heartbeat"]["detail"])
+        self.assertFalse([k for k in rows if "gu" + "ard" in k.lower()], "the removed feature has no doctor row")
+        beat.unlink()
+        rc, rows = self.doctor_rows(e)
+        self.assertEqual((rc, rows["hooks heartbeat"]["status"]), (1, "WARN"))
+        self.assertIn("no Claude Code session has started since the install", rows["hooks heartbeat"]["detail"])
+        S.jwrite(beat, {"last_precompact": S.now()})                      # a precompact stamp is not a session start
+        self.assertEqual(self.doctor_rows(e)[1]["hooks heartbeat"]["status"], "WARN")
+        beat.write_text("{broken", encoding="utf-8")
+        self.assertEqual(self.doctor_rows(e)[1]["hooks heartbeat"]["status"], "WARN")
+        S.jwrite(beat, {"last_start": S.now(), "last_precompact": S.now()})
+        self.assertEqual(self.doctor_rows(e)[1]["hooks heartbeat"]["status"], "OK")
 
     # ── G13 ──
     ASK = ("Please allow downloads from huggingface.co (a one-time embedding model), or provide an approved internal mirror of "

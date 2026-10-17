@@ -24,10 +24,10 @@ folder inside your Claude config folder.
    ```
    Add `--headed` to `open` to watch. Name a session with `-s=name`; `playwright-cli list` and `close-all` manage them.
    A headless session closes itself after an hour without commands.
-4. On the corporate profile the guard asks before three kinds of command: `upload` and `drop` (a file from this machine goes
-   into the page), `eval` and `run-code` (code runs inside the page), and `open`, `goto` or `tab-new` to any address that
-   is not localhost or a loopback address and not a host in `git_remote_hosts` or `upload_hosts` in
-   `<WB>/corporate-allowlist.json`. Read the command, approve only what you meant. The pack is on under both profiles; only `"enabled": false` in that file turns it off.
+4. On the corporate profile each shell command prompts unless you allowed it, so read every `playwright-cli` command before
+   you approve it, above all three kinds: `upload` and `drop` (a file from this machine goes into the page), `eval` and
+   `run-code` (code runs inside the page), and `open`, `goto` or `tab-new` to any address that is not localhost or a loopback
+   address. The kit adds no other check around them; approve only what you meant.
 5. CLI or MCP: this CLI is the better fit for coding work because a command prints a short result instead of a large page
    tree, and a skill tells Claude how to use it. The `playwright` entry in `<KIT>/mcp/golden-config.template.json`
    (`@playwright/mcp`) is the other route, for long loops that need the page held in memory. It ships off (`ignore`), so

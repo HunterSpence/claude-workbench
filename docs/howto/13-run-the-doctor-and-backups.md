@@ -3,13 +3,13 @@
 Automates it: `py -3 <KIT>/bootstrap/setup.py doctor`
 
 ## When to use
-Something feels off after an update, IT changed a policy, a session warns that guards have not run lately, or you want a
+Something feels off after an update, IT changed a policy, the doctor row `hooks heartbeat` warns, or you want a
 backup you have actually restored once. `<KIT>` is the kit folder (guide 01).
 
 ## Steps
 1. Run the doctor. Exit code 0 is OK, 1 warnings, 2 errors:
    `py -3 <KIT>/bootstrap/setup.py doctor`
-   Each line is a check: capability report, TLS and network, guard heartbeat, MCP servers, knowledge index, backup age,
+   Each line is a check: capability report, TLS and network, hooks heartbeat, MCP servers, knowledge index, backup age,
    managed policy, setup state, and placement (config folder, knowledge index and git repositories must stay out of OneDrive).
 2. To check the knowledge layer as well, run the deep doctor. It is a superset: it first runs the Day-1 knowledge checks
    (the knowledge base is seeded, its state folder works, search and the link graph meet their bar, `find` answers a
@@ -42,7 +42,7 @@ backup you have actually restored once. `<KIT>` is the kit folder (guide 01).
 - The "backup" row reads OK (within 7 days).
 
 ## Common failures
-- **The deep doctor exits 2:** read the rows marked FAIL. A doctor row (placement, guard heartbeat) is handled below. A
+- **The deep doctor exits 2:** read the rows marked FAIL. A doctor row (placement, hooks heartbeat) is handled below. A
   `knowledge: <name>` row names the check, and its detail says what failed: `kb-machinery` means the knowledge base's own
   unit tests failed on this machine (`py -3 -m unittest discover -s <KIT>/plugins/workbench-kb/tests` shows which);
   `kb-retrieval` or `kb-graph` mean search or the link graph fell below the bar fixed in advance; `find-keyword` means a
@@ -53,7 +53,7 @@ backup you have actually restored once. `<KIT>` is the kit folder (guide 01).
   allow list, a browser policy). Send the text (guide 03); the exit code stays 0. A check that timed out is also a WARN:
   run the deep doctor again.
 - **FAIL on a placement row:** a folder is inside OneDrive. Move it out; databases and git repositories corrupt there.
-- **WARN "guard heartbeat":** the guards have not fired recently. Start Claude Code, run any tool, run the doctor again;
-  if it persists, hooks may be locked (guide 03).
+- **WARN "hooks heartbeat":** no Claude Code session has started since the install. Start Claude Code and run the doctor
+  again; if it persists, hooks may be locked (guide 03).
 - **ERROR hash mismatch or unsafe path in a backup:** nothing is restored. Take a fresh backup; do not edit the zip.
-- **"never backed up":** run step 4. Keep the zip where your organisation allows, not on a personal cloud drive.
+- **"never backed up":** run step 4.

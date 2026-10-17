@@ -11,13 +11,10 @@
   --kb-root PATH                knowledge-base folder (default: the last install's, else <data root>/kb)
   --data-root PATH              workbench data folder (default: the last install's, else <work OneDrive>/Workbench
                                 when exactly one verified work OneDrive exists, else ~/Workbench)
-  --git-hosts h1,h2             the git hosts company code may be pushed to (written to the corporate allowlist)
-  --guard minimal|standard|strict  guard level (default standard: a push or upload to an unlisted host and --no-verify ask
-                                instead of being refused; strict refuses them; minimal refuses nothing and asks only before
-                                irreversible, outward, credential and guard-control steps). Kept across upgrades
+  --git-hosts h1,h2             accepted and ignored (older setup commands still pass it)
   --approvals ask|off           corporate profile: ask before each command (default) or run ordinary commands without
-                                asking (new windows start in bypass mode, the kit's own ask rules are lifted; deny rules
-                                and the guard still apply). Kept across upgrades
+                                asking (new windows start in bypass mode; the kit's minimal ask rules and the
+                                active-context deny still apply). Kept across upgrades
   --force                       replace settings keys you already set to something else
   --no-cli                      never call the claude CLI; print its commands instead
   --setup auto|plan             after --apply: show the capability report, then provision this machine in the
@@ -36,8 +33,13 @@ The kit is copied to <WORKBENCH_HOME>/kit and the plugin marketplace is register
 unpacked can be moved or deleted afterwards. CLAUDE_CONFIG_DIR inside a OneDrive folder is refused.
 
 Values with ONE owner, rewritten on every install (a change is printed as a warning): the KB root (env
-WORKBENCH_KB_ROOT, permissions.additionalDirectories, config.json, the instruction text) and the Python path
-(pluginConfigs of both plugins, the statusLine command, config.json).
+WORKBENCH_KB_ROOT, permissions.additionalDirectories, the active-context deny, config.json, the instruction text) and the
+Python path (pluginConfigs of both plugins, the statusLine command, config.json).
+
+Upgrades: permission rules an earlier kit wrote and the profile no longer has are retired (bootstrap/retired-rules.json;
+a rule you wrote is never touched); list entries the kit wrote and you removed are not added again, and a kit plugin you
+disabled stays disabled (<WB>/state/kit-written.json); files you changed in the kit copy, its instructions or the plugin
+cache are copied with a diff to <WB>/state/local-patches/<timestamp>/ before they are replaced (never re-applied here).
 
 Exit codes: 0 done (or dry run) · 1 unexpected error · 2 environment problem (old Python, unreadable settings.json,
 bad option) · 3 blocked by your organisation's policy (ask your IT team) · 4 an apply step failed (see the output).
@@ -45,7 +47,10 @@ Test seams: WORKBENCH_MANAGED_SETTINGS (os.pathsep-separated JSON files) is read
 WORKBENCH_FAKE_REGISTRY (a JSON file) replaces registry reads; WORKBENCH_REPORT_CLI replaces bootstrap/report.py.
 """
 import argparse
+import calendar
 import copy
+import difflib
+import fnmatch
 import hashlib
 import json
 import os
@@ -54,12 +59,11 @@ import shlex
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-VERSION = "0.3.4"
+VERSION = "0.3.5"
 MARKETPLACE = "workbench"
 PLUGIN_IDS = ("workbench-core@workbench", "workbench-kb@workbench")    # pluginConfigs.<id>.options.python: these only
 DEFAULT_PLUGINS = PLUGIN_IDS + ("workbench-biz@workbench",)
@@ -70,10 +74,107 @@ EXTRAS = ("tokensave", "pm-pack", "upstream-skills", "capture", "nightly", "clau
 # detector never names a card the user's file lacks; digests move one file at a time.
 KB_PAIR = ("_shared/bug-cards.md", "_shared/bug-detectors.json")
 BUILTIN_MARKETPLACES = {"claude-plugins-official": {"source": "github", "repo": "anthropics/claude-plugins-official"}}
-KIT_IGNORE = shutil.ignore_patterns(".git", "__pycache__", "*.pyc", ".venv", "venv", "node_modules", ".pytest_cache",
-                                    "*.bak*", "installed-config.json")
-RECORD = Path("plugins") / "workbench-core" / "scripts" / "installed-config.json"   # read by _wb.config_redirected()
+IGNORE = (".git", "__pycache__", "*.pyc", ".venv", "venv", "node_modules", ".pytest_cache", "*.bak*", "installed-config.json")
+KIT_IGNORE = shutil.ignore_patterns(*IGNORE)
+RECORD = Path("plugins") / "workbench-core" / "scripts" / "installed-config.json"   # read by profile.py (main_home)
 ABSENT = {"__absent__": True}
+LEDGER_KEYS = ("permissions.ask", "permissions.deny", "permissions.allow", "permissions.additionalDirectories")
+SUBAGENT_MIN = (2, 1, 251)       # before it, CLAUDE_CODE_SUBAGENT_MODEL overrode every persona's own model
+OLD = "gu" + "ard"               # the removed PreToolUse hook's name, built so a word scan of the kit finds no leftover
+
+
+def off_text(pid):
+    """What a kit plugin the user turned off means, said once per install and in the post-update verify."""
+    name = pid.split("@")[0]
+    if name == "workbench-core":
+        return ("workbench-core is disabled (your choice; kept). It also runs session-start memory, the save reminders and "
+                "the pre-compaction snapshot, so those are off too. To turn it back on: claude plugin enable "
+                "workbench-core@workbench")
+    return f"{name} is disabled (your choice; kept). To turn it back on: claude plugin enable {pid}"
+
+
+def stamp_key(name):
+    """Sort key of a backup folder name, oldest first: YYYYMMDD-HHMMSS, then its -N suffix (two installs in one second)."""
+    parts = str(name).split("-")
+    return "-".join(parts[:2]), int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+
+
+def manifests_in_order(wb):
+    """[(path, manifest)] of every live install manifest under <wb>/backups, oldest first. The folder stamp is LOCAL wall-clock
+    time, which a laptop that changes time zone puts out of order, so the order is the manifest's own UTC stamp ("utc",
+    0.3.5 on, taken when the manifest is written), else the file's mtime (written once, at the end of that install), then
+    the folder stamp as the tie-break. Both are end-of-install times, so an old and a new manifest compare correctly."""
+    out = []
+    for f in (Path(wb) / "backups").glob("*/manifest.json"):
+        m = json.loads(f.read_text(encoding="utf-8"))
+        try:
+            head, _, frac = str(m["utc"]).rstrip("Z").partition(".")
+            ns = calendar.timegm(time.strptime(head, "%Y-%m-%dT%H:%M:%S")) * 10**9 + int((frac + "0" * 9)[:9])
+        except (KeyError, ValueError):
+            ns = f.stat().st_mtime_ns
+        out.append(((ns, stamp_key(f.parent.name)), f, m))
+    return [(f, m) for _, f, m in sorted(out, key=lambda x: x[0])]
+
+
+def remove_once(cur, gone):
+    """cur without ONE occurrence of each string in gone (a user's own duplicate copy of a kit string stays); order kept."""
+    left = list(gone)
+    out = []
+    for x in cur:
+        if x in left:
+            left.remove(x)
+        else:
+            out.append(x)
+    cur[:] = out
+
+
+def perm_path(p):
+    """A path in the form Claude Code's permission rules match: forward slashes, `X:/rest` -> `//x/rest` (drive letter
+    lower-cased), `/rest` -> `//rest`."""
+    s = fwd(p).rstrip("/")
+    m = re.fullmatch(r"([A-Za-z]):(/.*)?", s)
+    if m:
+        return f"//{m.group(1).lower()}{m.group(2) or ''}"
+    return s if s.startswith("//") or not s.startswith("/") else "/" + s
+
+
+def ac_rule(kb):
+    """The one deny rule: only the save driver writes the KB's active-context.md (an Edit rule covers every edit tool)."""
+    return f"Edit({perm_path(kb)}/active-context.md)"
+
+
+def lf_sha(path):
+    """sha256 of a file's bytes with CRLF read as LF (the release manifests' form), or None when it cannot be read."""
+    try:
+        return hashlib.sha256(Path(path).read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+    except OSError:
+        return None
+
+
+def tree_files(root):
+    """{posix path: Path} of the files under root, without what a kit copy never holds (IGNORE)."""
+    root, out = Path(root), {}
+    skip = lambda n: any(fnmatch.fnmatch(n, pat) for pat in IGNORE)  # noqa: E731
+    for d, dirs, names in os.walk(root):
+        dirs[:] = [x for x in dirs if not skip(x)]
+        for n in names:
+            if not skip(n):
+                p = Path(d) / n
+                out[p.relative_to(root).as_posix()] = p
+    return out
+
+
+def move_retry(src, dst, tries=3):
+    """Move a file, retrying while another process holds it open (Windows); True when it moved."""
+    Path(dst).parent.mkdir(parents=True, exist_ok=True)
+    for i in range(tries):
+        try:
+            shutil.move(str(src), str(dst))
+            return True
+        except OSError:
+            if i + 1 < tries:
+                time.sleep(0.5)
+    return False
 
 
 def python_plugin_ids(repo=REPO):
@@ -573,7 +674,7 @@ class Installer:
         self.data, self.od_work = resolve_data_root(a.data_root, self.prev)
         kb = a.kb_root or self.prev.get("kb_root") or str(self.data / "kb")
         self.kb = Path(os.path.abspath(os.path.expanduser(kb)))
-        self.prior = [json.loads(p.read_text(encoding="utf-8")) for p in sorted((self.wb / "backups").glob("*/manifest.json"))]
+        self.prior = [m for _, m in manifests_in_order(self.wb)]
         self.upstream = a.upstream_plugins or a.profile == "permissive"
         self.approvals = getattr(a, "approvals", None) or (self.prev.get("approvals") if self.prev.get("approvals") in ("ask", "off") else "ask")
         self.values = {"CLAUDE_HOME": fwd(self.claude_home), "WORKBENCH_HOME": fwd(self.wb), "KB_ROOT": fwd(self.kb),
@@ -592,6 +693,13 @@ class Installer:
                          "created": [], "created_trees": [], "settings_ops": [], "cli": [], "no_cli": bool(a.no_cli),
                          "kb_root": fwd(self.kb), "kb_seeded": []}
         self.claude = None if a.no_cli else shutil.which("claude")
+        self.ledger_path = self.wb / "state" / "kit-written.json"
+        try:
+            self.ledger = read_json(self.ledger_path)
+        except (OSError, ValueError):
+            self.ledger = {}                          # none (or unreadable): nothing counts as removed by the user
+        self.plugin_choice, self.core_off, self.plugin_snap = {}, False, {}
+        self.frag_lists, self.user_removed = {k: [] for k in LEDGER_KEYS}, {k: [] for k in LEDGER_KEYS}
 
     def todo(self, text, fn=None):
         self.plan.append(text)
@@ -646,6 +754,8 @@ class Installer:
     # ── planning ──
     def build(self):
         self.check_policy()
+        self.plan_local_changes()
+        self.plan_leftovers()
         self.plan_kit()
         self.plan_instructions()
         self.plan_files()
@@ -655,6 +765,8 @@ class Installer:
                   + "".join(f"\n      skip {k}: {why}" for k, why in notes),
                   lambda: self.write_settings(settings, ops, notes))
         self.plan_plugins()
+        self.todo(f"[state] record what this install wrote in {fwd(self.ledger_path)} (an entry you remove later is not "
+                  "added again)", self.write_ledger)
 
     def check_policy(self):
         m = self.managed
@@ -664,21 +776,191 @@ class Installer:
                           "Ask your IT team to allow the workbench plugins (or to deploy them centrally); do not work "
                           "around the policy.")
         if m.get("allowManagedHooksOnly") is True:
-            self.warnings.append("Managed allowManagedHooksOnly is on: the workbench hooks (guards, session start, "
+            self.warnings.append("Managed allowManagedHooksOnly is on: the workbench hooks (session start, save reminders, "
                                  "statusline) will NOT run unless your IT team force-enables workbench-core in managed "
                                  "enabledPlugins. Agents and skills still load.")
+        if any(d.get("allowManagedPermissionRulesOnly") is True for _, d in self.sources):
+            self.warnings.append("your organisation allows only managed permission rules: the kit's ask rules and the "
+                                 "active-context deny are inert on this machine")
+
+    # ── upgrades: local changes, files the removed hook left, the kit's own record ──
+    def plan_local_changes(self):
+        """R4: before anything is replaced, copy what this machine changed in the kit copy, its instructions and the plugin
+        cache (with a diff) to <WB>/state/local-patches/<ts>/, against the hashes of the release it was installed from."""
+        if not (self.kit.is_dir() or (self.wb / "instructions").is_dir()):
+            return
+        self.todo(f"[kit] look for local changes in {fwd(self.kit)}, {fwd(self.wb / 'instructions')} and the plugin cache "
+                  f"(kept with a diff in {fwd(self.wb / 'state' / 'local-patches')}; never applied again by the installer)",
+                  self.keep_local_changes)
+
+    def baseline(self):
+        """(hashes, kind): the state manifest the last install wrote, else the bundled manifest of the previous release."""
+        try:
+            return read_json(self.wb / "state" / "kit-manifest.json")["files"], "state-manifest"
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        v = str(self.prev.get("version") or "")
+        try:
+            return read_json(REPO / "bootstrap" / "release-manifests" / f"{v}.json")["files"], f"bundled:{v}"
+        except (OSError, ValueError, KeyError, TypeError):
+            return None, "none"
+
+    def cache_trees(self):
+        """[(kit-relative prefix, folder)] of the plugin cache: <CH>/plugins/cache/workbench/<plugin>/<version>/ for the version
+        the old kit copy declares, else the only version folder there is."""
+        out, root = [], self.claude_home / "plugins" / "cache" / MARKETPLACE
+        for d in sorted(p for p in root.glob("*") if p.is_dir()) if root.is_dir() else []:
+            try:
+                v = str(read_json(self.kit / "plugins" / d.name / ".claude-plugin" / "plugin.json").get("version") or "")
+            except (OSError, ValueError):
+                v = ""
+            vers = [p for p in d.iterdir() if p.is_dir()]
+            pick = d / v if v and (d / v).is_dir() else vers[0] if len(vers) == 1 else None
+            if pick:
+                out.append((f"plugins/{d.name}/", pick))
+        return out
+
+    def keep_local_changes(self):
+        base, kind = self.baseline()
+        new = set(tree_files(REPO))
+        rows, skipped = [], 0
+        q = lambda s: f'"{s}"' if " " in s else s  # noqa: E731
+        prev_values = {**self.values, "KB_ROOT": fwd(self.prev.get("kb_root") or self.kb),
+                       "PYTHON": q(str(self.prev.get("python") or self.python))}
+
+        def note(where, rel, change, local, expected):
+            nonlocal skipped
+            if rel not in new:              # the new release no longer ships it: never reported, only counted
+                skipped += 1
+            else:
+                rows.append((where, rel, change, local, expected))
+        if base is not None:
+            trees = ([("kit", "", self.kit)] if REPO.resolve() != self.kit.resolve() else []) + \
+                    [("cache", pre, d) for pre, d in self.cache_trees()]
+            for where, pre, root in trees:
+                have = {pre + r: p for r, p in tree_files(root).items()}
+                for rel, p in have.items():
+                    if base.get(rel) != lf_sha(p):
+                        note(where, rel, "modified" if rel in base else "added", p, REPO / rel)
+                for rel in base if where == "kit" else ():      # the CLI's cache copy is not the whole kit: no "deleted" there
+                    if rel not in have and not any(fnmatch.fnmatch(x, pat) for x in rel.split("/") for pat in IGNORE):
+                        note(where, rel, "deleted", None, None)
+        old_ins, cur_ins = tree_files(self.kit / "instructions"), tree_files(self.wb / "instructions")
+        if old_ins and cur_ins:
+            for rel in sorted(set(old_ins) | set(cur_ins)):
+                if rel not in cur_ins:
+                    note("instructions", f"instructions/{rel}", "deleted", None, None)
+                    continue
+                if rel not in old_ins:
+                    note("instructions", f"instructions/{rel}", "added", cur_ins[rel], None)
+                    continue
+                want = old_ins[rel].read_bytes()
+                if rel.endswith(".md"):
+                    want = fill(want.decode("utf-8", "replace"), prev_values).encode("utf-8")
+                if want.replace(b"\r\n", b"\n") != cur_ins[rel].read_bytes().replace(b"\r\n", b"\n"):
+                    note("instructions", f"instructions/{rel}", "modified", cur_ins[rel], want)
+        cache = self.claude_home / "plugins" / "cache" / MARKETPLACE
+        if not rows and kind != "none":
+            print("  local changes: none" + (f" ({skipped} file(s) this release no longer ships were not compared)" if skipped else ""))
+            return
+        out = self.wb / "state" / "local-patches" / self.stamp
+        files = []
+        copies = [tree_files(self.kit), {pre + r: f for pre, d in self.cache_trees() for r, f in tree_files(d).items()}] + \
+                 [tree_files(d) for d in sorted(self.wb.glob("backups/*/trees/kit"), reverse=True)]   # older kit copies
+
+        def old_copy(rel):
+            """A file whose content is the OLD release's (its hash is the baseline's): the new release unchanged upstream, the
+            other copy (kit or cache), or a kit copy an earlier install backed up."""
+            for f in [REPO / rel] + [c[rel] for c in copies if rel in c]:
+                if f.is_file() and lf_sha(f) == base.get(rel):
+                    return f
+            return None
+        for n, (where, rel, change, local, expected) in enumerate(rows):
+            entry = {"path": rel, "where": where, "change": change, "diff": None, "copy": None, "base": None}
+            if local is not None:
+                entry["copy"] = f"files/{n:03d}-{Path(rel).name}"
+                (out / "files").mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(local, out / entry["copy"])
+            if change == "modified":
+                try:
+                    old = old_copy(rel) if isinstance(expected, Path) else None
+                    if not isinstance(expected, Path):                  # instructions: the old copy as it was filled in
+                        a, label, entry["base"] = expected, f"{rel} (base: old release, as installed)", "old"
+                    elif old is not None:
+                        a, label, entry["base"] = old.read_bytes(), f"{rel} (base: old release)", "old"
+                    else:                                               # no old copy left: this diff also undoes upstream changes
+                        a, label, entry["base"] = expected.read_bytes(), f"{rel} (base: NEW release {VERSION}; upstream changed too)", "new"
+                    diff = "".join(difflib.unified_diff(a.decode("utf-8").replace("\r\n", "\n").splitlines(True),
+                                                        local.read_bytes().decode("utf-8").replace("\r\n", "\n").splitlines(True),
+                                                        label, f"{rel} (this machine)"))
+                    entry["diff"] = f"diffs/{n:03d}.diff"
+                    (out / "diffs").mkdir(parents=True, exist_ok=True)
+                    (out / entry["diff"]).write_text(diff, encoding="utf-8", newline="\n")
+                except (OSError, UnicodeDecodeError):
+                    entry["diff"] = None                       # a binary file: the copy is all there is
+            files.append(entry)
+        out.mkdir(parents=True, exist_ok=True)
+        backup = None
+        if cache.is_dir():
+            shutil.copytree(cache, out / "plugin-cache", ignore=shutil.ignore_patterns("node_modules", "__pycache__"))
+            backup = "plugin-cache/"
+        (out / "patches.json").write_text(json.dumps({
+            "version": 1, "from_version": self.prev.get("version"), "to_version": VERSION, "baseline": kind, "files": files,
+            "cache_backup": backup, "skipped_removed_upstream": skipped}, indent=2) + "\n", encoding="utf-8", newline="\n")
+        self.manifest["local_patches"] = fwd(out)
+        print(f"  {len(files)} local change(s) kept at {fwd(out)}; the kit-update skill reviews them" if files else
+              f"  local changes: none found, but there was no release manifest to compare the kit copy with; the plugin cache "
+              f"is kept at {fwd(out)} and the old kit copy in {fwd(self.backup / 'trees')}")
+
+    def leftovers(self):
+        """[(file, name under the archive folder)] of the files the removed PreToolUse hook left (I6)."""
+        logs = Path(os.environ.get("WORKBENCH_LOG_DIR") or self.wb / "logs")
+        cands = [self.wb / "corporate-allowlist.json", self.wb / "state" / f"{OLD}-heartbeat.json",
+                 logs / f"{OLD}s.log", logs / f"{OLD}s.log.1"]
+        return [(p, fwd(p.relative_to(self.wb)) if under(p, self.wb) else f"logs/{p.name}") for p in cands if p.is_file()]
+
+    def plan_leftovers(self):
+        found = self.leftovers()
+        if not found:
+            return
+        dst = self.backup / f"{OLD}-leftovers"
+
+        def archive():
+            moved = []
+            for p, rel in found:
+                if move_retry(p, dst / rel):
+                    moved.append({"path": fwd(p), "to": fwd(dst / rel)})
+                else:
+                    self.warnings.append(f"{fwd(p)} is in use and was left in place; delete it once no program holds it")
+            self.manifest["archived"] = moved
+            print(f"  archived {len(moved)} file(s) left by the removed PreToolUse hook to {fwd(dst)}")
+        self.todo(f"[cleanup] archive {len(found)} file(s) left by the removed PreToolUse hook (allowlist, heartbeat, logs) "
+                  f"to {fwd(dst)}", archive)
+
+    def write_kit_manifest(self):
+        """The hashes of the release just copied: the next install tells this machine's own changes from it."""
+        files = {rel: lf_sha(p) for rel, p in sorted(tree_files(self.kit).items())}
+        p = self.wb / "state" / "kit-manifest.json"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_name(p.name + ".tmp")
+        tmp.write_text(json.dumps({"version": VERSION, "files": files}, indent=1) + "\n", encoding="utf-8", newline="\n")
+        os.replace(tmp, p)
 
     def plan_kit(self):
         def record():   # before the plugin install, so the CLI's copy of the plugin carries it; part of the kit tree
             (self.kit / RECORD).write_text(json.dumps({"claude_home": fwd(self.claude_home)}, indent=2) + "\n",
                                            encoding="utf-8", newline="\n")
+
+        def copy_kit():
+            self.replace_tree(REPO, self.kit, ignore=KIT_IGNORE)
+            self.write_kit_manifest()
         if REPO.resolve() == self.kit.resolve():
             self.todo(f"[kit] running from the installed kit at {fwd(self.kit)}: kept in place")
         else:
             self.todo(f"[kit] copy this release to {fwd(self.kit)} (the plugins load from there, so the folder you "
-                      "unpacked can be moved or deleted)", lambda: self.replace_tree(REPO, self.kit, ignore=KIT_IGNORE))
-        self.todo(f"[kit] record the config dir in {fwd(self.kit / RECORD)} (the guards fail closed if "
-                  "CLAUDE_CONFIG_DIR later points elsewhere)", record)
+                      "unpacked can be moved or deleted)", copy_kit)
+        self.todo(f"[kit] record the config dir in {fwd(self.kit / RECORD)} (profile.py finds the main install from it)",
+                  record)
 
     def plan_instructions(self):
         src = REPO / "instructions"
@@ -731,45 +1013,6 @@ class Installer:
                                                      "statusLine": self.statusline()}.items() if v is not None},
                                   indent=2) + "\n"
         self.todo(f"[files] write {fwd(cfg)} (kb_root, data_root, python, statusLine)", lambda: self.write_file(cfg, body()))
-        self.plan_allowlist()
-
-    def plan_allowlist(self):
-        al = self.wb / "corporate-allowlist.json"
-        tpl = REPO / "plugins" / "workbench-core" / "scripts" / "guards" / "corporate-allowlist.template.json"
-        hosts = [h.strip() for h in (self.a.git_hosts or "").split(",") if h.strip()]
-        bad = [h for h in hosts if not re.fullmatch(r"[A-Za-z0-9._-]+(?::\d+)?", h)]
-        if bad:
-            raise Stop(2, f"--git-hosts: not a host name: {', '.join(bad)}")
-        level = getattr(self.a, "guard", None)
-        if al.exists():
-            if not hosts and not level:
-                self.todo(f"[guards] keep your {fwd(al)}")
-                return
-            try:
-                conf = read_json(al)
-            except (OSError, ValueError) as e:
-                raise Stop(2, f"{fwd(al)} is not valid JSON ({e}); fix it by hand first")
-            changed = []
-            if hosts:
-                conf["git_remote_hosts"] = hosts
-                changed.append(f"git_remote_hosts to {hosts}")
-            if level:
-                conf["guard_level"] = level
-                changed.append(f"guard_level to {level}")
-            self.todo(f"[guards] set {' and '.join(changed)} in {fwd(al)}",
-                      lambda: self.write_file(al, json.dumps(conf, indent=2) + "\n"))
-            return
-        conf = read_json(tpl)
-        conf["git_remote_hosts"] = hosts
-        if level:
-            conf["guard_level"] = level
-        self.todo(f"[guards] create {fwd(al)}: corporate pack ON, guard level {conf.get('guard_level', 'standard')}, "
-                  f"approved git hosts {hosts or 'none yet'}",
-                  lambda: self.create_file(al, json.dumps(conf, indent=2) + "\n"))
-        if not hosts:
-            self.warnings.append("No git hosts approved yet: a push to a remote host asks you first (the strict guard "
-                                 "level refuses it). Re-run with --git-hosts <your company's git hosts>, or edit "
-                                 "corporate-allowlist.json by hand.")
 
     def plan_kb(self):
         if in_onedrive(self.kb) or "onedrive" in fwd(self.kb).lower():
@@ -893,11 +1136,17 @@ class Installer:
             deep_merge(frag, self._upstream("upstream-plugins.fragment.json"))
         if self.a.upstream_plugins_optional:
             deep_merge(frag, self._upstream("upstream-plugins.optional.fragment.json"))
+        ep = settings.get("enabledPlugins") if isinstance(settings.get("enabledPlugins"), dict) else {}
+        self.plugin_snap = {pid: ep.get(pid, ABSENT) for pid in DEFAULT_PLUGINS + (CAPTURE_PLUGIN,)}   # before the CLI step
+        self.subagent_gate(frag)
         ops, notes = [], []
         prev = {tuple(op["path"]): op["value"] for m in self.prior for op in m.get("settings_ops") or []
                 if op.get("op") == "set" and not op.get("container")}
         kit_default = (frag.get("permissions") or {}).get("defaultMode")
         mode = self.approvals_off(settings, frag, ops, prev) if self.approvals == "off" and self.a.profile == "corporate" else None
+        full = copy.deepcopy(frag)                 # what the profile carries, before the entries the user removed come out
+        self.before = copy.deepcopy(settings.get("permissions")) if isinstance(settings.get("permissions"), dict) else {}
+        self.strip_user_removed(settings, frag, sp.exists())
         merge_settings(settings, frag, self.managed, self.a.force, ops, notes, prev=prev)
         path = ("permissions", "defaultMode")
         cur = (settings.get("permissions") or {}).get("defaultMode") if isinstance(settings.get("permissions"), dict) else None
@@ -911,7 +1160,10 @@ class Installer:
             if cur == kit_default:                                         # the merge put the kit's default back: give theirs
                 own(settings, list(path), self.user_mode, self.managed, ops, notes, self.warnings)
             self.user_mode = None                                          # a mode they picked since is theirs to keep
-        self.retire_permissions(settings, frag, ops)
+        self.retire_permissions(settings, full, ops)
+        self.retire_old_rules(settings, full, ops)
+        if managed_has(self.managed, ("permissions", "deny"), []):
+            notes.append(("permissions.deny", "set by a managed source: the active-context deny is not written"))
         self.plan.append(f"[settings] profile {self.a.profile} ({fwd(src.relative_to(REPO))}); upstream plugins: "
                          f"{'yes' if self.upstream else 'no'}; optional upstream plugins: "
                          f"{'yes' if self.a.upstream_plugins_optional else 'no'}"
@@ -923,14 +1175,12 @@ class Installer:
     def approvals_off(self, settings, frag, ops, prev):
         """--approvals off on the corporate profile: ordinary commands run without a prompt. Changes the profile before the
         merge: no disableBypassPermissionsMode, and Bash(*), PowerShell(*) and Edit(*) allowed (they matter when bypass mode is
-        unavailable, and deny and ask rules still win over them). Removes the disableBypassPermissionsMode an earlier kit
+        unavailable, and the profile's ask rules and the active-context deny still win over them). Removes the disableBypassPermissionsMode an earlier kit
         install wrote, recorded so uninstall or `--approvals ask` puts it back. Returns the mode new windows start in:
         bypassPermissions, or acceptEdits when a managed policy or the user's own setting keeps bypass mode off."""
         perms = frag.setdefault("permissions", {})
         perms.pop("disableBypassPermissionsMode", None)
-        perms.pop("defaultMode", None)                     # owned below, after the merge
-        perms.pop("ask", None)                             # the guard asks before what matters; these would ask again
-        self.lift_kit_asks(settings, ops)
+        perms.pop("defaultMode", None)                     # owned below, after the merge (the minimal ask set stays)
         perms["allow"] = list(dict.fromkeys((perms.get("allow") or []) + ["Bash(*)", "PowerShell(*)", "Edit(*)"]))
         key = ("permissions", "disableBypassPermissionsMode")
         if managed_has(self.managed, key):
@@ -948,44 +1198,39 @@ class Installer:
                 return "acceptEdits"
         return "bypassPermissions"
 
-    def lift_kit_asks(self, settings, ops):
-        """--approvals off: remove the permissions.ask entries an earlier kit install added (its manifests record them), never
-        one the user added or a managed source sets. Recorded as list-remove: uninstall or `--approvals ask` adds them back."""
-        mine = []
+    def kit_added(self, path):
+        """Entries of a permissions list the kit still owns, replaying every earlier install's manifest OLDEST FIRST: a list-add
+        of the missing entries or the whole list it created makes an entry the kit's; a list-remove (an approvals-off lift, a
+        retire) makes it no longer the kit's, so a string the user typed after that is the user's. An entry the user already
+        had is never in a list-add."""
+        out = []
         for m in self.prior:
             for op in m.get("settings_ops") or []:
-                if tuple(op.get("path") or ()) != ("permissions", "ask"):
+                if tuple(op.get("path") or ()) != tuple(path):
+                    continue
+                if op.get("op") == "list-remove":
+                    gone = op.get("items") or []
+                    out = [x for x in out if x not in gone]
                     continue
                 if op.get("op") == "list-add":
-                    mine += op.get("items") or []
+                    items = op.get("items") or []
                 elif op.get("op") == "set" and op.get("old") == ABSENT and isinstance(op.get("value"), list):
-                    mine += op["value"]
-        cur = (settings.get("permissions") or {}).get("ask") if isinstance(settings.get("permissions"), dict) else None
-        if not isinstance(cur, list) or managed_has(self.managed, ("permissions", "ask"), []):
-            return
-        gone = [x for x in dict.fromkeys(mine) if x in cur]
-        if gone:
-            cur[:] = [x for x in cur if x not in gone]
-            ops.append({"op": "list-remove", "path": ["permissions", "ask"], "items": gone})
+                    items = op["value"]
+                else:
+                    continue
+                out += [x for x in items if x not in out]
+        return out
 
     def retire_permissions(self, settings, frag, ops):
         """merge_settings only ever adds to a list, so an entry a newer profile dropped would stay for ever (0.3.1's permissive
         profile allowed `mcp__tokensave` server-wide; later ones do not). On an upgrade, remove the permission entries an EARLIER
         kit install added (its manifest records them: a list-add of the missing entries, or the whole list it created; an entry the user
         already had is in neither) and the profile now being applied no longer carries. A user's own entry is never touched.
-        Only the ALLOW list: dropping an allow can only tighten what Claude may do, while dropping a deny or an ask would loosen
-        policy (on a managed laptop, and when an older kit runs after a newer one). Recorded as list-remove, so uninstall puts
-        them back before it undoes the earlier install."""
-        added = {}
-        for m in self.prior:
-            for op in m.get("settings_ops") or []:
-                path = tuple(op.get("path") or ())
-                if len(path) != 2 or path[0] != "permissions" or path[1] != "allow":     # removing an allow only tightens
-                    continue
-                if op.get("op") == "list-add":                      # the user had the list: only the missing entries were added
-                    added.setdefault(path, []).extend(op.get("items") or [])
-                elif op.get("op") == "set" and op.get("old") == ABSENT and isinstance(op.get("value"), list):
-                    added.setdefault(path, []).extend(op["value"])   # the user had no such list: the install wrote all of it
+        Only the ALLOW list here: dropping an allow can only tighten what Claude may do, while dropping a deny or an ask would
+        loosen policy (on a managed laptop, and when an older kit runs after a newer one); asks and denies leave only through
+        retire_old_rules (named strings). Recorded as list-remove, so uninstall puts them back before it undoes the earlier
+        install."""
+        added = {("permissions", "allow"): self.kit_added(("permissions", "allow"))}
         for path, items in added.items():
             cur = (settings.get("permissions") or {}).get(path[1])
             want = ((frag.get("permissions") or {}).get(path[1])) or []
@@ -996,10 +1241,104 @@ class Installer:
                 if x in cur and x not in want and x not in gone:
                     gone.append(x)
             if gone:
-                cur[:] = [x for x in cur if x not in gone]
+                remove_once(cur, gone)
                 ops.append({"op": "list-remove", "path": list(path), "items": gone})
                 self.warnings.append(f"{'.'.join(path)}: removed {', '.join(json.dumps(x) for x in gone)}. An earlier kit install "
                                      "added it and the profile now applied no longer has it (an entry you added yourself is kept).")
+
+    def retire_old_rules(self, settings, frag, ops):
+        """R2: the ask and deny strings the profiles of releases 0.2.0-0.3.4 carried (bootstrap/retired-rules.json, kit strings
+        only) leave settings.json when the profile now applied no longer has them, and only with evidence the kit wrote them:
+        the manifests, replayed oldest first, say the kit still owns the entry; or, when no manifest survives, an earlier install
+        is evident (config.json or the kit copy) AND the old kit's whole block is there (at least 90% of the asks every release
+        carried, all but one of its denies), so exact strings are the kit's. Without that evidence nothing is retired and one
+        warning says so. A rule the user wrote is never touched, one occurrence per string goes (a user's own duplicate copy
+        stays), the order of what remains is kept, and the active-context deny is never retired. One list-remove op per list."""
+        try:
+            retired = read_json(REPO / "bootstrap" / "retired-rules.json")
+        except (OSError, ValueError):
+            return self.warnings.append("bootstrap/retired-rules.json is missing from this copy of the kit: no old rule retired")
+        perms = settings.get("permissions") if isinstance(settings.get("permissions"), dict) else {}
+        exact = not self.prior and ((self.wb / "config.json").exists() or self.kit.is_dir())
+        every = retired.get("every_release") if isinstance(retired.get("every_release"), dict) else {}
+        unproven = []
+        for key in ("ask", "deny"):
+            cur = perms.get(key)
+            if not isinstance(cur, list) or managed_has(self.managed, ("permissions", key), []):
+                continue
+            keep = set((frag.get("permissions") or {}).get(key) or [])
+            if key == "deny":
+                keep |= {ac_rule(self.kb)} | ({ac_rule(self.prev["kb_root"])} if self.prev.get("kb_root") else set())
+            mine, old = set(self.kit_added(("permissions", key))), retired.get(key) or []
+            core = old[:int(every.get(key) or 0)]
+            have = sum(1 for x in core if x in (self.before.get(key) or []))     # what the user's file held, not the merge
+            block = bool(core) and have >= (-(-9 * len(core) // 10) if key == "ask" else len(core) - 1)
+            cand = [x for x in dict.fromkeys(x for x in cur if isinstance(x, str)) if x in set(old) and x not in keep]
+            gone = [x for x in cand if x in mine or (exact and block)]
+            if exact and not block and cand:
+                unproven.append(f"permissions.{key} {len(cand)} (old kit block: {have} of {len(core)})")
+            if gone:
+                remove_once(cur, gone)
+                ops.append({"op": "list-remove", "path": ["permissions", key], "items": gone})
+                self.plan.append(f"[settings] permissions.{key}: retire {len(gone)} rule(s) an earlier kit wrote that this "
+                                 "release no longer has (rules you wrote are kept)")
+        if unproven:
+            self.warnings.append("kept rules that equal an old kit's strings, because no install manifest shows the kit wrote "
+                                 "them and the old kit's block is not there: " + "; ".join(unproven))
+
+    def strip_user_removed(self, settings, frag, exists):
+        """I7: an entry the ledger lists as kit-written and settings.json no longer has was removed by the user: it is
+        remembered and taken out of the fragment, so the merge does not add it again. The kit's own single-owner entries
+        (the active-context deny, the KB folder) are rewritten every time and never count. No ledger: nothing is removed."""
+        led = self.ledger if isinstance(self.ledger, dict) else {}
+        lists = led.get("lists") if isinstance(led.get("lists"), dict) else {}
+        old = led.get("user_removed") if isinstance(led.get("user_removed"), dict) else {}
+        self.user_removed = {k: [x for x in old.get(k) or [] if isinstance(x, str)] for k in LEDGER_KEYS}
+        owned = {"permissions.deny": {ac_rule(self.kb)}, "permissions.additionalDirectories": {fwd(self.kb)}}
+        if self.prev.get("kb_root"):
+            owned["permissions.deny"].add(ac_rule(self.prev["kb_root"]))
+            owned["permissions.additionalDirectories"].add(fwd(self.prev["kb_root"]))
+        perms = settings.get("permissions") if isinstance(settings.get("permissions"), dict) else {}
+        fp = frag.get("permissions") if isinstance(frag.get("permissions"), dict) else {}
+        for key in LEDGER_KEYS:
+            sub, got = key.split(".")[1], self.user_removed[key]
+            cur = perms.get(sub) if isinstance(perms.get(sub), list) else []
+            for x in (lists.get(key) or []) if exists else []:
+                if x not in cur and x not in owned.get(key, ()) and x not in got:
+                    got.append(x)
+            if isinstance(fp.get(sub), list):
+                fp[sub] = [x for x in fp[sub] if x not in got]
+            self.frag_lists[key] = list(fp.get(sub) or []) if isinstance(fp.get(sub), list) else []
+        n = sum(len(v) for v in self.user_removed.values())
+        if n:
+            self.plan.append(f"[settings] {n} entry/entries the kit wrote and you removed stay removed ({fwd(self.ledger_path)})")
+
+    def claude_version(self):
+        """(version tuple, text) of the claude CLI, or (None, None): no CLI, --no-cli, or no version line in its answer."""
+        if not self.claude:
+            return None, None
+        try:
+            r = subprocess.run([self.claude, "--version"], capture_output=True, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            return None, None
+        for ln in ((r.stdout or b"") + (r.stderr or b"")).decode("utf-8", "replace").splitlines():
+            ln = ln.strip()
+            m = re.search(r"(\d+)\.(\d+)\.(\d+)", ln) if ln.endswith("(Claude Code)") or ln.startswith("Claude Code") else None
+            if m:
+                return tuple(int(x) for x in m.groups()), m.group(0)
+        return None, None
+
+    def subagent_gate(self, frag):
+        """G-G: CLAUDE_CODE_SUBAGENT_MODEL is written only for Claude Code 2.1.251 or newer; older, it overrides every persona's
+        own model. A value the user already has is never touched (the merge keeps it)."""
+        env = frag.get("env") if isinstance(frag.get("env"), dict) else {}
+        if "CLAUDE_CODE_SUBAGENT_MODEL" not in env:
+            return
+        ver, text = self.claude_version()
+        if ver is None or ver < SUBAGENT_MIN:
+            env.pop("CLAUDE_CODE_SUBAGENT_MODEL")
+            self.warnings.append(f"CLAUDE_CODE_SUBAGENT_MODEL not set: Claude Code {text or 'unknown'} lets it override every "
+                                 "persona's model (fixed in 2.1.251). Update Claude Code and re-run the installer.")
 
     def statusline(self):
         """Computed after statusline.py is written: a Windows short path exists only for an existing file."""
@@ -1018,6 +1357,15 @@ class Installer:
             if fwd(self.kb) not in dirs:
                 dirs.append(fwd(self.kb))
                 ops.append({"op": "list-add", "path": ["permissions", "additionalDirectories"], "items": [fwd(self.kb)]})
+        if not managed_has(self.managed, ("permissions", "deny"), []):   # any profile, any approvals mode; a KB move takes it along
+            deny = settings.setdefault("permissions", {}).setdefault("deny", [])
+            old, new = (ac_rule(self.prev["kb_root"]) if self.prev.get("kb_root") else None), ac_rule(self.kb)
+            if old and old != new and old in deny:
+                deny[:] = [x for x in deny if x != old]
+                ops.append({"op": "list-remove", "path": ["permissions", "deny"], "items": [old]})
+            if new not in deny:
+                deny.append(new)
+                ops.append({"op": "list-add", "path": ["permissions", "deny"], "items": [new]})
         for pid in PLUGIN_IDS:
             own(settings, ["pluginConfigs", pid, "options", "python"], self.python, self.managed, ops, notes,
                 self.warnings)
@@ -1041,6 +1389,8 @@ class Installer:
                 ids.append(i)
             else:
                 self.warnings.append(f"plugin {i} is not in this copy of the kit: skipped")
+        self.plugin_choices(ids)
+        ids = [i for i in ids if self.plugin_choice.get(i) != "removed-by-user"]     # uninstalled by the user: stays so
         pyids = [i for i in ids if i in python_plugin_ids()]     # their manifests declare userConfig.python
         config = ["--config", f"python={self.python}"]
         cmds = [["claude", "plugin", "marketplace", "remove", MARKETPLACE],
@@ -1049,6 +1399,10 @@ class Installer:
         shown = "\n".join(f"      {show(c)}" for c in cmds[1:])
         if not self.claude:
             self.todo("[plugins] the claude CLI is not on PATH (or --no-cli was given): after --apply, run:\n" + shown)
+            if not self.a.no_cli:
+                self.warnings.append("plugins were NOT re-registered: no `claude` command was found on PATH, so Claude Code keeps "
+                                     "the plugin versions it had. Run the [plugins] commands above from a terminal where "
+                                     "`claude --version` works, then restart Claude Code.")
             self.manifest["cli_pending"] = ids
             return
 
@@ -1075,13 +1429,46 @@ class Installer:
                 else:
                     self.manifest["marketplace_added"] = True
             self.pin_python([i for i in pyids if i in self.manifest["cli"]])
-        self.todo("[plugins] register the kit copy as the local marketplace `workbench` and install:\n" + shown, run)
+            self.keep_plugin_choices()
+        kept = [f"{i} ({self.plugin_choice[i]}, kept)" for i in self.plugin_choice if self.plugin_choice[i] != "enabled"]
+        self.todo("[plugins] register the kit copy as the local marketplace `workbench` and install:\n" + shown
+                  + ("".join(f"\n      keep {k}" for k in kept)), run)
+
+    def plugin_choices(self, ids):
+        """Item 6: a kit plugin the user set to false stays false; one a prior install's CLI step installed and that is gone
+        from enabledPlugins now was uninstalled by the user and is not installed again. The newest prior install that ran
+        the CLI is the evidence (an earlier failed step is never read as the user's choice). Never `claude plugin enable`."""
+        last = next((m.get("cli") or [] for m in reversed(self.prior) if not m.get("no_cli")), [])
+        led = self.ledger.get("plugins") if isinstance(self.ledger.get("plugins"), dict) else {}
+        for pid, v in self.plugin_snap.items():
+            if v is False:
+                self.plugin_choice[pid] = "disabled-by-user"
+            elif v is ABSENT and (pid in last or led.get(pid) == "removed-by-user") and pid in ids:
+                self.plugin_choice[pid] = "removed-by-user"
+            elif pid in ids:
+                self.plugin_choice[pid] = "enabled"
+        self.core_off = self.plugin_choice.get("workbench-core@workbench") in ("disabled-by-user", "removed-by-user")
+
+    def keep_plugin_choices(self):
+        """After the CLI step (which re-enables every plugin it installs): write false back for a plugin the user disabled."""
+        sp = self.claude_home / "settings.json"
+        try:
+            s = read_json(sp)
+        except (OSError, ValueError):
+            return self.failures.append(f"{fwd(sp)} cannot be read back to keep the plugins you disabled off")
+        ep = s.setdefault("enabledPlugins", {}) if isinstance(s.get("enabledPlugins", {}), dict) else None
+        todo = [pid for pid, c in self.plugin_choice.items() if c == "disabled-by-user" and ep is not None
+                and ep.get(pid) is not False and not managed_has(self.managed, ("enabledPlugins", pid))]
+        for pid in todo:     # old = the value before this install: undo leaves it off too
+            self.manifest["settings_ops"].append({"op": "set", "path": ["enabledPlugins", pid], "value": False, "old": False})
+            ep[pid] = False
+        if todo:
+            self.write_file(sp, json.dumps(s, indent=2, ensure_ascii=False) + "\n")
 
     def pin_python(self, ids):
         """`marketplace remove` clears pluginConfigs, and an install without --config leaves userConfig unset; an unset
-        python makes every hook fail (`Plugin option "python" isn't set`), so the guards silently fail open. After the
-        plugin step: write the interpreter where it is missing, read settings.json back, and fail loudly if it is still
-        absent."""
+        python makes every hook fail (`Plugin option "python" isn't set`), silently. After the plugin step: write the
+        interpreter where it is missing, read settings.json back, and fail loudly if it is still absent."""
         sp = self.claude_home / "settings.json"
         path = lambda i: ("pluginConfigs", i, "options", "python")  # noqa: E731
 
@@ -1127,45 +1514,39 @@ class Installer:
             for fn in self.actions:
                 fn()
         finally:
+            now = time.time()
+            self.manifest["utc"] = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now)) + f".{int(now % 1 * 1e6):06d}Z"
             (self.backup / "manifest.json").write_text(json.dumps(self.manifest, indent=2) + "\n", encoding="utf-8")
         for w in self.warnings:
             print("WARNING: " + w)
+        if self.core_off:
+            print(off_text("workbench-core@workbench"))
         print(f"Applied. Backups and the uninstall manifest: {fwd(self.backup)}")
-        if not self.self_test():
-            self.failures.append("guard self-test")
+        print("Next: start Claude Code and run /hooks: the workbench hooks must be listed.")
 
-    def self_test(self):
-        """Hooks fail open, so prove the installed guard stops a known-bad call with this interpreter: a deny, or at the minimal
-        level (which refuses nothing) the ask that level answers with."""
+    def write_ledger(self):
+        """I7 <WB>/state/kit-written.json: the list entries this install wrote and still finds in settings.json, the entries
+        the user removed, the plugins the user turned off. Every other key (setup's relay_hooks, unknown ones) is kept."""
         try:
-            conf = read_json(self.wb / "corporate-allowlist.json")
+            s = read_json(self.claude_home / "settings.json")
         except (OSError, ValueError):
-            conf = {}
-        want = "ask" if str(conf.get("guard_level") or "").strip().lower() == "minimal" else "deny"
-        root = self.kit if self.kit.exists() else REPO
-        guard = root / "plugins" / "workbench-core" / "scripts" / "guards" / "pretooluse.py"
-        ok = False
-        with tempfile.TemporaryDirectory() as logs:   # keep the probe out of the real guard log
-            # WB_SELF_TEST: the guard's heartbeat files this call as a self-test, never as the guard firing in a session
-            env = {**os.environ, "GUARDS_LOG_DIR": logs, "CLAUDE_CONFIG_DIR": str(self.claude_home), "WB_SELF_TEST": "1"}
-            try:
-                ev = {"tool_name": "Bash", "tool_input": {"command": "git push --force origin main"}, "cwd": logs}
-                r = subprocess.run([sys.executable, "-S", str(guard)], input=json.dumps(ev).encode(),
-                                   capture_output=True, timeout=60, env=env)
-                ok = json.loads(r.stdout)["hookSpecificOutput"]["permissionDecision"] == want
-            except Exception:
-                ok = False
-        print("Guard self-test (installed kit, this interpreter): " + ("PASS" if ok else "FAIL: the guards would not "
-                                                                       + ("ask" if want == "ask" else "block")))
-        hosts = conf.get("git_remote_hosts") or []
-        strict = str(conf.get("guard_level") or "").strip().lower() == "strict"
-        print("Corporate guard pack: " + ("OFF (enabled is false in corporate-allowlist.json)" if conf.get("enabled") is False
-              else f"ON, approved git hosts: {', '.join(hosts)}" if hosts
-              else "ON, no approved git hosts yet: every push to a remote host is "
-                   + ("refused" if strict else "asked about") + " until you add them"))
-        print("Next: start Claude Code, run /status and /hooks, then ask Claude to `git push --force origin main` in a "
-              "scratch repo; it must be blocked. That is the only proof the installed hooks run.")
-        return ok
+            s = {}
+        perms = s.get("permissions") if isinstance(s.get("permissions"), dict) else {}
+        lists = {}
+        for key in LEDGER_KEYS:
+            sub = key.split(".")[1]
+            cur = perms.get(sub) if isinstance(perms.get(sub), list) else []
+            owned = {"permissions.deny": [ac_rule(self.kb)], "permissions.additionalDirectories": [fwd(self.kb)]}.get(key, [])
+            lists[key] = list(dict.fromkeys(x for x in self.frag_lists[key] + owned if x in cur))
+        d = dict(self.ledger) if isinstance(self.ledger, dict) else {}
+        old = d.get("plugins") if isinstance(d.get("plugins"), dict) else {}
+        d.update({"version": 1, "lists": lists, "user_removed": self.user_removed, "plugins": {**old, **self.plugin_choice},
+                  "updated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+        d.setdefault("relay_hooks", None)
+        self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.ledger_path.with_name(f".{self.ledger_path.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(d, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
+        os.replace(tmp, self.ledger_path)
 
     # ── --setup: the capability report first, then provisioning ──
     def setup_cmds(self):
@@ -1174,8 +1555,7 @@ class Installer:
         extra = (["--with", ",".join(self.with_)] if self.with_ else []) + (["--no-nightly"] if self.a.no_nightly else []) + \
                 (["--no-update"] if self.a.no_update else [])
         report = os.environ.get("WORKBENCH_REPORT_CLI") or fwd(kit / "bootstrap" / "report.py")
-        pre = [py, report, "run", "--phase", "pre", "--packages", fwd(kit / "bootstrap" / "packages.json")] + \
-              (["--git-hosts", self.a.git_hosts] if self.a.git_hosts else [])
+        pre = [py, report, "run", "--phase", "pre", "--packages", fwd(kit / "bootstrap" / "packages.json")]
         return pre, [py, setup, "plan", *extra], [py, setup, "run", "--detach", *extra], [py, setup, "status", "--json", "--wait", "60"]
 
     def chain_setup(self):
@@ -1241,7 +1621,7 @@ def layout_removals(home):
 def uninstall(a):
     claude_home_ = claude_home()
     wb = claude_home_ / "workbench"
-    manifests = sorted((wb / "backups").glob("*/manifest.json"), reverse=True)
+    manifests = list(reversed(manifests_in_order(wb)))      # newest first
     print(f"claude-workbench uninstall ({'APPLY' if a.apply else 'DRY RUN: nothing is changed; add --apply'})")
     removals = layout_removals(claude_home_)
     failed = False
@@ -1258,8 +1638,7 @@ def uninstall(a):
     keep = wb / "backups" / f"uninstall-{time.strftime('%Y%m%d-%H%M%S')}"
     claude = None if a.no_cli else shutil.which("claude")
     ran = set()
-    for mf in manifests:
-        m = json.loads(mf.read_text(encoding="utf-8"))
+    for mf, m in manifests:
         print(f"  undo install {m['ts']} (profile {m.get('profile')}):")
         ids = list(m.get("cli") or []) + list(m.get("cli_pending") or [])
         cmds = [["claude", "plugin", "uninstall", i] for i in ids]
@@ -1319,7 +1698,9 @@ def uninstall(a):
                     if orig is not None:
                         for k in [k for k, v in s.items() if v in ({}, []) and k not in orig]:
                             del s[k]
-                    if not f["existed"] and not s:
+                    if f["existed"] and orig is not None and s == orig:
+                        shutil.copy2(f["backup"], p)   # the same content as before the install: its own bytes and format back
+                    elif not f["existed"] and not s:
                         p.unlink()   # the install created it; only empty objects (left by the claude CLI) remain
                     else:
                         p.write_text(json.dumps(s, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
@@ -1396,8 +1777,7 @@ def main(argv=None):
     ap.add_argument("--kb-root", help="knowledge-base folder (default: the last install's, else <data root>/kb)")
     ap.add_argument("--data-root", help="workbench data folder (default: the last install's, else <work OneDrive>/"
                                         "Workbench when exactly one verified work OneDrive exists, else ~/Workbench)")
-    ap.add_argument("--git-hosts", help="comma-separated git hosts company code may be pushed to")
-    ap.add_argument("--guard", choices=["minimal", "standard", "strict"], help="guard level (default standard; kept across upgrades)")
+    ap.add_argument("--git-hosts", help="accepted and ignored, so older setup commands still run")
     ap.add_argument("--approvals", choices=["ask", "off"], help="corporate profile: ask before each command (default) or run "
                                                                  "ordinary commands without asking; kept across upgrades")
     ap.add_argument("--setup", choices=["auto", "plan"], help="after --apply: capability report, then provision "

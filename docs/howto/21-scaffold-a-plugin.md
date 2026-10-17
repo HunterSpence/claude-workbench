@@ -3,13 +3,13 @@
 Automates it: /workbench-core:plugin-factory
 
 ## When to use
-You want to package a few skills, a command guard or a connection to a system as a plugin your team can install, and you
+You want to package a few skills, a small tool hook or a connection to a system as a plugin your team can install, and you
 want it to start out tested and checkable instead of hand-built. `<KIT>` is the kit folder (guide 01). Conventions and
 background: `docs/plugins-playbook.md`.
 
 ## Steps
 1. Decide four things. The name (lowercase and hyphens; it cannot start with `claude-`, `anthropic-`, `anthropics-` or
-   `cc-plugin-`). The kind: `content` (skills only), `guard` (adds a shell hook) or `integration` (adds an MCP server).
+   `cc-plugin-`). The kind: `content` (skills only), `tool-check` (adds a shell hook) or `integration` (adds an MCP server).
    The surface: `cli` (Claude Code only) or `all` (must also load on claude.ai). For an integration, `remote` or `stdio`;
    claude.ai connects only to remote servers, so `all` needs `--mcp remote`.
 2. Scaffold into a marketplace repository (a new folder is fine), or run `/workbench-core:plugin-factory` and describe it: "a plugin called team-notes with one skill". Claude can only suggest that command.

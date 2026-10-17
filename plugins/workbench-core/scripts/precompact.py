@@ -6,7 +6,7 @@ Contract shared with workbench-kb's save_driver.py (it reads and clears the flag
 _wb.kb_state_dir(kb) = <workbench home>/kb-state/<key>/, never inside the KB (an earlier kit wrote <kb>/.state/):
   precompact-<session id>.flag                                    the flag
   snapshots/active-context-<YYYYmmdd-HHMMSS>-<pid>.md             the snapshot (pruned after 14 days)
-The hook also stamps last_precompact in the guard heartbeat, which is how setup proves the hook fires.
+The hook also stamps last_precompact in the hooks heartbeat, which is how setup proves the hook fires.
 """
 import os
 import re
@@ -26,7 +26,7 @@ def flag_path(kb, sid):
 
 def main():
     d = _wb.read_event()
-    _wb.heartbeat(None, stamp="last_precompact")
+    _wb.heartbeat("last_precompact")
     kb = _wb.kb_root()
     if not kb.is_dir():
         return

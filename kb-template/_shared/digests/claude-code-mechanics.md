@@ -35,8 +35,8 @@ session did.
 - **Compound and inline commands prompt.** The checker evaluates every segment and cannot inspect `-c` strings. Write
   multi-step logic to a script file and keep allow rules specific.
 - **Auto mode discards broad Bash and PowerShell allow rules** and sends the command to a classifier.
-- **Guard denials are not errors.** Counting them inflates the error list; read them as the guards working, and a
-  denial is a stop, not a puzzle to route around.
+- **Hook and permission denials are not errors.** Counting them inflates the error list; read them as the controls
+  working, and a denial is a stop, not a puzzle to route around.
 - **Hand edits to a generated or reconciled settings file do not stick.** Edit the source of truth and regenerate.
 
 ## Reading and editing

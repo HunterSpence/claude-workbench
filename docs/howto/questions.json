@@ -38,8 +38,28 @@
    "expect": "docs/howto/36-scrub-a-document-before-sending.md"
   },
   {
-   "q": "I think I pasted a secret key into a chat by mistake. What are my first steps?",
-   "expect": "docs/howto/40-incident-first-steps.md"
+   "q": "How do I delete the captured pages and meeting copies and make search forget them?",
+   "expect": "docs/howto/32-purge-indexed-or-captured-data.md"
+  },
+  {
+   "q": "Which model should I pick for a quick code fix compared with a long research task, and at what effort?",
+   "expect": "docs/howto/09-spawn-subagents-and-pick-models.md"
+  },
+  {
+   "q": "My seat's usage limit runs out halfway through the week. How do I make it last longer?",
+   "expect": "docs/howto/11-keep-token-use-low.md"
+  },
+  {
+   "q": "Someone wants to add a vector database and a knowledge graph to our document search. Do we actually need either?",
+   "expect": "docs/howto/56-do-i-need-a-graph-or-vectors.md"
+  },
+  {
+   "q": "How do I turn my findings into a polished PDF report with page numbers and a table of contents?",
+   "expect": "docs/howto/57-make-a-report-pdf.md"
+  },
+  {
+   "q": "How do I safely build a help chatbot in a visual flow builder where admins can see more than ordinary members?",
+   "expect": "docs/howto/58-build-a-grounded-internal-assistant.md"
   }
  ]
 }

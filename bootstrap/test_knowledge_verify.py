@@ -197,7 +197,7 @@ def fake_kit(dst):
     tool_file(kit / "tools/mcp-healer/mcp_healer.py", "healer")
     tool_file(kit / "plugins/workbench-core/skills/find/scripts/find_mcp.py", "find_mcp")
     tool_file(kit / "bootstrap/setup.py", "setup")
-    for rel in ("tools/model-sweep/model_sweep.py", "tools/token-split/token_split.py"):     # two of the nine IT1 tools
+    for rel in ("tools/model-sweep/model_sweep.py", "tools/token-split/token_split.py"):     # two of the eight IT1 tools
         tool_file(kit / rel, "selftest:" + Path(rel).stem)
     (kit / "docs/howto").mkdir(parents=True)
     shutil.copyfile(REPO / "docs/howto/questions.json", kit / "docs/howto/questions.json")
@@ -221,7 +221,7 @@ class Env:
                                                          "kb_root": I_fwd(self.kb), "knowledge_db": I_fwd(self.live_find)}))
         (self.ch / ".claude.json").write_text(json.dumps({"mcpServers": {}}), encoding="utf-8")
         (self.ch / "settings.json").write_text(json.dumps({"enabledPlugins": {p: True for p in KV.PLUGINS}}), encoding="utf-8")
-        (self.wb / "state" / "guard-heartbeat.json").write_text(json.dumps({"last_start": "2026-01-05T10:00:00Z"}))
+        (self.wb / "state" / "hooks-heartbeat.json").write_text(json.dumps({"last_start": "2026-01-05T10:00:00Z"}))
         self.probe = self.root / "probe.json"
         self.probe.write_text(json.dumps({"sections": {"capture": {"data": capture or {
             "automation_allowed": True, "headless_allowed": True, "edge_path": "C:/Edge/msedge.exe"}}}}), encoding="utf-8")
@@ -552,16 +552,19 @@ class Steps(Base):
         self.assertEqual((res["d10"], res["d11"]["status"]), (KV.PASS, KV.WARN))
 
     def test_find_keyword_needs_ten_of_ten(self):
-        e = self.env(scenario={"misses": 1})
-        st = {}
+        """Every question must find its guide: one miss fails, whatever the size of the question set."""
+        n = len(QUESTIONS)
+        for misses, want in ((1, KV.FAIL), (0, KV.PASS)):
+            e = self.env(scenario={"misses": misses})
+            st = {}
 
-        def chain(v):
-            KV.d9_find_build(v)
-            st["d10"] = KV.d10_find_keyword(v)
-            return KV.PASS, ""
-        e.step(chain)
-        self.assertEqual(st["d10"][0], KV.FAIL)
-        self.assertIn("9/10", st["d10"][1])
+            def chain(v):
+                KV.d9_find_build(v)
+                st["d10"] = KV.d10_find_keyword(v)
+                return KV.PASS, ""
+            e.step(chain)
+            self.assertEqual(st["d10"][0], want, st["d10"][1])
+            self.assertIn(f"{n - misses}/{n}", st["d10"][1])
 
     def test_find_keyword_fails_when_the_howto_index_is_empty_and_warns_after_a_timeout(self):
         e = self.env(scenario={"find_ok": {"howto": 0}})
@@ -622,7 +625,7 @@ class Steps(Base):
 
     def test_hooks_without_a_session_or_plugins_are_a_warn(self):
         e = self.env()
-        (e.wb / "state" / "guard-heartbeat.json").unlink()
+        (e.wb / "state" / "hooks-heartbeat.json").unlink()
         (e.ch / "settings.json").write_text("{}", encoding="utf-8")
         st, detail, _ = e.step(KV.d14_hooks)
         self.assertEqual(st, KV.WARN)
@@ -765,38 +768,21 @@ class Steps(Base):
         self.assertEqual((row["status"], row["tools"]), (KV.PASS, {"ctx": KV.PASS}), "an absent tool is not listed")
         self.assertNotIn("tools", KV.step_row("D3", "kb-machinery", (KV.PASS, "ok"), 0), "other steps keep the IK2 shape")
 
-    def capture_env(self, ack=None):
+    def capture_env(self):
         """A profile with capture on, a fake node, and the kit's real ingest scripts: the sandbox ingest is not a stand-in."""
         e = self.env()
         shutil.copytree(REPO / "plugins/workbench-capture/skills/ingest/scripts",
                         e.kit / "plugins/workbench-capture/skills/ingest/scripts", ignore=shutil.ignore_patterns("__pycache__"))
-        shutil.copyfile(REPO / "bootstrap/infosec-note.txt", e.kit / "bootstrap/infosec-note.txt")
         (e.wb / "state" / "setup-state.json").write_text(json.dumps({"options": {"with": ["capture"]}}), encoding="utf-8")
         e.program("node")
-        if ack:
-            (e.wb / "capture").mkdir(parents=True, exist_ok=True)
-            (e.wb / "capture" / "ingest.json").write_text(json.dumps({"infosec_ack": ack}), encoding="utf-8")
         return e
 
-    def test_capture_exit_5_says_the_acknowledgement_is_not_recorded_and_what_to_do_next(self):
+    def test_capture_check_passes_on_a_fresh_profile_with_no_acknowledgement_step(self):
         e = self.capture_env()
-        st, detail, _ = e.step(KV.d17_capture)
-        self.assertEqual(st, KV.WARN)
-        self.assertIn("InfoSec acknowledgement is not recorded", detail)
-        self.assertIn("exit 5", detail)
-        self.assertIn("ingest.py ack-infosec", detail)
-        self.assertIn("security team", detail)
-        self.assertIn("the install is fine", detail)
-        self.assertNotIn("0 meeting file", detail, "no more bare counts")
-        self.assertFalse((e.wb / "capture" / "ingest.json").exists(), "the check never records an acknowledgement for the person")
-
-    def test_capture_check_passes_once_the_person_has_recorded_the_acknowledgement_in_the_live_profile(self):
-        e = self.capture_env(ack="2026-01-01T00:00:00Z")
         st, detail, _ = e.step(KV.d17_capture)
         self.assertEqual(st, KV.PASS, detail)
         self.assertIn("a fixture transcript became one meeting file", detail)
-        live = json.loads((e.wb / "capture" / "ingest.json").read_text(encoding="utf-8"))
-        self.assertEqual(live, {"infosec_ack": "2026-01-01T00:00:00Z"}, "the live profile is read, never written")
+        self.assertFalse((e.wb / "capture" / "ingest.json").exists(), "the check writes nothing into the live profile")
 
     def test_opt_ins_and_capture_off(self):
         e = self.env()

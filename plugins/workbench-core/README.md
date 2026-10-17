@@ -1,7 +1,6 @@
 # workbench-core
 
-The main plugin of claude-workbench: agent personas, workflow skills and the stdlib-only hooks, including the guard
-engine. The installer registers it from the local kit copy; invoke a skill as `/workbench-core:<skill>`. Claude also
+The main plugin of claude-workbench: agent personas, workflow skills and the stdlib-only hooks. The installer registers it from the local kit copy; invoke a skill as `/workbench-core:<skill>`. Claude also
 picks a skill on its own when the task matches its description, except the user-invoked ones marked below.
 
 ## Agents (`agents/`)
@@ -20,12 +19,11 @@ file pins its own model and effort; which persona fits which task is in `docs/mo
 | User-invoked only (Claude suggests them, never starts them) | `setup`, `cleanup`, `pc-checkup`, `vdi-drive`, `onboard`, and the authoring and admin skills `plugin-factory`, `plugin-review`, `web-packager`, `mcp-builder`, `api-bridge`, `app-navigator`, `mcp-heal`, `batch-review`, `brand-spec` |
 
 ## Hooks (`hooks/hooks.json`, scripts in `scripts/`)
-- PreToolUse: the guard engine (`scripts/guards/`, generic and corporate rule packs), a read-flood guard and the
-  skill auto-invoke hint.
+- PreToolUse: a read-flood check on Read.
 - SessionStart, UserPromptSubmit, PreCompact, Stop, ConfigChange and InstructionsLoaded: session context, journal
   checkpoints, a credential check on replies and a settings-change log.
 - PostToolUseFailure: a one-line hint from the bug-card detectors.
-Hooks fail open, so a guard is a backstop, never the only control. Test them with the guard test in `IMPORT.md`.
+Hooks fail open and none of them blocks a shell command; permission rules carry that (`settings/SETTINGS.md`). `/hooks` in Claude Code lists what is registered.
 
 ## Configuration
 One option, `python`: the interpreter that runs the hooks. The installer fills in the one it detected; avoid the

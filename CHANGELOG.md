@@ -1,5 +1,68 @@
 # Changelog
 
+## 0.3.5
+
+The guard is gone, the knowledge base ships with real knowledge, and save, search and updates got the fixes the field asked for.
+
+### Upgrade notes (from 0.3.4)
+- **Restart every Claude Code window before you type go.**
+- Repository private or no access from this machine: carry the release zip over and run
+  `kit_update.py update --archive <zip> --sha256 <hash from the release notes>` (a 0.3.4 kit without that option: IMPORT.md,
+  "A carried release zip"). Nothing is downloaded and nothing changes when the hash does not match.
+- Meaning search keyword-only because the model host is blocked: import the model zip that ships beside the release
+  (`doc_index.py model import <zip>`, guide 27).
+- Rules you wrote in `settings.json` are kept exactly as they are. Rules an older kit wrote are retired only where the kit's own
+  install records show it wrote them. A kit plugin you disabled stays disabled.
+
+### Removed
+- **The PreToolUse guard and everything that served it**: engine, rule packs, allowlist, guard levels and `set --guard`, the
+  push-host allowlist, its doctor and verify rows, the live test, the replay tool, guides 20 and 50. Safety is now permission
+  rules only (below). Leftover files from it are moved to `<workbench home>/backups/<time>/` on update.
+- **Rules about where and when to write, push, send, publish, share or upload, and most security prose**: the instruction
+  files, rules, guides and skills no longer carry destination rules, data-wall rules or caution sections (always-loaded text
+  is about a fifth smaller). Gone with them: the InfoSec acknowledgement gate for capture and ingest (`ack-infosec`, exit 5),
+  the plugin-install scan hook, repo-review's allowlist and posting token (both options are accepted and ignored), the doctor's
+  personal-OneDrive row, the publish, upload, secret, visibility and credential-file asks, `docs/security-overview.md` and
+  guides 38 and 40 (54 guides). `--git-hosts` is accepted and ignored. Kept: never paste a credential value into a file or
+  commit, and confirm before irreversible deletions.
+
+### Added
+- **A minimal permission set** in both profiles: asks only before a force push (also `git -C <dir> push` and `+refspec`
+  forms) and before deleting a repository or a release. No ask on a plain push. The installer adds one deny: only the save
+  driver writes `active-context.md` (Edit and Write tools; a shell write is not stopped). Kept under `--approvals off`.
+  A managed `allowManagedPermissionRulesOnly` makes these inert; the installer and the verify say so.
+- **Knowledge seed pack**: ten digests in the KB (`_shared/digests/`): models and tokens; the knowledge layer (search, RAG,
+  graphs, code graph); retrieval evaluation; reports and PDFs; the internal assistant; five on enterprise RAG (architecture and
+  permissions, retrieval, ingestion, evaluation and leak testing, failure modes). Cited sources, measured results, seed questions
+  that prove both searches find them. Existing knowledge bases get them on update; a note you edited is never overwritten.
+- **`pdf-report` skill and guide 57**: HTML or Markdown to a finished PDF through Edge (cover, contents, page N of M, repeating
+  table headers, no split rows, embedded fonts, bookmarks, clean metadata), a preflight check, PDF tools (merge, split, rotate,
+  stamp, metadata, scrub, form fields on a copy), and a render-every-page loop. Builds with Edge and the standard library alone.
+- **Guides 56 and 58**: graph or vectors, and a grounded, role-aware internal assistant in a visual flow builder.
+- **Offline update**: `kit_update.py update --archive <zip|tar.gz> --sha256 <hex>`, hash checked before anything is unpacked.
+- **Local changes survive updates**: files you or Claude changed in the kit, its instructions or the plugin cache are kept with
+  a diff in `<workbench home>/state/local-patches/<time>/`; the kit-update skill reviews them and re-applies only what the new
+  release did not already fix. New verify rows `local-patches`, `ac-deny`, `hooks-heartbeat`, and `plugin-cache`, which
+  fails when Claude Code still runs an older copy of a kit plugin (an update whose `claude` command was not on the Path;
+  the installer now says so in one warning line).
+- **Your removals stick**: `<workbench home>/state/kit-written.json` records what the kit wrote; an entry you remove is not
+  added back.
+- **Find model sideload**: `doc_index.py model import|export`; `status` says when search is keyword-only and why.
+- Corporate profile: subagent default Sonnet (written only on Claude Code 2.1.251 or newer, where personas keep their own
+  model), autocompact 75, tool search `auto:1`, subagent prompt cache 5m; Fable defaults to `high`. The full 12-row routing table
+  is in the always-loaded model policy; a Prompt cache section in the token guide.
+
+### Fixed
+- **Save**: the journal reminder carries the full command (and says which shell); the pending-save banner clears without a
+  session id; slow advisories run at most daily (the legacy scan weekly), a failure is not retried until the tool changes, and
+  `SAVE_ADVISORIES=0` turns them off; the advisories are found again in an installed kit; a bounded, debounced find refresh
+  follows each save (`SAVE_FIND_REFRESH=0` off); `--post` reports `recent_other_saves`; bare `/save` works.
+- **KB search**: links resolve case-blind, with spaces or by title; a failed index answers with one warning and a plain scan
+  instead of a traceback (`mode` is index, stale-index or grep; the old value is `ranking`); folder junctions are not indexed
+  twice; the snippet is the answering line; a retired value is flagged with its owner note.
+- The doctor's hooks row is `hooks heartbeat`; the read-flood hook is `read_flood.py`.
+- Uninstall gives back your own `settings.json` bytes (formatting and line endings) when its content is unchanged.
+
 ## 0.3.4
 
 Far fewer prompts on request, and a save the guard no longer stops.

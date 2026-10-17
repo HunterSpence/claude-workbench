@@ -20,11 +20,9 @@ repository holds scripts and documents nobody uses. Both tools only read until y
    `skillOverrides` value of `user-invocable-only` hides the skill from Claude, and `off` hides it from Claude and from the
    `/` menu; either way Claude cannot follow the route. Set the skill back to `on` or `name-only`, or reword the route so it
    asks you to run it. The setting does not apply to a plugin's skills: use `/plugin` for those.
-   Claude may make this one edit itself. `skillOverrides` is the only key of your user `settings.json` (or `settings.local.json`)
-   it may change, and only after you approve the prompt the guard raises, which names the file and the key. Every other key
-   (hooks, permissions, plugins and their options, environment, MCP servers, the status line, API key helpers) stays yours to
-   edit by hand with `/config`, `/permissions` or an editor, and the guard refuses a change to any of them. Why:
-   `settings/SETTINGS.md`.
+   The edit is one key, `skillOverrides`, in your user `settings.json` (or `settings.local.json`): make it by hand with
+   `/config` or an editor, or ask Claude and approve the prompt. Leave hooks, permissions, plugins and their options,
+   environment and MCP servers alone for this step. Keys: `settings/SETTINGS.md`.
 4. Duplicates are listed as `file:line` with a short id, not as text. Open each place, keep the line in one file and link to
    it from the others.
 5. Over-long files: the documented target is under 200 lines per CLAUDE.md file. Move the parts that matter for only some
@@ -56,15 +54,8 @@ repository holds scripts and documents nobody uses. Both tools only read until y
   folder with `--home` when you audit another one.
 - **A hidden skill is not reported although Claude never uses it:** the check reads `skillOverrides` only. A skill whose own
   front matter says `disable-model-invocation: true` is hidden from Claude the same way; look for it by hand.
-- **Claude says it may not edit your settings file:** that is the guard. It asks you only for a `skillOverrides` change; for
-  any other key, or a file that does not parse, it refuses and you edit the file yourself. In bypass mode the prompt was observed to
-  appear, and the refusals never depend on a prompt.
-- **A guard asks or refuses more than you want, or less:** the guard level decides for three rules and for plain browser navigation.
-  `guard_level` in `<CH>/workbench/corporate-allowlist.json` is `standard` by default (a push or upload to an unapproved host and
-  skipping git hooks ask; `playwright-cli` to an ordinary web address passes), `strict` (they are refused or asked about, as in 0.3.1) or
-  `minimal` (nothing is refused; only irreversible, outward, credential and guard-control steps ask). Change it by hand, with the
-  installer's `--guard` option, or by asking Claude to "turn the guard down". At standard and strict the other refusals do not move. `<CH>/workbench/logs/guards.log` shows
-  each decision with its rule id and level. Details: `settings/SETTINGS.md`.
+- **A prompt asks before a force push or before deleting a repository or a release:** that is a permission rule, listed in
+  `settings/SETTINGS.md`. Answer it, or change the rule with `/permissions`.
 - **A script is listed but is in use:** a scheduler or the CI starts it without any file naming it. Leave it, and add `--keep`.
 - **A script you expected is missing from the list:** its name appears somewhere, even in a comment or a changelog, or it
   changed within the last 30 days. Run with `--stale-days 0` to see the second kind. For Python and JavaScript the bare module

@@ -8,6 +8,7 @@ description: "Save this session's knowledge to the Markdown knowledge base (doma
 The driver is `${CLAUDE_PLUGIN_ROOT}/scripts/save_driver.py`; run it with `${user_config.python}`.
 Below, `DRIVER` means `"${user_config.python}" "${CLAUDE_PLUGIN_ROOT}/scripts/save_driver.py"`.
 The knowledge base root is `WORKBENCH_KB_ROOT` (set by the bootstrap); the driver prints it as `kb_root`.
+Bare `/save` starts this skill too, the same as `/workbench-kb:save`.
 
 Mid-session, never edit `active-context.md`. Journal one line instead (appends never collide):
 ```bash
@@ -15,7 +16,7 @@ DRIVER --inbox-add "<status + what is open + which note holds the detail>"
 ```
 Under 2 KB, no backticks, no credential values (the driver masks credential shapes, but refer to secrets by name).
 
-## Step 1: pre-flight (one call)
+## Step 1: pre-flight (one call, Bash timeout 300000 ms)
 ```bash
 DRIVER --pre
 ```
@@ -29,7 +30,15 @@ Do each item in its `next` list, in order. Keep `ac_base` for step 3.
   `"folded": true` were offered to an earlier save: re-add one only if active-context lost it.
 
 ## Step 2: knowledge-base writes (your judgment)
-Domains are the KB root's folders that hold a `HOT.md` (the `domains` field of `--pre`). Route by topic, usually one or two domains.
+Domains are the KB root's folders that hold a `HOT.md` (the `domains` field of `--pre`). Route by topic, usually one or two domains:
+- `platform`: the applications you build: architecture, UI, testing, code review.
+- `infra`: servers, containers, CI/CD, networking, DNS, certificates, monitoring.
+- `data`: databases, pipelines, schemas, data quality.
+- `ai`: models, agents, prompts, retrieval, evaluation, the assistant itself.
+- `ops`: how work runs: this knowledge base, docs, cost, research, debugging.
+- `projects`: multi-session efforts, one folder each with a `00-index.md`.
+- `security`: secrets handling, hardening, findings, compliance.
+- `_shared`: facts every task needs: conventions, environment, tools, contacts by role.
 1. **`<domain>/HOT.md`**: only if live state changed. Sections: `## Current state`, `## Decision heuristics`,
    `## Error blacklist` (symptom -> root cause -> fix). Respect `warn_hot` / `over_cap_hot`; over the cap, run
    `kb_demote.py --domain <d> --match "<text>"` (in the same `scripts/` folder). Never shorten text in place.
@@ -50,13 +59,14 @@ Domains are the KB root's folders that hold a `HOT.md` (the `domains` field of `
    Use the `stamp` from `--pre` for the heading time.
 4. **Subagent `## DISCOVERIES` blocks**: route each to its `domain:` and `note:`.
 
-Work facts stay inside the knowledge base your organisation allows. Never write a credential value anywhere.
+Never write a credential value anywhere.
 - **No re-reads.** Do not read a file back after Edit or Write to check it: an edit applies only when its checks pass, so a call that succeeded has changed the file.
 - **The driver writes the daily log** (`daily/`, one line per save) and stamps `updated:` in front matter. Do not write
   either by hand. A fact registered in `_shared/facts.json` has one owner note: change it there, and run
   `kb_health.py facts` (same `scripts/` folder) if you moved a value.
 
 ## Step 3: active-context.md (through the driver only)
+A settings deny rule refuses a direct edit of `active-context.md`: draft in the temp folder and use `--ac-write`.
 Write your full new version to a scratch file in the system temp folder (stay within `ac_bytes_left` bytes; in-flight items only, no rules).
 Adding more than the budget allows means removing the difference in this same rewrite: cut finished work whose
 detail already lives in a KB note (the link is the entry once the work is done). Never cut a rule pointer or an
@@ -69,7 +79,7 @@ DRIVER --ac-write <draft-file> --base <ac_base>
 - `status: conflict`: another session changed the same lines. Edit the `conflict_file` it names (keep both
   sessions' facts, remove the markers), then re-run `--ac-write <conflict_file> --base <the base it printed>`.
 
-## Step 4: post (one call)
+## Step 4: post (one call, Bash timeout 300000 ms)
 ```bash
 DRIVER --post --domains ops,infra --note "<one-line summary>" --files <file1> <file2>
 ```
@@ -85,7 +95,9 @@ this driver commits to: give it its own repository or folder.
 | `THIS SAVE DID NOT COMPLETE` | active-context is past its cap and grace band: trim through `--ac-write`, re-run |
 | `cred_unscanned` | a `--files` path does not exist, so it was not scanned: fix the path, re-run |
 | `stamped` / `stamp_skipped` | notes given a fresh `updated:` (only those named in `--files` whose content changed since `--pre`); a skipped one says why (no front matter, over its cap): no action unless you expected a stamp |
-| `advisories` | one line each: the size of the always-loaded instructions, and weekly the notes marked deprecated. Information only. `skipped: ...` means that tool is missing or failed; the save is unaffected |
+| `advisories` | one line each: the size of the always-loaded instructions (at most once a day), and weekly the notes marked deprecated. Information only. `not due (...)` means it ran recently; `skipped: ...` means that tool is missing, failed or is turned off (`SAVE_ADVISORIES=0`); the save is unaffected |
+| `find_refresh` | `started`: a detached refresh of the find index was launched (at most one per 30 min). `skipped: ...` says why (no find setup, too soon, `SAVE_FIND_REFRESH=0`). No action either way |
+| `recent_other_saves` | not empty: another session saved in the last 15 minutes, so mention it; the merge already kept its lines |
 | `git_commit` / `git_push` | `skipped` unless the KB is a git repository / you passed `--push` with a remote |
 
 ## Step 5: report (at most 5 lines)
@@ -96,7 +108,11 @@ caps OK (warn: ..) | credential scan CLEAN | reindex ok | git: commit ok / skipp
 
 ## After compaction
 When session start says a precompact save is pending (or `--pre` reports `resume_pending`), read the snapshot `--pre`
-names, write what it knew (steps 2 to 4). The completed `--post` clears this session's flag.
+names and write what it knew (steps 2 to 4). Use the snapshot, not the live `active-context.md`, when a parallel session
+rewrote that file since: the live file may no longer hold what this session knew. If the snapshot is skeletal (a few
+lines, nothing of the session), write a minimal history entry with what you do know and still run `--post`, so the flag
+clears and the banner stops. The completed `--post` clears this session's flag; without a session id in the environment
+it clears the one flag it claimed (`flag_claimed_without_session_id: true`).
 
 ## Search and health
 - Search: `"${user_config.python}" "${CLAUDE_PLUGIN_ROOT}/scripts/kb_search.py" "<terms>" [--domain d]`.

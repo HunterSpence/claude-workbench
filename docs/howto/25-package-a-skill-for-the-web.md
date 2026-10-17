@@ -23,7 +23,7 @@ key fails the upload, and a top-level `bin/` folder makes it refuse the whole pl
    Forward slashes, LF endings, sorted entries and fixed timestamps: two runs give identical bytes. The listing is printed.
 4. Tell the users what will not work: scripts a skill points to need code execution and, on default organisation settings,
    have no network, so a skill that downloads or installs something fails. Hooks, agents and local servers do not run in chat.
-5. Upload it yourself, where your organisation allows custom skills: Customize, Skills (a skill) or Customize, Plugins, Add,
+5. Upload it yourself: Customize, Skills (a skill) or Customize, Plugins, Add,
    Upload plugin (a plugin). The kit never uploads anything. Review a package you did not write first (guide 24).
 
 ## Verify

@@ -52,6 +52,13 @@ def load(name, path):
     return mod
 
 
+def put(path, text):
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text, encoding="utf-8")
+    return p
+
+
 def tree_hash(root):
     h = hashlib.sha256()
     for p in sorted(Path(root).rglob("*")):
@@ -78,13 +85,14 @@ class Base(unittest.TestCase):
                     "PYTHONIOENCODING": "utf-8", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
         self.env.pop("KB_INDEX_DB", None)
         self.env.pop("CLAUDE_CODE_SESSION_ID", None)
+        self.scripts = SCRIPTS                      # a subclass may run the driver from a copy of the plugin folder
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def popen(self, *args, sid="sess-a", env=None):
         e = {**self.env, "CLAUDE_CODE_SESSION_ID": sid, **(env or {})}
-        return subprocess.Popen([sys.executable, str(SCRIPTS / "save_driver.py"), *map(str, args)], env=e,
+        return subprocess.Popen([sys.executable, str(self.scripts / "save_driver.py"), *map(str, args)], env=e,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")
 
     @staticmethod
@@ -310,7 +318,7 @@ class ActiveContextCap(Base):
 
 class RolloverBySize(Base):
     """kb_audit's history rollover, in-process on a throwaway KB: the ladder must end under the cap, lose nothing and keep
-    the newest entries. The failure these guard against is a strategy that reports success while moving nothing."""
+    the newest entries. The failure these tests catch is a strategy that reports success while moving nothing."""
 
     def setUp(self):
         super().setUp()
@@ -526,6 +534,306 @@ class Sandbox(Base):
         self.assertEqual(tree_hash(TEMPLATE), template_before, "the template was modified")
         self.assertEqual(list(self.home.rglob("*")), [], "something was written to the home folder")
         self.assertFalse((self.root / ".state").exists())
+
+
+class KitCopy(Base):
+    """The driver run from a COPY of the plugin folder, so the tools it calls beside it (workbench-core) can be faked or
+    left out, and the workbench home sits in a folder whose name holds a space."""
+
+    def setUp(self):
+        super().setUp()
+        self.claude = self.tmp / "claude home"
+        self.env["CLAUDE_CONFIG_DIR"] = str(self.claude)
+        self.wb = self.claude / "workbench"
+        self.kit = self.tmp / "kit"
+        shutil.copytree(PLUGIN, self.kit / "workbench-kb", ignore=shutil.ignore_patterns("__pycache__"))
+        self.scripts = self.kit / "workbench-kb" / "scripts"
+
+    def core(self, skill, script, body):
+        return put(self.kit / "workbench-core" / "skills" / skill / "scripts" / script, body)
+
+    def saved(self, note, **env):
+        rc, out = self.drv("--post", "--domains", "ops", "--note", note, env=env)
+        self.assertEqual((rc, out["metrics"]), (0, "recorded"), out)
+        return out
+
+    def age_stamp(self, name, **ago):
+        when = (datetime.now(timezone.utc) - timedelta(**ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        put(self.state() / name, when + "\n")
+
+
+class SessionIdFallback(Base):
+    """The hooks name a precompact flag by the id in the event; a Bash tool that does not export CLAUDE_CODE_SESSION_ID
+    leaves the driver without it."""
+    NOSID = {"CLAUDE_CODE_SESSION_ID": ""}
+
+    def flag(self, name, age=0):
+        f = self.state() / f"precompact-{name}.flag"
+        f.write_text("compacted\n", encoding="utf-8")
+        os.utime(f, (time.time() - age, time.time() - age))
+        return f
+
+    def test_the_one_fresh_flag_is_claimed_and_cleared(self):
+        flag = self.flag("hook-session")
+        rc, pre = self.drv("--pre", env=self.NOSID)
+        self.assertEqual((rc, pre["resume_pending"], pre["flag_claimed_without_session_id"]), (0, True, True), pre)
+        self.assertEqual(pre["mode_hint"], "precompact-resume")
+        rc, post = self.drv("--post", "--domains", "ops", "--note", "no session id", env=self.NOSID)
+        self.assertEqual((rc, post["mode"], post["flag_cleared"], post["flag_claimed_without_session_id"]),
+                         (0, "precompact-resume", flag.name, True), post)
+        self.assertFalse(flag.exists(), "the claimed flag must be gone, or the banner repeats forever")
+
+    def test_with_several_flags_the_newest_is_claimed_and_the_others_stay(self):
+        old, new = self.flag("old-session", age=3600), self.flag("new-session", age=60)
+        rc, pre = self.drv("--pre", env=self.NOSID)
+        self.assertEqual(pre["other_sessions_pending"], [old.name])
+        rc, post = self.drv("--post", "--domains", "ops", "--note", "newest", env=self.NOSID)
+        self.assertEqual(post["flag_cleared"], new.name)
+        self.assertTrue(old.exists(), "another session's flag must survive")
+
+    def test_a_stale_flag_is_nobodys_and_is_cleaned_up(self):
+        stale = self.flag("dead-session", age=30 * 86400)
+        rc, pre = self.drv("--pre", env=self.NOSID)
+        self.assertEqual((rc, pre["resume_pending"]), (0, False), "a dead session's flag raised a spurious resume")
+        self.assertNotIn("flag_claimed_without_session_id", pre)
+        self.assertFalse(stale.exists(), "the stale flag should be removed by the usual cleanup")
+
+    def test_a_stale_flag_never_beats_a_fresh_one(self):
+        stale, fresh = self.flag("dead-session", age=30 * 86400), self.flag("live-session", age=60)
+        rc, post = self.drv("--post", "--domains", "ops", "--note", "fresh wins", env=self.NOSID)
+        self.assertEqual((rc, post["flag_cleared"]), (0, fresh.name))
+        self.assertFalse(stale.exists())
+
+    def test_without_any_flag_nothing_is_claimed(self):
+        rc, pre = self.drv("--pre", env=self.NOSID)
+        self.assertEqual((rc, pre["resume_pending"]), (0, False))
+        self.assertNotIn("flag_claimed_without_session_id", pre)
+
+    def test_a_known_session_id_never_claims_another_sessions_flag(self):
+        flag = self.flag("hook-session")
+        rc, pre = self.drv("--pre", sid="sess-b")
+        self.assertEqual((pre["resume_pending"], pre.get("flag_claimed_without_session_id")), (False, None))
+        self.assertTrue(flag.exists())
+
+
+class PostReport(KitCopy):
+    def test_post_lists_the_other_recent_saves_in_the_shape_pre_does(self):
+        first = self.saved("first save")
+        self.assertEqual(first["recent_other_saves"], [], "a save is not its own 'other'")
+        second = self.drv("--post", "--domains", "infra", "--note", "second save", sid="sess-b")[1]
+        others = second["recent_other_saves"]
+        self.assertEqual((len(others), others[0]["domains"], set(others[0])), (1, ["ops"], {"ts", "domains"}))
+        pre = self.pre()["recent_other_saves"]
+        self.assertEqual((len(pre), set(pre[0])), (2, set(second["recent_other_saves"][0])))
+
+
+class LegacyScanTimeout(KitCopy):
+    def test_a_timed_out_scan_is_stamped_and_the_next_save_does_not_retry_it(self):
+        mark = self.tmp / "scan-ran"
+        self.core("cleanup", "scan_legacy.py", "import os, time\nopen(os.environ['SCAN_MARK'], 'a').write('x')\ntime.sleep(60)\n")
+        env = {"SAVE_ADVISORY_TIMEOUT": "1", "SCAN_MARK": str(mark)}
+        first = self.saved("slow scan one", **env)["advisories"]["legacy_scan"]
+        self.assertEqual(first, "skipped: timed out after 1 s")
+        self.assertTrue((self.state() / "legacy-scan.stamp").exists(), "a timeout must leave the stamp")
+        self.assertRegex(self.saved("slow scan two", **env)["advisories"]["legacy_scan"], r"^not due \(ran 0 day")
+        self.assertEqual(mark.read_text(), "x", "the scan was started again by the next save")
+
+    def test_a_failing_scan_is_not_retried_until_the_tool_changes(self):
+        mark = self.tmp / "scan-ran"
+        env = {"SCAN_MARK": str(mark)}
+        self.core("cleanup", "scan_legacy.py", "import os\nopen(os.environ['SCAN_MARK'], 'a').write('x')\nraise SystemExit(2)\n")
+        self.assertEqual(self.saved("failing scan one", **env)["advisories"]["legacy_scan"], "skipped: no usable answer (exit 2)")
+        self.assertRegex(self.saved("failing scan two", **env)["advisories"]["legacy_scan"], r"^not due \(ran 0 day\(s\) ago, and failed\)$")
+        self.assertEqual(mark.read_text(), "x", "a failing scan was started again by the next save")
+        self.core("cleanup", "scan_legacy.py", "import json\nprint(json.dumps({'candidates': []}))\n")      # the kit updated the tool
+        self.assertEqual(self.saved("fixed scan", **env)["advisories"]["legacy_scan"],
+                         "0 note(s) marked deprecated, obsolete or similar")
+
+
+class Advisories(KitCopy):
+    AUDIT = ("import json, os\nopen(os.environ['AUDIT_MARK'], 'a').write('x')\n"
+             "print(json.dumps({'surface': {'bytes': 10, 'rules_over_cap': [], 'duplicates': [], 'dead_refs': [], "
+             "'generated_drift': [], 'hidden_skills': []}}))\n")
+
+    def setUp(self):
+        super().setUp()
+        self.mark = self.tmp / "audit-ran"
+        self.core("brain-audit", "audit.py", self.AUDIT)
+
+    def run_save(self, note, **env):
+        return self.saved(note, AUDIT_MARK=str(self.mark), **env)["advisories"]
+
+    def test_the_surface_audit_runs_at_most_once_a_day(self):
+        self.assertEqual(self.run_save("day one")["surface"], "10 B always loaded, 0 finding(s)")
+        self.assertRegex(self.run_save("day one again")["surface"], r"^not due \(ran 0 h ago; once a day\)$")
+        self.assertEqual(self.mark.read_text(), "x", "ran twice inside a day")
+        self.age_stamp("advisories.stamp", hours=25)
+        self.assertEqual(self.run_save("day two")["surface"], "10 B always loaded, 0 finding(s)")
+        self.assertEqual(self.mark.read_text(), "xx")
+
+    def test_a_timed_out_audit_counts_as_the_days_run(self):
+        self.core("brain-audit", "audit.py", "import time\ntime.sleep(60)\n")
+        self.assertEqual(self.run_save("slow", SAVE_ADVISORY_TIMEOUT="1")["surface"], "skipped: timed out after 1 s")
+        self.assertRegex(self.run_save("slow again", SAVE_ADVISORY_TIMEOUT="1")["surface"], r"^not due")
+
+    BROKEN = "import os\nopen(os.environ['AUDIT_MARK'], 'a').write('b')\nraise SystemExit(2)\n"
+
+    def test_an_audit_that_fails_at_once_is_not_retried_until_the_tool_changes(self):
+        self.core("brain-audit", "audit.py", self.BROKEN)
+        self.assertEqual(self.run_save("broken")["surface"], "skipped: no usable answer (exit 2)")
+        self.assertRegex(self.run_save("broken again")["surface"], r"^not due \(ran 0 h ago, and failed; once a day\)$")
+        self.assertEqual(self.mark.read_text(), "b", "a failing tool was started again by the next save")
+        self.core("brain-audit", "audit.py", self.AUDIT)                  # the kit updated the tool: tried at once
+        self.assertEqual(self.run_save("fixed")["surface"], "10 B always loaded, 0 finding(s)")
+        self.assertEqual(self.mark.read_text(), "bx")
+
+    def test_a_failed_audit_is_tried_again_a_day_later(self):
+        self.core("brain-audit", "audit.py", self.BROKEN)
+        self.run_save("broken")
+        self.age_stamp("advisories.stamp", hours=25)
+        self.assertEqual(self.run_save("a day later")["surface"], "skipped: no usable answer (exit 2)")
+        self.assertEqual(self.mark.read_text(), "bb")
+
+    def test_save_advisories_zero_runs_neither_tool(self):
+        scan_mark = self.tmp / "scan-ran"
+        self.core("cleanup", "scan_legacy.py", "import os\nopen(os.environ['SCAN_MARK'], 'a').write('x')\n")
+        out = self.run_save("quiet", SAVE_ADVISORIES="0", SCAN_MARK=str(scan_mark))
+        self.assertEqual(out, {"surface": "skipped: SAVE_ADVISORIES=0", "legacy_scan": "skipped: SAVE_ADVISORIES=0"})
+        self.assertFalse(self.mark.exists() or scan_mark.exists(), "a tool ran although advisories were turned off")
+
+
+class CoreLookup(KitCopy):
+    """Where the driver finds the workbench-core tools: the installed kit, then the newest plugin-cache copy, then the
+    folder beside the plugin. An installed plugin sits in `<claude>/plugins/cache/workbench/<plugin>/<version>/`."""
+
+    def audit(self, base, n):
+        body = "import json\nprint(json.dumps({'surface': {'bytes': %d, 'rules_over_cap': [], 'duplicates': [], 'dead_refs': [], " \
+               "'generated_drift': [], 'hidden_skills': []}}))\n" % n
+        return put(Path(base) / "skills" / "brain-audit" / "scripts" / "audit.py", body)
+
+    def cached_driver(self):
+        """Run the driver from the plugin-cache layout; returns the cache folder holding the core plugin's versions."""
+        cache = self.claude / "plugins" / "cache" / "workbench"
+        shutil.copytree(PLUGIN, cache / "workbench-kb" / "0.3.5", ignore=shutil.ignore_patterns("__pycache__"))
+        self.scripts = cache / "workbench-kb" / "0.3.5" / "scripts"
+        return cache / "workbench-core"
+
+    def surface(self, **env):
+        self.age_stamp("advisories.stamp", hours=25)          # the audit runs once a day: make it due again
+        self.n = getattr(self, "n", 0) + 1
+        return self.saved(f"lookup {self.n}", **env)["advisories"]["surface"]
+
+    def test_the_plugin_cache_layout_finds_the_installed_kit_then_the_newest_cache_copy(self):
+        cores = self.cached_driver()
+        kit = self.wb / "kit" / "plugins" / "workbench-core"
+        self.audit(cores / "0.3.9", 39)
+        os.utime(cores / "0.3.9", (1_000_000_000, 1_000_000_000))          # older, though it sorts after 0.3.10
+        self.audit(cores / "0.3.10", 310)
+        self.audit(kit, 1)
+        for label, remove, want in (("installed kit first", None, "1 B always loaded, 0 finding(s)"),
+                                    ("then the newest cache copy", kit, "310 B always loaded, 0 finding(s)"),
+                                    ("then the older one", cores / "0.3.10", "39 B always loaded, 0 finding(s)"),
+                                    ("then nothing", cores, "skipped: not found")):
+            with self.subTest(label):
+                if remove is not None:
+                    shutil.rmtree(remove)
+                self.assertEqual(self.surface(), want)
+
+    def test_the_folder_beside_the_plugin_is_the_last_resort_and_the_kit_beats_it(self):
+        self.audit(self.kit / "workbench-core", 7)
+        self.assertEqual(self.surface(), "7 B always loaded, 0 finding(s)")
+        self.audit(self.wb / "kit" / "plugins" / "workbench-core", 1)
+        self.assertEqual(self.surface(), "1 B always loaded, 0 finding(s)")
+
+    def test_a_tool_found_in_the_cache_is_still_cut_off_at_the_timeout(self):
+        self.cached_driver()
+        put(self.claude / "plugins" / "cache" / "workbench" / "workbench-core" / "0.3.5" / "skills" / "brain-audit" / "scripts"
+            / "audit.py", "import time\ntime.sleep(60)\n")
+        self.assertEqual(self.surface(SAVE_ADVISORY_TIMEOUT="1"), "skipped: timed out after 1 s")
+
+
+class FindRefresh(KitCopy):
+    """The find index is refreshed by a detached child the stub stands in for: it writes a marker and exits, so no process
+    outlives a test."""
+    STUB = ("import json, os, sys\nopen(os.environ['FIND_MARK'], 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n"
+            "print(json.dumps({'started': True}))\n")
+
+    def setUp(self):
+        super().setUp()
+        self.mark = self.tmp / "find-calls"
+        self.db = self.tmp / "know dir" / "index.sqlite"
+        self.tool = put(self.wb / "kit" / "plugins" / "workbench-core" / "skills" / "find" / "scripts" / "doc_index.py", self.STUB)
+        self.config(knowledge_python=sys.executable, knowledge_db=str(self.db))
+
+    def config(self, **kw):
+        put(self.wb / "config.json", json.dumps(kw))
+
+    def go(self, note, **env):
+        return self.saved(note, FIND_MARK=str(self.mark), **env)["find_refresh"]
+
+    def calls(self):
+        return [json.loads(x) for x in self.mark.read_text().splitlines()] if self.mark.exists() else []
+
+    def test_started_once_then_debounced_then_started_again_after_30_minutes(self):
+        self.assertEqual(self.go("one"), "started")
+        argv = ["--db", str(self.db), "refresh", "--root", "kb", "--detach", "--json"]
+        self.assertEqual((len(self.calls()), self.calls()[0]), (1, argv))
+        self.assertRegex(self.go("two"), r"^skipped: a refresh was started \d+ min ago")
+        self.assertEqual(len(self.calls()), 1, "the refresh was started again inside 30 minutes")
+        self.age_stamp("find-refresh.stamp", minutes=31)
+        self.assertEqual(self.go("three"), "started")
+        self.assertEqual(len(self.calls()), 2)
+
+    def test_skipped_without_config_without_the_script_or_when_turned_off(self):
+        no_cfg = "skipped: config.json has no knowledge_python and knowledge_db"
+        for label, setup, want in (
+                ("no config file", lambda: (self.wb / "config.json").unlink(), no_cfg),
+                ("no database", lambda: self.config(knowledge_python=sys.executable), no_cfg),
+                ("no find script", lambda: (self.config(knowledge_python=sys.executable, knowledge_db=str(self.db)), self.tool.unlink()),
+                 "skipped: the find script is not installed")):
+            with self.subTest(label):
+                setup()
+                self.assertEqual(self.go(label), want)
+        put(self.tool, self.STUB)
+        self.config(knowledge_python=sys.executable, knowledge_db=str(self.db))
+        self.assertEqual(self.go("off", SAVE_FIND_REFRESH="0"), "skipped: SAVE_FIND_REFRESH=0")
+        self.assertEqual(self.calls(), [], "a refresh was started although it was skipped")
+
+    def test_a_hung_or_failing_refresh_never_blocks_the_save_or_repeats(self):
+        stamp = self.state() / "find-refresh.stamp"
+        for label, body, env, want in (
+                ("hangs", "import time\ntime.sleep(60)\n", {"SAVE_FIND_TIMEOUT": "1"}, "skipped: timed out after 1 s"),
+                ("crashes", "raise SystemExit(1)\n", {}, "skipped: no usable answer (exit 1)"),
+                ("already running", "import json\nprint(json.dumps({'started': False}))\n", {}, None)):
+            with self.subTest(label):
+                put(self.tool, body)
+                stamp.unlink(missing_ok=True)
+                out = self.go(label, **env)
+                self.assertTrue(out.startswith("skipped: ") and (want is None or out == want), out)
+                self.assertRegex(self.go(label + " again", **env), r"^skipped: a refresh was started", "the failure was retried")
+
+
+class PluginAlone(Base):
+    """The whole cycle from a copy of plugins/workbench-kb with no workbench-core folder beside it: the tools it calls
+    after the save are absent, and nothing may fail because of that."""
+
+    def test_pre_ac_write_post_without_workbench_core(self):
+        solo = self.tmp / "solo kit"
+        shutil.copytree(PLUGIN, solo / "workbench-kb", ignore=shutil.ignore_patterns("__pycache__"))
+        self.scripts = solo / "workbench-kb" / "scripts"
+        self.assertEqual([p.name for p in solo.iterdir()], ["workbench-kb"])
+        pre = self.pre()
+        draft = put(self.tmp / "draft.md", "# AC\n- solo item\n")
+        rc, out = self.drv("--ac-write", draft, "--base", pre["ac_base"])
+        self.assertEqual((rc, out["status"]), (0, "written"), out)
+        note = self.note("ops/solo.md", "---\ntitle: solo\ndomain: ops\nstatus: active\nupdated: 2001-01-01\n---\nbody\n")
+        rc, post = self.drv("--post", "--domains", "ops", "--note", "solo cycle", "--files", note)
+        self.assertEqual((rc, post["cred_scan"], post["metrics"], post["stamped"]), (0, "CLEAN", "recorded", ["ops/solo.md"]), post)
+        self.assertEqual(post["advisories"], {"surface": "skipped: not found", "legacy_scan": "skipped: not found"})
+        self.assertTrue(post["find_refresh"].startswith("skipped: "), post["find_refresh"])
+        self.assertNotIn("action_required", post)
+        self.assertIn("solo item", (self.root / "active-context.md").read_text(encoding="utf-8"))
+        self.assertTrue(list((self.root / "daily").glob("*.md")))
 
 
 if __name__ == "__main__":

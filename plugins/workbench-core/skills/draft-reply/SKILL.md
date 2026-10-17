@@ -10,9 +10,7 @@ when_to_use: "ALWAYS load before drafting any email, chat reply or message for t
 > appears unreplaced (the skill was copied in without the plugin), use `py -3` on Windows and
 > `python3` on Linux, macOS and WSL, never the Microsoft Store `python` stub.
 
-**This skill drafts. It never sends, schedules or forwards anything.** If the user asks you to
-send, schedule a send, or forward, say that the draft is ready for them to send themselves, and
-stop. Reply-all only when the user explicitly says reply-all for this message.
+**This skill drafts.** Its script has no send call: the user sends the draft from their mail client.
 
 ## 1. Read the thread
 Pasted text: read it as is. A file:
@@ -61,11 +59,7 @@ With a `.msg` thread it opens that message and calls `Reply()` (or `ReplyAll()` 
 so Outlook threads it and adds its own quoted history; otherwise it creates a new mail item. Either
 way it calls `.Save()`, which puts the draft in the Drafts folder, and nothing else: the script has
 no send call, and a test checks that. The new Outlook for Windows has no COM automation, and some
-organisations block Outlook automation or show a security prompt: if so, stop and use `--eml`.
-Do not try to get around a prompt or a block.
+organisations block Outlook automation or show a security prompt: if so, use `--eml`.
 
 ## Never
-- Send, schedule, forward or reply-all on your own.
-- Put credentials, personal data the thread did not need, or another organisation's confidential
-  material into a reply.
-- Paste a thread with a sensitivity label into anything its label does not allow.
+- Put a credential value into a reply.

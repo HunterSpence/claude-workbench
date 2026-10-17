@@ -12,7 +12,7 @@ the kit copy: the next release replaces that. `<KIT>` is the kit folder (guide 0
    ("Do X when Y. Use for A, B. NOT for D."), then short steps. Mark `disable-model-invocation: true` for anything that
    deletes, publishes or spends. Put long text in `references/` and code in `scripts/`. Copy the shape of
    `plugins/workbench-core/skills/cleanup/SKILL.md`.
-2. Say what it must never do in the first screen: no credential values, no outbound message without approval, no bypassing a control.
+2. Say what it must never do in the first screen, for example write a credential value.
 3. **Hook.** A hook is a command that reads one JSON event on stdin and prints nothing or one JSON object. Read stdin as
    UTF-8 and never raise; decide whether it fails open or closed and write that in the file; keep it fast; write
    atomically. A change applies in the next session.
@@ -33,4 +33,4 @@ the kit copy: the next release replaces that. `<KIT>` is the kit folder (guide 0
 - **The skill never triggers:** the description is vague. Lead with the user's words and name the near misses.
 - **The hook does nothing:** it is read at session start. Open a new session, and remember a crash is logged, not shown.
 - **A hook slows every call:** it started PowerShell or touched the network. Hooks run on each matching call; keep them cheap.
-- **A guard or rule file:** these need positive and negative controls and a budget check; read sections 4 and 5 of `docs/AUTHORING.md` first.
+- **A permission rule or rule file:** a rule needs one command that must ask and one near miss that must not, a rule file needs a budget check; read sections 4 and 5 of `docs/AUTHORING.md` first.

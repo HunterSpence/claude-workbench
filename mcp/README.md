@@ -28,7 +28,7 @@ deploy, allow or deny MCP servers through managed settings, and those always win
 | tavily | ignore (optional) | **hosted**: queries leave | `TAVILY_API_KEY` |
 | postgres (read-only) | ignore (optional) | local process; talks only to the database you name; results enter the session | `uv`, `POSTGRES_MCP_DATABASE_URI` for a read-only role on a dev or replica database |
 
-Not included, on purpose: servers that act on personal infrastructure or accounts, anything
+Not included, on purpose: servers with write access to infrastructure or accounts, anything
 AGPL-licensed, and servers that duplicate a built-in tool without adding much. Memory and code-intelligence servers
 under AGPL, GPL or non-commercial licences are not shipped. Claude Code's built-in WebSearch and
 WebFetch cover most search needs; the search servers are for teams that need more volume.
@@ -71,8 +71,7 @@ registry or by the server.
 Keys are written as `${VAR}` in the template (or come from a `headersHelper` command) and are expanded by
 Claude Code when it starts a server. Keep the values in your environment or your OS credential store, never in the
 golden file, a repo, or a chat. The healer refuses to write an `ensure` entry while a `{{PLACEHOLDER}}` or a
-`${VAR}` without a default is still unset, and says which. Corporate keys come from whoever owns the account; never use a personal key for work
-data. Behind a TLS-inspecting proxy, Node-based servers need `NODE_EXTRA_CA_CERTS` pointing at your
+`${VAR}` without a default is still unset, and says which. Behind a TLS-inspecting proxy, Node-based servers need `NODE_EXTRA_CA_CERTS` pointing at your
 organisation's CA bundle.
 
 ## Token cost
@@ -156,10 +155,8 @@ its own hooks, CLAUDE.md rules and tool permissions; `reinstall` and `claude-ins
 again and `uninstall` and `claude-uninstall` remove them (tokensave itself says to run `reinstall` to
 update permissions); `upgrade` replaces the binary outside your control; `doctor` is not read-only,
 it "auto-repairs" by adding hooks to your Claude Code settings (observed with 7.12.1 on a plain
-diagnostic run). The workbench guard blocks all seven when they are typed as the command, also inside `$(...)`,
-a script block or a `powershell -Command` string. It does not see one that another program starts or that is spelled
-indirectly (`xargs`, `find -exec`, `Start-Process`, an alias, a shim: the list is in `docs/known-limits.md`), so the rule
-holds only while nobody goes looking for a way around it.
+diagnostic run). Nothing in the kit blocks the seven: the rule is an instruction
+(`instructions/rules/code-graph.md`), and a hook that named them would itself contain the word "tokensave" (see below).
 The kit pins 7.12.1: from 7.13.0, the first launch of a new version silently reinstalls its agent integrations
 (rules text and git-hook sections), so move past the pin only after reviewing what that writes.
 ```bash
@@ -179,25 +176,20 @@ tokensave sync                     # incremental refresh after changes
 Rules that keep it contained:
 - **No hook command may contain the word "tokensave".** A hook that calls its CLI can re-register
   its integrations. Run `tokensave sync` by hand or from your own scheduler.
-- **Its edit tools are guarded like Edit and Write.** The server can also change files (`str_replace`, `multi_str_replace`,
-  `insert_at`, `insert_at_symbol`, `replace_symbol`, `ast_grep_rewrite`, `replace_lines`, `delete_symbol`). The guard puts
-  their `path` (tokensave has no `project_root` option: a relative path is read against the folder the server was started in,
-  taken to be the session's folder; a root the call supplies is judged as well, and any other base-folder key makes the call ask)
-  through the same checks: credential files, `.env` files, the guards' own configuration and
-  your settings files are refused, and so is a folder that holds them (`~/.claude`, your home folder), because a rewrite tool
-  reaches everything beneath the folder it is given. Approving the server as a whole therefore does not approve those
-  paths; the search and callers tools are untouched.
+- **Its edit tools are not covered by the Edit rules.** The server can also change files (`str_replace`, `multi_str_replace`,
+  `insert_at`, `insert_at_symbol`, `replace_symbol`, `ast_grep_rewrite`, `replace_lines`, `delete_symbol`), and a rewrite
+  tool reaches everything beneath the folder it is given. Approve those tools one at a time, not the server as a whole;
+  the search and callers tools only read.
 - Pass `graph_root` to query another initialised repo instead of re-indexing.
 - It misses some cross-file calls in some languages; confirm a blast radius with grep before a
   risky change.
 
 ## Playwright and Chrome DevTools
-For testing apps you own or are allowed to test. Keep versions pinned (`@x.y.z`, never `@latest`)
+Keep versions pinned (`@x.y.z`, never `@latest`)
 and `--isolated`, so neither server touches your signed-in browser profile. Chrome DevTools MCP
 sends usage statistics to its vendor by default, and its performance tools send trace URLs to
 Google's CrUX API; the template turns both off with `--no-usage-statistics`,
-`CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS=1` and `--no-performance-crux`. Do not remove them.
+`CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS=1` and `--no-performance-crux`.
 
 ## Hosted servers (context7, GitHub remote, mslearn, atlassian, bigquery, gcloud, brave-search, exa, tavily)
-Everything you send leaves your machine. Enable one only if your organisation allows that
-service, and never put code, internal names, customer data or secrets in a query.
+Every query goes to the vendor's service.

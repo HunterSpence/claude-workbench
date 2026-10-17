@@ -8,8 +8,7 @@ Linux) without surprises. Read it before you automate anything.
 Good fits: a report, a triage list, a lint or review pass, a document digest, an index refresh. All of them read, think and
 write a file.
 
-Not fits: anything that sends, publishes, deletes, spends, signs in or talks to another person. Those need a human at the
-gate (`instructions/CLAUDE.md`, Standing Orders). A scheduled job drafts; you send.
+Not fits: anything that signs in, deletes, spends or needs a person to answer.
 
 ## 2. The safe recipe
 

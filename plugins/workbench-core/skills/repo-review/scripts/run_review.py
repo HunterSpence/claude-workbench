@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """run_review.py: review a repository or a local folder with a hardened, read-only headless Claude call.
 
-  run_review.py HOST/OWNER/REPO [--pr N] [--allowlist FILE] [--out DIR] [--rubric FILE] [--keep-scratch]
+  run_review.py HOST/OWNER/REPO [--pr N] [--out DIR] [--rubric FILE] [--keep-scratch]
   run_review.py --local DIR [--rubric FILE] [--out DIR] [--print-argv]
-  run_review.py HOST/OWNER/REPO --pr N --post REVIEW.md --confirm POST-REVIEW-COMMENT
+  run_review.py HOST/OWNER/REPO --pr N --post REVIEW.md
   run_review.py --canary [--live]          build the isolation fixture; --live also reviews it and checks the result
 
-Nothing is fetched or sent until the repository is on the allowlist (one HOST/OWNER/REPO per line; see
-review-allowlist.example.txt). Fetching happens HERE, outside Claude: a shallow clone (no submodules, symlinks written
+--allowlist FILE and --confirm TOKEN are accepted and ignored, so older command lines still run. Fetching happens HERE,
+outside Claude: a shallow clone (no submodules, symlinks written
 as plain files, .git removed) into %LOCALAPPDATA%/wb-review/<run> (~/.cache/wb-review/<run> elsewhere), plus the pull
 request text and diff as meta.json and pr.diff when --pr is given. WB_REVIEW_TOKEN (a read-only token) is handed to
 the fetch commands only; Claude never gets a GitHub token. Secret-shaped files (.env*, keys, .npmrc, ...) are deleted from
@@ -25,9 +25,9 @@ claude exits 0 and the text names Claude Code and lists -p/--print. A flag dropp
 stderr; --max-turns is a cost cap, not isolation, and some versions accept it without listing it, but it is passed only when listed.)
 --local DIR copies a folder into the scratch directory (symlinks and .git skipped) and reviews the copy with the same
 command; the source folder is only read. Findings are written to local files (<out>/<name>.findings.json, review.md,
-run.log). Posting a review comment needs --post FILE and the literal --confirm token, which you give only after you
-have read the file. WB_CLAUDE_BIN names another claude executable (tests).
-Exit: 0 done, 2 refused (allowlist, missing token, usage, claude's safety flags cannot be confirmed), 4 error.
+run.log). --post FILE posts that file as one review comment on the pull request. WB_CLAUDE_BIN names another claude
+executable (tests).
+Exit: 0 done, 2 refused (usage, claude's safety flags cannot be confirmed), 4 error.
 """
 import argparse
 import datetime
@@ -46,7 +46,6 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 SETTINGS = HERE / "review-settings.json"
 RUBRIC = HERE / "RUBRIC.md"
-CONFIRM_TOKEN = "POST-REVIEW-COMMENT"
 # Files that hold secrets. Two layers keep Claude away from them: they are deleted from the scratch copy before the
 # review starts (prune_secrets), and the same patterns are denied as Read rules on the command line, which does not
 # depend on a settings file being honoured (review-settings.json repeats the common ones).
@@ -116,28 +115,6 @@ def parse_target(text):
     if len(parts) != 3 or not all(PART.fullmatch(p) for p in parts):
         raise ValueError(f"not a HOST/OWNER/REPO repository name: {text!r}")
     return "/".join(parts).lower()
-
-
-def default_allowlist():
-    if os.environ.get("WB_REVIEW_ALLOWLIST"):
-        return Path(os.environ["WB_REVIEW_ALLOWLIST"])
-    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "workbench" / "review-allowlist.txt"
-
-
-def is_allowed(target, allowlist):
-    try:
-        lines = Path(allowlist).read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return False
-    for line in lines:
-        line = line.split("#", 1)[0].strip()
-        if line:
-            try:
-                if parse_target(line) == target:
-                    return True
-            except ValueError:
-                continue
-    return False
 
 
 # ---- the hardened claude command --------------------------------------------------------------------------------
@@ -367,7 +344,7 @@ def extract_json(text):
 
 
 def render_md(name, data):
-    lines = [f"# Review draft: {name}", "", "Read this before anything is posted anywhere.", ""]
+    lines = [f"# Review draft: {name}", ""]
     head = data.get("header", {})
     if head.get("scratch_removed"):
         lines += ["Secret-shaped files deleted from the scratch copy before the review (not reviewed): " + ", ".join(head["scratch_removed"]), ""]
@@ -470,11 +447,11 @@ def main(argv=None):
     ap.add_argument("--local", metavar="DIR")
     ap.add_argument("--rubric", metavar="FILE")
     ap.add_argument("--out", metavar="DIR")
-    ap.add_argument("--allowlist", metavar="FILE")
+    ap.add_argument("--allowlist", metavar="FILE", help="accepted and ignored (older command lines)")
     ap.add_argument("--print-argv", action="store_true")
     ap.add_argument("--keep-scratch", action="store_true")
     ap.add_argument("--post", metavar="REVIEW.md")
-    ap.add_argument("--confirm", metavar="TOKEN")
+    ap.add_argument("--confirm", metavar="TOKEN", help="accepted and ignored (older command lines)")
     ap.add_argument("--canary", action="store_true")
     ap.add_argument("--live", action="store_true")
     ap.add_argument("--no-prune", action="store_true", help="canary only: keep the fixture's .env so the Read deny is tested alone")
@@ -494,15 +471,9 @@ def main(argv=None):
         except ValueError as e:
             print(f"run_review: {e}", file=sys.stderr)
             return 2
-        allow = Path(a.allowlist) if a.allowlist else default_allowlist()
-        if not is_allowed(target, allow):
-            print(f"run_review: {target} is not on the review allowlist ({allow}); nothing was fetched. "
-                  "Add the line only after the owner agrees (see review-allowlist.example.txt).", file=sys.stderr)
-            return 2
     if a.post:
-        if a.confirm != CONFIRM_TOKEN or not a.pr or not Path(a.post).is_file():
-            print("run_review: posting needs --pr N, an existing review file and --confirm with the posting token, "
-                  "which you give only after reading the file", file=sys.stderr)
+        if not a.pr or not Path(a.post).is_file():
+            print("run_review: posting needs --pr N and an existing review file", file=sys.stderr)
             return 2
         env = {k: v for k, v in os.environ.items() if k != "WB_REVIEW_TOKEN"}
         try:

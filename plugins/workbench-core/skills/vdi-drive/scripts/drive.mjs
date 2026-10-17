@@ -22,7 +22,7 @@ import { readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { launch, attach, viewport, assertAscii, closeBrowser, portUp } from './lib.mjs';   // assertAscii: self-test
 import { execFileSync } from 'node:child_process';
-import { authNotePath, shotPath, SHOT_DIR, allowedExtraKeys, assertKeyAllowed, assertTypeAllowed } from './guardrails.mjs';
+import { authNotePath, shotPath, SHOT_DIR, allowedExtraKeys, assertKeyAllowed, assertTypeAllowed } from './limits.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.VDI_PORT ?? 9222);
