@@ -1,14 +1,15 @@
 """Tests for the knowledge seed pack: the digests every new and existing knowledge base receives under _shared/digests/,
 the questions that prove they are findable, and the installer path that adds them to an existing knowledge base.
 
-  Shape      the ten notes exist with digest frontmatter, and the marker lint passes: a body line holding a number of two
+  Shape      the seed notes exist with digest frontmatter, and the marker lint passes: a body line holding a number of two
              or more digits carries an [S<n>] or [M<n>] marker, every [S<n>] resolves to a Sources row with a link and a
              fetch date, every [M<n>] to a Measurements row with n= and a tier. A negative control proves the lint
              fails. No subprocess and no index: the doctor's field list runs this class.
   Retrieval  every question in every seed_questions*.json finds its note in the KB search top 5 (throwaway template copy).
-  Find       the same questions through find's keyword mode, top 3 (scratch index, no model download).
-  Install    bootstrap/install.py --apply into a knowledge base that predates the pack: the ten notes are added and an
-             edited digest stays byte for byte.
+  Find       the same questions through find's keyword mode, top 3 (scratch index, no model download), and the explainer
+             PDF beside its digest is indexed and found by a question only it answers.
+  Install    bootstrap/install.py --apply into a knowledge base that predates the pack: the seed notes and the two PDFs
+             are added and an edited digest stays byte for byte.
 Run: python -m unittest plugins/workbench-kb/tests/test_seed_pack.py -v
 """
 import os
@@ -32,7 +33,8 @@ SCRIPTS = HERE.parent / "scripts"
 FIND = REPO / "plugins" / "workbench-core" / "skills" / "find" / "scripts" / "doc_index.py"
 SEED = ("models-and-tokens", "knowledge-layer", "retrieval-eval-method", "reports-and-pdfs", "internal-assistant",
         "enterprise-rag-architecture", "enterprise-rag-retrieval", "enterprise-rag-ingestion", "enterprise-rag-evaluation",
-        "enterprise-rag-failure-modes")
+        "enterprise-rag-failure-modes", "ponytail-measurements", "workbench-explainer")
+PDFS = ("workbench-explainer.pdf", "workbench-poster.pdf")   # shipped beside their digest; find indexes them, kb_search does not
 FRONT = re.compile(r"\A---\ntitle: Digest, [^\n]+\ndomain: _shared\nstatus: active\n---\n")
 NUMBER = re.compile(r"(?<![A-Za-z_\d])\d{2,}")          # the publish check's P5 rule (tools/test_docs.py)
 LIST_ITEM = re.compile(r"^\s*\d+\.\s")                    # an ordered-list item number is structure, like a heading's
@@ -113,7 +115,7 @@ status: active
 
 
 class Shape(unittest.TestCase):
-    def test_the_ten_notes_exist_with_digest_frontmatter_and_body(self):
+    def test_the_seed_notes_and_pdfs_exist_with_digest_frontmatter_and_body(self):
         for name in SEED:
             with self.subTest(note=name):
                 p = DIGESTS / f"{name}.md"
@@ -121,6 +123,11 @@ class Shape(unittest.TestCase):
                 text = p.read_text(encoding="utf-8")
                 self.assertRegex(text, FRONT)
                 self.assertGreater(len(text), 1500, "a seed note carries real content")
+        for name in PDFS:
+            with self.subTest(pdf=name):
+                p = DIGESTS / name
+                self.assertTrue(p.is_file(), f"{p} is missing")
+                self.assertTrue(p.read_bytes().startswith(b"%PDF-"), name)
 
     def test_every_number_carries_a_marker_and_every_marker_resolves(self):
         for name in SEED:
@@ -208,6 +215,27 @@ class Find(TemplateCopy):
                 top = [Path(h["path"]).as_posix() for h in json.loads(r.stdout)["hits"]]
                 self.assertIn(expect, top)
 
+    def test_the_explainer_pdf_is_indexed_and_answers_a_question_only_it_covers(self):
+        # PDF text needs the knowledge venv (pdfminer), as in the find suite: run_suites passes WB_KNOWLEDGE_PYTHON
+        py = os.environ.get("WB_KNOWLEDGE_PYTHON") or sys.executable
+        env = dict(self.env, WB_FIND_LAZY="0", WB_KNOWLEDGE_REEXEC="1", HF_HUB_OFFLINE="1")
+        db = self.tmp / "find-pdf.sqlite"
+
+        def cli(*a):
+            r = subprocess.run([py, str(FIND), "--db", str(db), *a], env=env, capture_output=True, text=True,
+                               encoding="utf-8", timeout=600)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            return json.loads(r.stdout) if "--json" in a else r
+        cli("add-root", str(self.kb), "--label", "kb")
+        cli("refresh", "--root", "kb", "--embed", "off")
+        problems = [p for p in cli("report", "--json").get("problems") or [] if p.get("ref", "").endswith(".pdf")]
+        if problems and not REQUIRE and all("not installed" in p.get("error", "") for p in problems):
+            self.skipTest("PDF text needs the knowledge venv: set WB_KNOWLEDGE_PYTHON")
+        self.assertEqual(problems, [])
+        hits = cli("search", "why is memory Markdown and not a vector store", "--mode", "keyword", "--limit", "3",
+                   "--root", "kb", "--json")["hits"]
+        self.assertIn("_shared/digests/workbench-explainer.pdf", [Path(h["path"]).as_posix() for h in hits])
+
 
 class Install(unittest.TestCase):
     """An existing knowledge base made from an earlier template (no seed notes, testing.md edited by its owner)."""
@@ -217,8 +245,8 @@ class Install(unittest.TestCase):
         self.addCleanup(shutil.rmtree, t, True)
         kb, home = t / "kb", t / "home"
         shutil.copytree(TEMPLATE, kb)
-        for name in SEED:
-            (kb / "_shared" / "digests" / f"{name}.md").unlink()
+        for name in [f"{n}.md" for n in SEED] + list(PDFS):
+            (kb / "_shared" / "digests" / name).unlink()
         edited = kb / "_shared" / "digests" / "testing.md"
         edited.write_bytes(edited.read_bytes() + b"\n- A line the owner added.\n")
         before = edited.read_bytes()
@@ -232,11 +260,11 @@ class Install(unittest.TestCase):
                             "corporate", "--kb-root", str(kb)], capture_output=True, text=True, encoding="utf-8",
                            env=env, timeout=600)
         self.assertEqual(r.returncode, 0, r.stdout[-2000:] + r.stderr[-1000:])
-        for name in SEED:
+        for name in [f"{n}.md" for n in SEED] + list(PDFS):
             with self.subTest(note=name):
-                got = kb / "_shared" / "digests" / f"{name}.md"
+                got = kb / "_shared" / "digests" / name
                 self.assertTrue(got.is_file(), f"{name} was not added")
-                self.assertEqual(got.read_bytes(), (DIGESTS / f"{name}.md").read_bytes())
+                self.assertEqual(got.read_bytes(), (DIGESTS / name).read_bytes())
         self.assertEqual(edited.read_bytes(), before, "an edited digest is never overwritten")
 
 

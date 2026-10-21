@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.3.6
+
+The knowledge base now explains the kit itself, and it carries the newest ponytail measurements.
+
+### Upgrade notes (from 0.3.5)
+- **Restart every Claude Code window before you type go.**
+- Repository private or no access from this machine: carry the release zip over and tell Claude Code "update the kit from
+  `<file>`, SHA-256 `<hash>`" (`kit_update.py update --archive`). Nothing changes when the hash does not match.
+- The new notes and PDFs are added to an existing knowledge base on update. The two digests that gained a link
+  (models and tokens, knowledge layer) are refreshed only if you never edited them.
+
+### Added
+- **The explainer and the poster in the knowledge base** (`_shared/digests/`): `workbench-explainer.pdf` (twelve chapters:
+  how the kit is put together, install and update, the rules, the skills, the agent team, the knowledge layer and RAG,
+  ponytail, token savings, the design ideas, safety and limits, a glossary, and lists of the guides and tools) and
+  `workbench-poster.pdf` (the whole kit on one landscape page). `find` indexes both, so it answers questions about the kit
+  with page citations. A companion digest, `workbench-explainer.md`, maps every chapter to the kit file that owns its facts.
+- **`ponytail-measurements` digest**: what the ponytail coding rules save in single answers and in real agent sessions,
+  with the method and intervals, and the newest finding: the way the rules arrive decides the saving. Rules present from
+  the start (the build personas) saved far more than the same rules added by a hook at the first code write (the main
+  session); a codebase map recovers part of the gap; `ultra` ties `full`; an output style buys nothing. Linked from the
+  models-and-tokens and knowledge-layer digests, the KB index and `docs/token-diet.md`.
+- **Seed questions** for both digests (KB search and `find`), and a `find` check that the explainer PDF is indexed.
+- **Bundled 0.3.5 release manifest** (`bootstrap/release-manifests/0.3.5.json`), the fallback for telling local changes
+  from the release when an install's own record is missing.
+
 ## 0.3.5
 
 The guard is gone, the knowledge base ships with real knowledge, and save, search and updates got the fixes the field asked for.

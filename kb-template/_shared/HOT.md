@@ -20,6 +20,8 @@ Keep this file under its byte cap (`kb_audit.py --caps-json`). Over the cap, dem
   [[_shared/digests/enterprise-rag-evaluation]], [[_shared/digests/enterprise-rag-failure-modes]].
 - Reports and PDFs: [[_shared/digests/reports-and-pdfs]]. A grounded, role-aware help assistant:
   [[_shared/digests/internal-assistant]].
+- How the kit works, for you or to explain it to someone: [[_shared/digests/workbench-explainer]] (beside it, the
+  explainer and poster PDFs). What ponytail saves and how to deliver it: [[_shared/digests/ponytail-measurements]].
 
 ## Decision heuristics
 
@@ -40,7 +42,9 @@ Keep this file under its byte cap (`kb_audit.py --caps-json`). Over the cap, dem
 - lists [[_shared/digests/mcp]]
 - lists [[_shared/digests/models-and-tokens]]
 - lists [[_shared/digests/orchestration]]
+- lists [[_shared/digests/ponytail-measurements]]
 - lists [[_shared/digests/reports-and-pdfs]]
 - lists [[_shared/digests/retrieval-eval-method]]
 - lists [[_shared/digests/testing]]
 - lists [[_shared/digests/windows-shell]]
+- lists [[_shared/digests/workbench-explainer]]

@@ -62,6 +62,11 @@ What the small run showed (direction only):
 - **"Be brief." alone** saved a little on single answers, but some explanations missed a point and one runbook it
   wrote did not work. Fine for code-only sessions.
 - **caveman** left explanations too terse for a junior reader.
+- **How the rules arrive decides most of the saving.** Rules present from the start of a session, as in the build
+  personas, saved far more than the same rules added by a hook at the first code write, as in the main session. A
+  hook recovers part of that gap when it also injects a map of the codebase. Hand build work to the build personas to
+  get the strong form. The figures, with method and intervals, are in the knowledge base digest
+  `_shared/digests/ponytail-measurements.md`; the whole kit is explained in `_shared/digests/workbench-explainer.pdf`.
 
 ## 4. Do not install
 

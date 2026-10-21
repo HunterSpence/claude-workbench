@@ -29,6 +29,8 @@ Every domain folder holds a HOT.md (current facts, byte-capped), an optional his
   [[_shared/digests/enterprise-rag-architecture]], [[_shared/digests/enterprise-rag-retrieval]],
   [[_shared/digests/enterprise-rag-ingestion]], [[_shared/digests/enterprise-rag-evaluation]] and
   [[_shared/digests/enterprise-rag-failure-modes]]
+- How the kit itself works: [[_shared/digests/workbench-explainer]] (with the explainer and poster PDFs beside it) and
+  [[_shared/digests/ponytail-measurements]] (what the coding rules save)
 - [[ops/model-routing-ledger]]: an append-only record of routing picks that surprised you
 
 ## Looking something up

@@ -1,0 +1,11 @@
+{
+ "version": 1,
+ "questions": [
+  {"q": "how much does ponytail save in agent build sessions", "expect": "_shared/digests/ponytail-measurements.md"},
+  {"q": "ponytail rules in the system prompt versus a hook on the first code write", "expect": "_shared/digests/ponytail-measurements.md"},
+  {"q": "does an output style holding the ponytail rules save anything", "expect": "_shared/digests/ponytail-measurements.md"},
+  {"q": "where is the explainer PDF that describes how the whole workbench works", "expect": "_shared/digests/workbench-explainer.md"},
+  {"q": "chapter map of the workbench explainer and the poster", "expect": "_shared/digests/workbench-explainer.md"},
+  {"q": "how do I explain this kit to a colleague or a manager", "expect": "_shared/digests/workbench-explainer.md"}
+ ]
+}

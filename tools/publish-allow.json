@@ -56,6 +56,22 @@
     "P5"
    ],
    "reason": "public citations stay exact; own-run [M] figures are blurred; test_seed_pack enforces markers and rejects exact own-run figures"
+  },
+  {
+   "glob": "kb-template/_shared/digests/ponytail-measurements.md",
+   "rules": [
+    "P4",
+    "P5"
+   ],
+   "reason": "public citations stay exact; own-run [M] figures are two-decimal ratios or whole percentages; test_seed_pack enforces markers and rejects exact own-run figures"
+  },
+  {
+   "glob": "kb-template/_shared/digests/workbench-explainer.md",
+   "rules": [
+    "P4",
+    "P5"
+   ],
+   "reason": "public citations stay exact; own-run [M] figures are two-decimal ratios or whole percentages; test_seed_pack enforces markers and rejects exact own-run figures"
   }
  ]
 }

@@ -16,3 +16,4 @@ plugins/workbench-core/skills/app-navigator/templates/** text eol=lf
 *.docx binary
 *.pptx binary
 *.xlsx binary
+*.pdf binary

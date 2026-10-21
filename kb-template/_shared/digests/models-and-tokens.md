@@ -88,6 +88,8 @@ Claude configuration folder).
 - **Skill listing:** every skill name is always listed, but past the listing's budget of 1% of the context window the
   descriptions of the least-used skills are dropped first [S6], and each entry is cut at 1,536 characters [S6]. Raise
   the budget with `skillListingBudgetFraction`; the kit's numbers are in `docs/token-diet.md`.
+- **Ponytail for build work:** what the coding rules save in single answers and in agent sessions, and why the way they
+  arrive decides it, is in [[_shared/digests/ponytail-measurements]].
 - **Context size is the big lever:** `/clear` between unrelated tasks, `/compact` with what to keep, exploration in a
   subagent, a short CLAUDE.md. Measure with `/usage` and `/context` before and after a change.
 

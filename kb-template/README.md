@@ -13,7 +13,7 @@ The bootstrap copies this folder to your KB root (default `~/claude-kb`) once an
 | `<domain>/history.md` | Session records; old ones roll into `history/YYYY-MM.md` | the save skill and the driver |
 | `<domain>/<topic>.md` | Reusable knowledge (runbooks, configs, patterns), with frontmatter | the save skill; the driver stamps `updated:` |
 | `daily/YYYY-MM-DD.md` | One line per save | the driver |
-| `_shared/digests/*.md` | On-demand topic digests: Windows and shell, git and CI, Claude Code, MCP, testing, orchestration, models and tokens, the knowledge layer, retrieval evaluation, reports and PDFs, the internal assistant, and enterprise RAG (five notes) | shipped with the kit |
+| `_shared/digests/*.md` | On-demand topic digests: Windows and shell, git and CI, Claude Code, MCP, testing, orchestration, models and tokens, the knowledge layer, retrieval evaluation, reports and PDFs, the internal assistant, enterprise RAG (five notes), ponytail measurements, and how the kit works (with the explainer and poster PDFs beside it) | shipped with the kit |
 | `_shared/bug-cards.md`, `_shared/bug-detectors.json` | Recurring failures with their fixes, and the error patterns that point to them | shipped with the kit |
 | `_shared/facts.json` | The fact registry: facts that must have one home (see Pinned facts) | you; checked by `kb_health.py facts` |
 | `inbox/` | Drops awaiting triage (daily digests, pasted notes); nothing in it is promoted automatically | the ingest skill, you |

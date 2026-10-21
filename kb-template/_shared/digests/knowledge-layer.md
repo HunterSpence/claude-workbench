@@ -7,7 +7,8 @@ status: active
 
 Read this before adding embeddings, a vector store, a reranker or a knowledge graph to anything, and before choosing an
 ingestion or graph tool. Permission-filtered retrieval for many users with different access is a separate topic: the
-`enterprise-rag-*` digests. How to measure a change is in `retrieval-eval-method`.
+`enterprise-rag-*` digests. How to measure a change is in `retrieval-eval-method`. How this kit's own knowledge base,
+link graph and `find` fit together, chapter by chapter: [[_shared/digests/workbench-explainer]].
 
 ## The escalation ladder (stop at the first rung that passes its gate)
 1. **Markdown plus grep and read.** Climb when answers miss across many documents.
