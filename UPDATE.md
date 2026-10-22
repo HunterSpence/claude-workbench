@@ -48,4 +48,7 @@ When the user says "do the model section of UPDATE.md". The same rules apply.
    Keep it only if its SHA-256 is `89e377c937af56f0f7590cc73305e3bd59a4b871fe7c6b7b4d6726d4d0f75719`.
 2. Run the find skill's CLI (`doc_index.py`) the way its SKILL.md says: `model import <the zip>` (it checks every file against the pins in the script; no network), then `embed`.
    If `embed` reports a missing package, stop and report it.
-3. Report the output of `status`, then run find for "what does ponytail save" and say whether search is still keyword-only. The zip can be deleted afterwards.
+3. Run `status`. Success is `mode hybrid` with more than 0 vectors. A `note:` line saying a huggingface.co download failed is left over from before the import: ignore it.
+4. End with exactly one line, short enough for the user to retype elsewhere:
+   `MODEL download=<ok, or the blocked host> import=<ok, or the error in a few words> mode=<hybrid or keyword> vectors=<number>`
+   The zip can be deleted afterwards.
