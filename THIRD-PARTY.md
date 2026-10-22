@@ -90,7 +90,7 @@ The React widget uses the app's own React (18 or later) and adds no package.
 ## Models
 | Model | Used by | Source | Licence |
 |---|---|---|---|
-| bge-small-en-v1.5 (quantised ONNX export) | `find` meaning-based search | BAAI, exported by Qdrant; downloaded once from huggingface.co, SHA-256 checked against the pin in `find`'s script | MIT |
+| bge-small-en-v1.5 (quantised ONNX export) | `find` meaning-based search | BAAI, exported by Qdrant; downloaded once from huggingface.co, or imported from `models/find-embedding-model.zip` (its `NOTICE-MODEL.txt` inside), SHA-256 checked against the pin in `find`'s script | MIT |
 
 ## GitHub Actions templates (`templates/github-actions/`, documentation only)
 | Action | Licence | Note |

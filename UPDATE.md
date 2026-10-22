@@ -41,3 +41,11 @@ When the user says "check UPDATE.md", work inside a git repo that has code:
 3. Without tools, answer in three lines: is a ruleset called ponytail active, and at which level; the exact comment prefix your instructions give for a shortcut; does your context include a section titled Codebase map?
 
    Expected answers: active, full · `shortcut: <the limit>, <when to upgrade>` · yes.
+
+## Meaning-search model (when huggingface.co is blocked)
+When the user says "do the model section of UPDATE.md". The same rules apply.
+1. Download `https://raw.githubusercontent.com/<owner>/claude-workbench/main/models/find-embedding-model.zip` (about 61 MB) into a temporary folder outside the knowledge base. If that host is blocked, the same file is at `https://github.com/<owner>/claude-workbench/releases/download/v0.3.5/find-embedding-model.zip`.
+   Keep it only if its SHA-256 is `89e377c937af56f0f7590cc73305e3bd59a4b871fe7c6b7b4d6726d4d0f75719`.
+2. Run the find skill's CLI (`doc_index.py`) the way its SKILL.md says: `model import <the zip>` (it checks every file against the pins in the script; no network), then `embed`.
+   If `embed` reports a missing package, stop and report it.
+3. Report the output of `status`, then run find for "what does ponytail save" and say whether search is still keyword-only. The zip can be deleted afterwards.
