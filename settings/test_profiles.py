@@ -17,7 +17,7 @@ HERE = Path(__file__).resolve().parent
 KIT = HERE.parent
 PROFILES = ("corporate", "permissive")
 POLICY = KIT / "instructions" / "rules" / "model-policy.md"
-POLICY_MAX_BYTES = 3450          # I9 budget for the always-loaded model policy (LF bytes)
+POLICY_MAX_BYTES = 4300          # I9 budget for the always-loaded model policy (LF bytes); was 3450 before the research-tier and Fable 5.2 lines
 
 # The command patterns of the minimal ask set (I5 a): each is written as Bash(...) and as PowerShell(...).
 COMMAND_PATTERNS = [
@@ -149,7 +149,12 @@ class ModelTuning(unittest.TestCase):
 
     def test_fable_effort_is_high_in_both_profiles(self):
         for name in PROFILES:
-            self.assertEqual(profile(name)["modelSettings"]["claude-fable-5-1"], {"effortLevel": "high"}, name)
+            for mid in ("claude-fable-5-1", "claude-fable-5-2"):
+                self.assertEqual(profile(name)["modelSettings"][mid], {"effortLevel": "high"}, f"{name} {mid}")
+
+    def test_only_permissive_pins_the_fable_alias_and_to_fable_5_2(self):
+        self.assertEqual(profile("permissive")["env"].get("ANTHROPIC_DEFAULT_FABLE_MODEL"), "claude-fable-5-2")
+        self.assertNotIn("ANTHROPIC_DEFAULT_FABLE_MODEL", profile("corporate")["env"], "corporate keeps the documented default")
 
     def test_the_merge_keeps_a_users_own_model_and_subagent_model(self):
         install = load_install()
@@ -253,7 +258,9 @@ class RoutingTable(unittest.TestCase):
     def test_policy_keeps_the_pointers_and_the_fable_rule(self):
         text = POLICY.read_text(encoding="utf-8")
         for want in ("Unsure? One row up", "step down that row's chain", "docs/token-diet.md", "_shared/digests/models-and-tokens",
-                     "Fable 5.1 only when the user names it", "offer it, never route to it"):
+                     "Fable 5.1 only when the user names it", "offer it, never route to it",
+                     "- Fable 5.2 lanes (Agent `model: fable` with that `effort`), only on a seat that includes Fable",
+                     "- Never start a headless `claude -p` or SDK run on a Fable model without the user's go"):
             self.assertIn(want, text, want)
 
 
@@ -280,7 +287,7 @@ class Docs(unittest.TestCase):
 
     def test_the_fable_level_and_claude_code_defaults_are_documented(self):
         r = row("Both profiles", "modelSettings")
-        self.assertRegex(r, r"Fable 5\.1 `high`")
+        self.assertRegex(r, r"Fable 5\.1 and Fable 5\.2 `high`")
         self.assertIn("(E38, fetched Oct 2026)", r)
 
     def test_deny_row_is_gone_and_the_ask_row_points_at_the_rules_section(self):
