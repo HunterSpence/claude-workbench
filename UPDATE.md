@@ -52,3 +52,48 @@ When the user says "do the model section of UPDATE.md". The same rules apply.
 4. End with exactly one line, short enough for the user to retype elsewhere:
    `MODEL download=<ok, or the blocked host> import=<ok, or the error in a few words> mode=<hybrid or keyword> vectors=<number>`
    The zip can be deleted afterwards.
+
+## Research tiers and Fable 5.2 notes (2026-11-10)
+When the user says "do the 2026-11-10 section of UPDATE.md". The Rules at the top apply: no updater, change only what is
+listed, and stop and report on a failure, a hash mismatch or a company-policy block. This adds one knowledge-base note,
+one skill, one agent and one rule line.
+1. **Download three files** into a temporary folder outside the knowledge base, from
+   `https://raw.githubusercontent.com/<owner>/claude-workbench/7c75ee8b64fd29a37774dd983ef79c0c24be4f38/<path in the repo>`,
+   where `<owner>/claude-workbench` is the GitHub repository you read this file from. If that URL answers 404, use `main`
+   in place of the long commit id; the SHA-256 still decides. Keep a file only if its SHA-256 matches, then copy it to
+   its place (create a missing folder). If a file with that name is already there with different bytes, don't
+   overwrite it; report it. `kb_root` is in `%USERPROFILE%\.claude\workbench\config.json`.
+
+   | Path in the repo | Copy it to | SHA-256 |
+   |---|---|---|
+   | `kb-template/_shared/digests/fable-5-2-routing.md` | `<kb_root>\_shared\digests\fable-5-2-routing.md` | `cb6a1473f654f2d1964b4dee904e066588d3133f3b7f57d6e90c0acb0281a46c` |
+   | `plugins/workbench-core/skills/research/SKILL.md` | `%USERPROFILE%\.claude\skills\research\SKILL.md` | `3dd3bfb492edfbe76f29af2bf427534aaa23b8f20fc8fdb234ebbcf607b3ac10` |
+   | `plugins/workbench-core/agents/searcher.md` | `%USERPROFILE%\.claude\agents\searcher.md` | `f3e6c565f410a10c94a75587585f67693723d84b7ca92f89f25b79752b7e7e2c` |
+
+2. **Add one rule line.** In `%USERPROFILE%\.claude\workbench\instructions\rules\model-policy.md`, directly above the
+   line that starts `- Fable 5.1 only when the user names it`, insert this one line, starting at the left margin with
+   `- Web research` (keep the file's line endings):
+   ```
+   - Web research by tier (low, medium, high): the `research` skill; its `searcher` worker runs Sonnet xhigh, Fable 5.2 low only on a seat that includes Fable (KB note `_shared/digests/fable-5-2-routing`).
+   ```
+   If the `- Fable 5.1` line is missing, or a `- Web research by tier` line is already there, change nothing and report it.
+3. **Leave the searcher on Sonnet 5.5 `xhigh`.** On this seat Fable 5.2 may bill usage credits. Tell the user: if `/model`
+   shows the Fable 5.2 row without "Requires usage credits" (or an admin confirms the seat includes Fable) and they
+   want Fable searchers, they can say "switch the searcher to Fable"; then change only the two lines that the comment in
+   `searcher.md` names.
+4. Run the find skill's `refresh --all`, so the new note is searchable.
+5. **Report** what you changed, then tell the user to restart every Claude Code window.
+
+A later kit release ships the skill and the agent inside the workbench-core plugin. When this machine gets that
+release, delete the two copies added in step 1 under `%USERPROFILE%\.claude\skills\research` and
+`%USERPROFILE%\.claude\agents\searcher.md`, so each exists once.
+
+### Check after the restart
+When the user says "check the 2026-11-10 section of UPDATE.md":
+1. Run find for "which effort should Fable 5.2 run at for web search" and show the citations; `fable-5-2-routing.md`
+   should be in the top three.
+2. Confirm that a skill named `research` is in your skill list and an agent named `searcher` is available.
+3. Spawn `searcher` once with: "Which Claude Code version first supports Claude Fable 5.2? One fact, one source." Its
+   reply must start with `Model: claude-sonnet-5-5` (or `claude-fable-5-2` if the user switched it) and cite a URL.
+4. End with exactly one line, short enough for the user to retype elsewhere:
+   `RESEARCH digest=<ok or missing> find=<rank or miss> skill=<ok or missing> searcher=<model id or the error> rule=<ok or skipped>`
