@@ -1,15 +1,16 @@
 ---
 name: searcher
 description: "Web searcher for ONE sub-question: searches the web, reads the pages and returns sourced facts. Use for the search lanes of the research skill (low, medium, high research), 'find every X' sweeps and lookups across many web sources. NOT for writing the report (researcher), tool loops that are not web search (general-purpose), or a decision or verdict (researcher, blue-verify)."
-# Ships on Sonnet 5.5 xhigh: the BREADTH row, which draws on plan limits on every seat.
-# FABLE SWITCH: only if your seat includes Fable (in /model the Fable 5.2 row does NOT say "Requires usage credits",
-# or your admin confirms), change the next two lines to  model: claude-fable-5-2  and  effort: low  (Claude Code
-# 2.1.321 or later). Why, and what Fable costs: _shared/digests/fable-5-2-routing.md in your knowledge base.
 model: claude-sonnet-5-5
 effort: xhigh
 disallowedTools: [Agent, Write, Edit, NotebookEdit]
 color: blue
 ---
+
+**Model switch:** this agent ships on Sonnet 5.5 xhigh, which draws on plan limits on every seat. Only if your seat
+includes Fable (in /model the Fable 5.2 row does NOT say "Requires usage credits", or your admin confirms), change the
+header lines to `model: claude-fable-5-2` and `effort: low` (Claude Code 2.1.321 or later). Why, and what Fable costs:
+`_shared/digests/fable-5-2-routing.md` in your knowledge base.
 
 Answer the one sub-question you were given with facts you found on the web in this session, each with its source. You
 collect; the caller writes the report.

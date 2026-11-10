@@ -53,7 +53,7 @@ read off the published charts, so treat a ratio as about five percent either way
   or Opus 5 [S1] [S8]. The `security-auditor` stays on Opus, and a Fable `searcher` never takes those topics.
 - **Medical, legal, tax.** No published Fable 5.2 advantage on the health or legal benchmarks so far; the kit's
   REGULATED row (Opus 5.5 `xhigh` plus `blue-verify`) stands.
-- **The Sonnet rows** (`implementer`, general-purpose, `red-team`, `green-team`): about four times the price per token
+- **The Sonnet rows** (`implementer`, general-purpose, `red-team`, `green-team`): four times the price for input and output, twice for cache reads
   for no published gain on those task shapes [S6].
 - **An orchestrator in Opus's place:** +0.2 F1 for 19% more cost in Anthropic's own run [S3].
 
@@ -85,8 +85,8 @@ read off the published charts, so treat a ratio as about five percent either way
 ## Plans and seats: plan limits or usage credits
 - Max and Ultra plans and premium seats on Team and seat-based Enterprise plans include Fable up to half of the weekly
   usage limit, and Anthropic says Fable uses those limits faster than other models. Past that, you continue on usage
-  credits or switch models. Pro plans and standard seats run Fable on usage credits from the start; usage-based
-  Enterprise plans pay API rates; on Enterprise, an admin must turn Fable 5.2 on first. Source: Claude Help Center,
+  credits or switch models. Pro plans and standard seats run Fable on usage credits from the start (a launch-week promotion also included Fable for Pro and Team standard seats; check `/model` again after it ends); usage-based
+  Enterprise plans pay API rates; on Enterprise, Fable 5.2 stays off until an admin enables it; a week after launch it joins every role that already has a Fable model unless an admin opts out. Source: Claude Help Center,
   "Claude Fable models on your plan".
 - **Check your own seat:** in `/model`, a Fable row marked "Requires usage credits" means Fable bills usage credits,
   not your plan's limits [S8]. `/usage` shows what you have used. How fast Fable drains a seat's limit is not published
@@ -94,7 +94,7 @@ read off the published charts, so treat a ratio as about five percent either way
 - **Headless runs never ask:** with `claude -p`, or an SDK application that shows no prompt, a Fable request that would
   bill usage credits is billed without asking [S8]. Keep headless and scheduled work off Fable unless the seat includes
   it.
-- **Name the model id.** The kit's settings profiles pin the `fable` alias to Fable 5.1 through
+- **Name the model id.** The kit's permissive settings profile pins the `fable` alias to Fable 5.1 through
   `ANTHROPIC_DEFAULT_FABLE_MODEL`; use `claude-fable-5-2`, which needs Claude Code 2.1.321 or later [S8]. An
   organisation's model allow-list can exclude it.
 
