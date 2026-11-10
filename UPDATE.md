@@ -100,3 +100,54 @@ When the user says "check the 2026-11-10 section of UPDATE.md":
    reply must start with `Model: claude-sonnet-5-5` (or `claude-fable-5-2` if the user switched it) and cite a URL.
 4. End with exactly one line, short enough for the user to retype elsewhere:
    `RESEARCH digest=<ok or missing> find=<rank or miss> skill=<ok or missing> searcher=<model id or the error> rule=<ok or skipped>`
+
+## 2026-11-10 (part 2): Fable effort, Fable lanes, no headless Fable
+When the user says "do the 2026-11-10 part 2 section of UPDATE.md". The Rules at the top apply: no updater, change only
+what is listed, and stop and report on a failure or a company-policy block. This sets one effort level, may repoint one
+model alias and adds two rule lines. Running it again changes nothing the first run did.
+0. **Part 1 first.** Open `%USERPROFILE%\.claude\workbench\instructions\rules\model-policy.md`. If no line in it starts
+   with `- Web research by tier`, the "Research tiers and Fable 5.2 notes (2026-11-10)" section above has not run: do
+   that section now (the user restarts once, at the end of this one), then come back here. If it stops on a failure or
+   skips its rule line, report that and go on; step 3 says where the lines go then.
+1. **Back up and report.** Copy `%USERPROFILE%\.claude\settings.json` to `settings.json.bak-2026-11-10-part2` and that
+   `model-policy.md` to `model-policy.md.bak-2026-11-10-part2`, each beside its file. If a backup with that name is
+   already there, keep it and copy nothing (it holds the state before the first run). Report `claude --version`.
+2. **Two settings.** In `%USERPROFILE%\.claude\settings.json`, edit the text in place (keep its formatting and line
+   endings; never rewrite the whole file) and change nothing else:
+   - `env.ANTHROPIC_DEFAULT_FABLE_MODEL`: if it is exactly `claude-fable-5-1`, change it to `claude-fable-5-2`, but
+     only when `claude --version` is 2.1.321 or later (Fable 5.2 needs it). On an older version leave it, and tell the
+     user to run `claude update` (or ask IT if the version is pinned), then this section again. If the key is absent,
+     leave it absent; if it holds any other value, leave it and report it.
+   - `modelSettings."claude-fable-5-2".effortLevel`: set it to `high` (Claude Code's own default for Fable 5.2 is
+     `medium`). If `modelSettings` exists, add or change only that entry and keep any other key the entry has; if
+     `modelSettings` is absent, add `"modelSettings": {"claude-fable-5-2": {"effortLevel": "high"}}` at the top level.
+
+   Then read the file back with a JSON parser; if it does not parse, restore the backup and stop. A managed
+   (organisation) setting for the same key wins: report it, never work around it.
+3. **Two rule lines.** In that `model-policy.md`, directly below the line that starts `- Web research by tier` (if that
+   line is missing, directly above the line that starts `- Fable 5.1 only when the user names it`), insert these two
+   lines, each starting at the left margin with `- ` (keep the file's line endings):
+   ```
+   - Fable 5.2 lanes (Agent `model: fable` with that `effort`), only on a seat that includes Fable (`/model` shows its row without "Requires usage credits", or an admin confirms): medium for hard closed-book questions, 3+ per spawn; low for chart or figure reading and fact cross-checks; high for `flagship` after an Opus build failed. Never security, biology or medical; legal, tax and medical stay on Opus xhigh citing primary sources.
+   - Never start a headless `claude -p` or SDK run on a Fable model without the user's go for that run: where Fable would bill usage credits (a seat without Fable, or past its Fable cap), a headless run bills them without asking.
+   ```
+   A line whose start (`- Fable 5.2 lanes` or `- Never start a headless`) is already in the file is skipped, not
+   doubled; report it. If neither anchor line is there, change nothing and report it.
+4. **Report** what you changed and what you skipped (and why), then tell the user to restart every Claude Code window.
+
+On a seat where `/model` marks Fable 5.2 "Requires usage credits", the first line keeps the lanes off by its own wording.
+
+To undo: copy each `.bak-2026-11-10-part2` file back over the file beside it (this undoes part 2 only, and also drops
+any setting changed since), or reverse by hand the edits your report lists.
+
+### Check after the restart
+When the user says "check the 2026-11-10 part 2 section of UPDATE.md":
+1. Read `%USERPROFILE%\.claude\settings.json` and report `env.ANTHROPIC_DEFAULT_FABLE_MODEL` (its value, or absent) and
+   `modelSettings."claude-fable-5-2".effortLevel`.
+2. Without tools, answer from your instructions in one line: the effort of the Fable 5.2 lane for chart reading, and
+   whether you may start `claude -p` on a Fable model without the user's go. Expected: `low` · no.
+3. Run `claude --version`.
+4. End with exactly one line, short enough for the user to retype elsewhere:
+   `FABLE2 settings=<ok or skipped:reason> lanes=<ok or skipped> headless=<ok or skipped> cc=<version>`
+   `settings=ok` means the effort is `high` and the alias is `claude-fable-5-2` or absent; `lanes=ok` and
+   `headless=ok` mean that line is in `model-policy.md` and your step 2 answer matched.
