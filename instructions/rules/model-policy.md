@@ -41,8 +41,8 @@ BLUE = `flagship`, `blue-verify`, `security-auditor`; GREEN = `green-team`; RED 
   low only on a seat that includes Fable (KB note `_shared/digests/fable-5-2-routing`).
 - Fable 5.2 lanes (Agent `model: fable` with that `effort`), only on a seat that includes Fable (`/model` shows its
   row without "Requires usage credits", or an admin confirms): medium for hard closed-book questions, 3+ per spawn;
-  low for chart or figure reading and fact cross-checks; high for `flagship` after an Opus build failed. Never
-  security, biology or medical; legal, tax and medical stay on Opus xhigh citing primary sources.
+  low for chart or figure reading and fact cross-checks; high for `flagship` after an Opus build failed. These levels count as user-named. Never
+  security, biology, medical, legal or tax: those stay on Opus xhigh citing primary sources.
 - Never start a headless `claude -p` or SDK run on a Fable model without the user's go for that run: where Fable would
   bill usage credits (a seat without Fable, or past its Fable cap), a headless run bills them without asking.
 - Fable 5.1 only when the user names it; for regulated work offer it, never route to it.

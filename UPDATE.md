@@ -117,25 +117,28 @@ model alias and adds two rule lines. Running it again changes nothing the first 
    - `env.ANTHROPIC_DEFAULT_FABLE_MODEL`: if it is exactly `claude-fable-5-1`, change it to `claude-fable-5-2`, but
      only when `claude --version` is 2.1.321 or later (Fable 5.2 needs it). On an older version leave it, and tell the
      user to run `claude update` (or ask IT if the version is pinned), then this section again. If the key is absent,
-     leave it absent; if it holds any other value, leave it and report it.
+     leave it absent; if it is already `claude-fable-5-2`, leave it; if it holds any other value, leave it and report it.
    - `modelSettings."claude-fable-5-2".effortLevel`: set it to `high` (Claude Code's own default for Fable 5.2 is
      `medium`). If `modelSettings` exists, add or change only that entry and keep any other key the entry has; if
      `modelSettings` is absent, add `"modelSettings": {"claude-fable-5-2": {"effortLevel": "high"}}` at the top level.
 
    Then read the file back with a JSON parser; if it does not parse, restore the backup and stop. A managed
    (organisation) setting for the same key wins: report it, never work around it.
-3. **Two rule lines.** In that `model-policy.md`, directly below the line that starts `- Web research by tier` (if that
+3. **Two rule lines.** Insert the `- Fable 5.2 lanes` line only if `claude --version` is 2.1.321 or later,
+   `env.ANTHROPIC_DEFAULT_FABLE_MODEL` is now `claude-fable-5-2` or absent, `ANTHROPIC_BASE_URL` is unset, and the user
+   answers yes to "Does `/model` show Fable 5.2 without 'Requires usage credits', or has an admin confirmed your seat
+   includes Fable?" Otherwise insert only the headless line and report `lanes skipped:<reason>`. In that `model-policy.md`, directly below the line that starts `- Web research by tier` (if that
    line is missing, directly above the line that starts `- Fable 5.1 only when the user names it`), insert these two
    lines, each starting at the left margin with `- ` (keep the file's line endings):
    ```
-   - Fable 5.2 lanes (Agent `model: fable` with that `effort`), only on a seat that includes Fable (`/model` shows its row without "Requires usage credits", or an admin confirms): medium for hard closed-book questions, 3+ per spawn; low for chart or figure reading and fact cross-checks; high for `flagship` after an Opus build failed. Never security, biology or medical; legal, tax and medical stay on Opus xhigh citing primary sources.
+   - Fable 5.2 lanes (Agent `model: fable` with that `effort`), only on a seat that includes Fable (`/model` shows its row without "Requires usage credits", or an admin confirms): medium for hard closed-book questions, 3+ per spawn; low for chart or figure reading and fact cross-checks; high for `flagship` after an Opus build failed. These levels count as user-named. Never security, biology, medical, legal or tax: those stay on Opus xhigh citing primary sources.
    - Never start a headless `claude -p` or SDK run on a Fable model without the user's go for that run: where Fable would bill usage credits (a seat without Fable, or past its Fable cap), a headless run bills them without asking.
    ```
    A line whose start (`- Fable 5.2 lanes` or `- Never start a headless`) is already in the file is skipped, not
    doubled; report it. If neither anchor line is there, change nothing and report it.
 4. **Report** what you changed and what you skipped (and why), then tell the user to restart every Claude Code window.
 
-On a seat where `/model` marks Fable 5.2 "Requires usage credits", the first line keeps the lanes off by its own wording.
+On a seat without Fable, step 3 leaves the lanes line out; run this section again once it includes Fable.
 
 To undo: copy each `.bak-2026-11-10-part2` file back over the file beside it (this undoes part 2 only, and also drops
 any setting changed since), or reverse by hand the edits your report lists.
