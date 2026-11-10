@@ -58,7 +58,7 @@ When the user says "do the 2026-11-10 section of UPDATE.md". The Rules at the to
 listed, and stop and report on a failure, a hash mismatch or a company-policy block. This adds one knowledge-base note,
 one skill, one agent and one rule line.
 1. **Download three files** into a temporary folder outside the knowledge base, from
-   `https://raw.githubusercontent.com/<owner>/claude-workbench/7c75ee8b64fd29a37774dd983ef79c0c24be4f38/<path in the repo>`,
+   `https://raw.githubusercontent.com/<owner>/claude-workbench/e7dfc19ce2e57ccb489ec39c508fbf7b7f817679/<path in the repo>`,
    where `<owner>/claude-workbench` is the GitHub repository you read this file from. If that URL answers 404, use `main`
    in place of the long commit id; the SHA-256 still decides. Keep a file only if its SHA-256 matches, then copy it to
    its place (create a missing folder). If a file with that name is already there with different bytes, don't
@@ -66,11 +66,12 @@ one skill, one agent and one rule line.
 
    | Path in the repo | Copy it to | SHA-256 |
    |---|---|---|
-   | `kb-template/_shared/digests/fable-5-2-routing.md` | `<kb_root>\_shared\digests\fable-5-2-routing.md` | `cb6a1473f654f2d1964b4dee904e066588d3133f3b7f57d6e90c0acb0281a46c` |
+   | `kb-template/_shared/digests/fable-5-2-routing.md` | `<kb_root>\_shared\digests\fable-5-2-routing.md` | `8cb7c33fb622b4355c419437ee59c0ead50d18913992f30b0815f6113399629d` |
    | `plugins/workbench-core/skills/research/SKILL.md` | `%USERPROFILE%\.claude\skills\research\SKILL.md` | `3dd3bfb492edfbe76f29af2bf427534aaa23b8f20fc8fdb234ebbcf607b3ac10` |
-   | `plugins/workbench-core/agents/searcher.md` | `%USERPROFILE%\.claude\agents\searcher.md` | `f3e6c565f410a10c94a75587585f67693723d84b7ca92f89f25b79752b7e7e2c` |
+   | `plugins/workbench-core/agents/searcher.md` | `%USERPROFILE%\.claude\agents\searcher.md` | `308eb064a5290a9944ecfbb1cfc172d34f0c2741b4377d8b99467dce5d870c61` |
 
-2. **Add one rule line.** In `%USERPROFILE%\.claude\workbench\instructions\rules\model-policy.md`, directly above the
+2. **Add one rule line.** First copy that file to `model-policy.md.bak-2026-11-10` beside it (rules load by name, so the
+   copy is never read). Then in `%USERPROFILE%\.claude\workbench\instructions\rules\model-policy.md`, directly above the
    line that starts `- Fable 5.1 only when the user names it`, insert this one line, starting at the left margin with
    `- Web research` (keep the file's line endings):
    ```
@@ -79,10 +80,12 @@ one skill, one agent and one rule line.
    If the `- Fable 5.1` line is missing, or a `- Web research by tier` line is already there, change nothing and report it.
 3. **Leave the searcher on Sonnet 5.5 `xhigh`.** On this seat Fable 5.2 may bill usage credits. Tell the user: if `/model`
    shows the Fable 5.2 row without "Requires usage credits" (or an admin confirms the seat includes Fable) and they
-   want Fable searchers, they can say "switch the searcher to Fable"; then change only the two lines that the comment in
-   `searcher.md` names.
+   want Fable searchers, they can say "switch the searcher to Fable"; then change only the two header lines that the
+   **Model switch** note at the top of `searcher.md` names.
 4. Run the find skill's `refresh --all`, so the new note is searchable.
 5. **Report** what you changed, then tell the user to restart every Claude Code window.
+
+To undo: restore `model-policy.md.bak-2026-11-10` and delete the three files copied in step 1.
 
 A later kit release ships the skill and the agent inside the workbench-core plugin. When this machine gets that
 release, delete the two copies added in step 1 under `%USERPROFILE%\.claude\skills\research` and
