@@ -13,6 +13,7 @@ Keep this file under its byte cap (`kb_audit.py --caps-json`). Over the cap, dem
 - On-demand knowledge shipped with the kit: `digests/` (topic digests, listed under Relations) and `bug-cards.md`
   (recurring failures with fixes; search it by symptom words before debugging).
 - Choosing a model, an effort level or a subagent's model, or saving tokens: [[_shared/digests/models-and-tokens]].
+  Where Fable 5.2 wins, where it should not go and which effort: [[_shared/digests/fable-5-2-routing]].
 - Search, RAG and knowledge graphs: [[_shared/digests/knowledge-layer]] (ladder, evidence, tools, licences) and
   [[_shared/digests/retrieval-eval-method]] (measuring a change honestly).
 - Permission-safe retrieval for many users: [[_shared/digests/enterprise-rag-architecture]],
@@ -36,6 +37,7 @@ Keep this file under its byte cap (`kb_audit.py --caps-json`). Over the cap, dem
 - lists [[_shared/digests/enterprise-rag-failure-modes]]
 - lists [[_shared/digests/enterprise-rag-ingestion]]
 - lists [[_shared/digests/enterprise-rag-retrieval]]
+- lists [[_shared/digests/fable-5-2-routing]]
 - lists [[_shared/digests/git-ci]]
 - lists [[_shared/digests/internal-assistant]]
 - lists [[_shared/digests/knowledge-layer]]

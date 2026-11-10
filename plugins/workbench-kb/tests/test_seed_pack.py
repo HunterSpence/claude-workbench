@@ -33,7 +33,7 @@ SCRIPTS = HERE.parent / "scripts"
 FIND = REPO / "plugins" / "workbench-core" / "skills" / "find" / "scripts" / "doc_index.py"
 SEED = ("models-and-tokens", "knowledge-layer", "retrieval-eval-method", "reports-and-pdfs", "internal-assistant",
         "enterprise-rag-architecture", "enterprise-rag-retrieval", "enterprise-rag-ingestion", "enterprise-rag-evaluation",
-        "enterprise-rag-failure-modes", "ponytail-measurements", "workbench-explainer")
+        "enterprise-rag-failure-modes", "ponytail-measurements", "workbench-explainer", "fable-5-2-routing")
 PDFS = ("workbench-explainer.pdf", "workbench-poster.pdf")   # shipped beside their digest; find indexes them, kb_search does not
 FRONT = re.compile(r"\A---\ntitle: Digest, [^\n]+\ndomain: _shared\nstatus: active\n---\n")
 NUMBER = re.compile(r"(?<![A-Za-z_\d])\d{2,}")          # the publish check's P5 rule (tools/test_docs.py)

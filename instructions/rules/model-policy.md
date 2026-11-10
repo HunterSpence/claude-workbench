@@ -37,6 +37,8 @@ BLUE = `flagship`, `blue-verify`, `security-auditor`; GREEN = `green-team`; RED 
 
 - Unsure? One row up. On "model not allowed", step down that row's chain in
   `{{WORKBENCH_HOME}}/kit/docs/model-routing.md`; never retry or route around.
+- Web research by tier (low, medium, high): the `research` skill; its `searcher` worker runs Sonnet xhigh, Fable 5.2
+  low only on a seat that includes Fable (KB note `_shared/digests/fable-5-2-routing`).
 - Fable 5.1 only when the user names it; for regulated work offer it, never route to it.
 - `sonnet-max` only on explicit ask. A workflow `agent()` takes the same pairs. The user's
   explicit model, count or effort wins. The final pass of a build/attack/verify run is `blue-verify`.

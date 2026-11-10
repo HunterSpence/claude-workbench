@@ -1,0 +1,8 @@
+{
+ "version": 1,
+ "questions": [
+  {"q": "which effort should Fable 5.2 run at for web search", "expect": "_shared/digests/fable-5-2-routing.md"},
+  {"q": "where does Fable 5.2 beat Opus 5.5 and where should it not go", "expect": "_shared/digests/fable-5-2-routing.md"},
+  {"q": "does my seat include Fable or does it bill usage credits", "expect": "_shared/digests/fable-5-2-routing.md"}
+ ]
+}

@@ -63,6 +63,8 @@ SKILLS = [
     ("deep-research", r"\b(?:deep research|research (?:thoroughly|in depth)|should we (?:adopt|use|switch to)|"
                       r"compare (?:the )?(?:vendors|tools|options|libraries)|evaluate (?:the )?(?:vendors|tools|options))\b",
      "many sources, adversarial check, decision list"),
+    ("research", r"\b(?:low|medium|high)[- ]research\b|^\s*(?:please |can you |could you )?research\b",
+     "tiered web research: searchers collect, a researcher writes; the tier sets how many"),
     ("claude-api", r"\b(?:anthropic|claude[- ](?:api|sdk|models?|opus|sonnet|haiku)|(?:opus|sonnet|haiku)[- ]?\d|(?:model|token) (?:ids?|prices?|pricing|limits)"
                    r"|context window|prompt caching|batch api|build[- ]eval|hillclimb|(?:build|write|design|run) (?:an? |our |the )?evals?)\b",
      "model facts, pricing, evals: never from memory"),

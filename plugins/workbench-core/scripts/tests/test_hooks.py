@@ -315,7 +315,8 @@ class Hooks(unittest.TestCase):
                  "find the latest version of the pricing doc": "find", "create a new claude plugin": "plugin-factory",
                  "build an mcp server for our ticketing": "mcp-builder", "wrap the internal api as an mcp tool": "api-bridge",
                  "run the workbench setup": "setup", "crawl the intranet wiki": "capture",
-                 "ingest my meeting transcripts": "ingest"}
+                 "ingest my meeting transcripts": "ingest", "medium research on vector databases": "research",
+                 "research which CI runners support arm64": "research"}
         for prompt, skill in route.items():
             out = self.hook("auto_invoke.py", {"hook_event_name": "UserPromptSubmit", "prompt": prompt})
             ctx = out["hookSpecificOutput"]["additionalContext"]

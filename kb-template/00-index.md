@@ -24,6 +24,7 @@ Every domain folder holds a HOT.md (current facts, byte-capped), an optional his
   [[_shared/digests/claude-code-mechanics]], [[_shared/digests/mcp]], [[_shared/digests/testing]] and
   [[_shared/digests/orchestration]]
 - Kit knowledge, read on demand: [[_shared/digests/models-and-tokens]] (models, effort, tokens),
+  [[_shared/digests/fable-5-2-routing]] (where Fable 5.2 wins and which effort),
   [[_shared/digests/knowledge-layer]] and [[_shared/digests/retrieval-eval-method]] (search, RAG, graphs, measuring),
   [[_shared/digests/reports-and-pdfs]], [[_shared/digests/internal-assistant]], and the enterprise RAG set
   [[_shared/digests/enterprise-rag-architecture]], [[_shared/digests/enterprise-rag-retrieval]],
